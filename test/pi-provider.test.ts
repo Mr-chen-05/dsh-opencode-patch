@@ -35,7 +35,7 @@ const withHeaders = (
       fn(model, context, {
         ...options,
         headers: {
-          ...gatewayHeaders(sessionId, "opencode/1.18.35 dsh-opencode-patch"),
+          ...gatewayHeaders(sessionId, "opencode/1.19.0 dsh-opencode-patch"),
           ...(options?.headers as Record<string, string> | undefined),
         },
       } as never);
