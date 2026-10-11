@@ -327,3 +327,204 @@ describe("console-auth: the refresh grant rotates both halves", () => {
     ).resolves.toMatchObject({ account: "acme" });
   });
 });
+
+describe("console-auth: answers that leave fields out", () => {
+  it("fills in the defaults a sparse answer omits", async () => {
+    // The Console's answers are not all the same shape. A code response
+    // without `interval` or `expires_in` must still produce a usable
+    // authorization — these are the fallbacks, and a login that refuses to
+    // start because a field was absent would be the wrong kind of strict.
+    const { fetch } = stubFetch([
+      { device_code: "dc", user_code: "ABCD-1234" },
+    ]);
+    const pending = await new ConsoleAuthClient({ fetch }).start();
+    expect(pending.authorization.intervalSeconds).toBe(5);
+    expect(pending.authorization.expiresInSeconds).toBe(600);
+    // A missing verification URI still yields something openable.
+    expect(pending.authorization.verificationUri).toBe(
+      "https://opencode.ai/console/device"
+    );
+    expect(pending.authorization.verificationUriComplete).toBeUndefined();
+  });
+
+  it("reads a response that is not JSON as a failure with the text in it", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response("<html>gateway timeout</html>", { status: 502 })
+    );
+    const client = new ConsoleAuthClient({
+      fetch: fetchImpl as unknown as typeof globalThis.fetch,
+    });
+    // The body is unreadable, so there is no code to poll for.
+    await expect(client.start()).rejects.toThrow(
+      /unreadable|unexpected|HTML|JSON|token/i
+    );
+  });
+
+  it("treats a JSON body that is not an object as unreadable too", async () => {
+    const fetchImpl = vi.fn(async () => Response.json(["not", "an", "object"]));
+    const client = new ConsoleAuthClient({
+      fetch: fetchImpl as unknown as typeof globalThis.fetch,
+    });
+    await expect(client.start()).rejects.toThrow();
+  });
+
+  it("uses the ambient fetch when none is given, and the documented defaults", async () => {
+    // No `fetch` option means the ambient one, which is the production path.
+    const real = globalThis.fetch;
+    const { calls, fetch } = stubFetch([MEASURED_CODE_RESPONSE]);
+    globalThis.fetch = fetch;
+    try {
+      const client = new ConsoleAuthClient();
+      expect(client.clientId).toBe(OPENCODE_CLI_CLIENT_ID);
+      const pending = await client.start();
+      expect(pending.authorization.userCode).toBe("HQFZ-NQPQ");
+      expect(calls).toHaveLength(1);
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+
+  it("waits the default window when no deadline is given", async () => {
+    // `awaitAuthorization` with no deadline uses the authorization's own
+    // window; a zero interval keeps the test from spending it.
+    const { fetch } = stubFetch([
+      { ...MEASURED_CODE_RESPONSE, interval: 0 },
+      MEASURED_PENDING_RESPONSE,
+      { access_token: "a", expires_in: 1 },
+    ]);
+    const pending = await new ConsoleAuthClient({ fetch }).start();
+    const result = await awaitAuthorization(pending);
+    expect(result).toMatchObject({ granted: { accessToken: "a" } });
+  });
+
+  it("doubles the wait after slow_down, which is what that error asks for", async () => {
+    // The first answer says poll less often; the wait must grow rather than
+    // repeat the same one, and the second attempt is the one that succeeds.
+    const waits: number[] = [];
+    const { fetch } = stubFetch([
+      { device_code: "dc", interval: 2, user_code: "ABCD-1234" },
+      { error: "slow_down", error_description: "poll less often" },
+      { access_token: "a", expires_in: 1 },
+    ]);
+    const pending = await new ConsoleAuthClient({ fetch }).start();
+    // Record the waits without spending them.
+    const originalSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((fn: () => void, _ms?: number) =>
+      originalSetTimeout(fn, 0)) as typeof globalThis.setTimeout;
+    try {
+      await awaitAuthorization(pending, {
+        deadlineMs: 60_000,
+        onWait: (seconds) => {
+          waits.push(seconds);
+        },
+      });
+    } finally {
+      globalThis.setTimeout = originalSetTimeout;
+    }
+    expect(waits).toEqual([4]);
+  });
+
+  it("reads a token response that omits the expiry and the account", async () => {
+    const { fetch } = stubFetch([{ access_token: "only-this" }]);
+    const client = new ConsoleAuthClient({ fetch });
+    await expect(client.refresh("r")).resolves.toEqual({
+      accessToken: "only-this",
+      account: undefined,
+      expiresInSeconds: 0,
+      refreshToken: undefined,
+    });
+    const granted = stubFetch([
+      { device_code: "dc", user_code: "ABCD-1234" },
+      { access_token: "only-this" },
+    ]);
+    const pending = await new ConsoleAuthClient({
+      fetch: granted.fetch,
+    }).start();
+    await expect(pending.poll()).resolves.toMatchObject({
+      kind: "granted",
+      tokens: { accessToken: "only-this" },
+    });
+  });
+
+  it("carries the account as an org when that is the field the Console used", async () => {
+    const { fetch } = stubFetch([
+      { access_token: "a", expires_in: 1, org: "acme" },
+    ]);
+    await expect(
+      new ConsoleAuthClient({ fetch }).refresh("r")
+    ).resolves.toMatchObject({ account: "acme" });
+    const granted = stubFetch([
+      { device_code: "dc", user_code: "ABCD-1234" },
+      { access_token: "a", expires_in: 1, org: "acme" },
+    ]);
+    const pending = await new ConsoleAuthClient({
+      fetch: granted.fetch,
+    }).start();
+    await expect(pending.poll()).resolves.toMatchObject({
+      kind: "granted",
+      tokens: { account: "acme" },
+    });
+  });
+
+  it("falls back to the error code when there is no description", async () => {
+    const { fetch } = stubFetch([
+      { device_code: "dc", user_code: "ABCD-1234" },
+      { error: "invalid_grant" },
+    ]);
+    const pending = await new ConsoleAuthClient({ fetch }).start();
+    await expect(pending.poll()).resolves.toEqual({
+      detail: "invalid_grant",
+      kind: "failed",
+    });
+  });
+
+  it("defaults a refusal's description when the Console sends only the code", async () => {
+    for (const [code, kind, detail] of [
+      ["access_denied", "denied", "access denied"],
+      ["expired_token", "expired", "expired"],
+    ] as const) {
+      const { fetch } = stubFetch([
+        { device_code: "dc", user_code: "ABCD-1234" },
+        { error: code },
+      ]);
+      const pending = await new ConsoleAuthClient({ fetch }).start();
+      await expect(pending.poll()).resolves.toEqual({ detail, kind });
+    }
+  });
+
+  it("reads a token whose expiry is not a number as no expiry", async () => {
+    // A field of the wrong type is the same absence as a missing one, because
+    // the alternative is arithmetic on something that is not a number.
+    const { fetch } = stubFetch([{ access_token: "a", expires_in: "soon" }]);
+    await expect(
+      new ConsoleAuthClient({ fetch }).refresh("r")
+    ).resolves.toMatchObject({ expiresInSeconds: 0 });
+    const granted = stubFetch([
+      { device_code: "dc", user_code: "ABCD-1234" },
+      { access_token: "a", expires_in: "soon" },
+    ]);
+    const pending = await new ConsoleAuthClient({
+      fetch: granted.fetch,
+    }).start();
+    await expect(pending.poll()).resolves.toMatchObject({
+      tokens: { expiresInSeconds: 0 },
+    });
+  });
+
+  it("treats an error body with neither code nor description as unknown", async () => {
+    const { fetch } = stubFetch([{}]);
+    const client = new ConsoleAuthClient({ fetch });
+    await expect(client.start()).rejects.toThrow(/unknown reason/u);
+    const granted = stubFetch([
+      { device_code: "dc", user_code: "ABCD-1234" },
+      {},
+    ]);
+    const pending = await new ConsoleAuthClient({
+      fetch: granted.fetch,
+    }).start();
+    await expect(pending.poll()).resolves.toEqual({
+      detail: "unknown reason",
+      kind: "failed",
+    });
+  });
+});
