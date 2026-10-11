@@ -598,6 +598,66 @@ describe("apply (plugin lifecycle)", () => {
     }
   });
 
+  it("monitors a request that flows through the patched fetch", async () => {
+    // The case above drives the stream hook; this one drives the request
+    // monitor, whose closure lives in the composition's debugHook and is only
+    // called when a request runs through a patch the composition installed.
+    // A deployment turns debugging on from the profile, so that wiring — hook
+    // created on the fiber, entry written per claimed request — is the
+    // behaviour being pinned.
+    const tmpDir = await mkdtemp(path.join(tmpdir(), "dsh-opencode-req-"));
+    try {
+      const debugFile = path.join(tmpDir, "requests.jsonl");
+      const originalFetch = globalThis.fetch;
+      const answering = vi.fn(async () => Response.json({ ok: true }));
+      globalThis.fetch = answering as unknown as typeof fetch;
+      let disposer: unknown;
+      const ctx: CordisContext = {
+        effect: (fn: () => unknown) => {
+          disposer = fn();
+        },
+        logger: { info: () => {} },
+        on: () => {},
+      };
+      try {
+        apply(ctx, { debug: true, debugFile });
+        const url = "https://opencode.ai/zen/v1/chat/completions";
+        const response = await globalThis.fetch(url, {
+          body: JSON.stringify({ messages: [] }),
+          headers: {},
+          method: "POST",
+        });
+        expect(response.status).toBe(200);
+
+        const content = await waitForFileContent(debugFile);
+        const entries = content
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line))
+          .filter(isRecord);
+        const requestEntries = entries.filter(
+          (entry) => entry.claimed === true
+        );
+        expect(requestEntries).toHaveLength(1);
+        const [requestEntry] = requestEntries;
+        if (!isRecord(requestEntry)) {
+          throw new Error("no request entry in the debug file");
+        }
+        expect(requestEntry.url).toBe(url);
+        expect(requestEntry.plane).toBe("opencode");
+        expect(requestEntry.status).toBe(200);
+        expect(requestEntry.sessionFormat).toBe(true);
+      } finally {
+        if (typeof disposer === "function") {
+          disposer();
+        }
+        globalThis.fetch = originalFetch;
+      }
+    } finally {
+      await rm(tmpDir, { force: true, recursive: true });
+    }
+  });
+
   it("keeps session affinity across turns for the same DSH session", async () => {
     const tmpDir = await mkdtemp(path.join(tmpdir(), "dsh-opencode-aff-"));
     try {

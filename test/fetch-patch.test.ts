@@ -130,6 +130,93 @@ describe("patchFetch", () => {
     expect(seen).toEqual([]);
   });
 
+  it("reports each claimed request to the debug hook, presence not values", async () => {
+    // The request monitor answers "was this request patched, and how?" — the
+    // question a run that misbehaves poses and an answer invisible from outside,
+    // because the gateway's reply for a malformed session id reads exactly like
+    // its reply for a bad credential. What the interceptor SAW and SENT is
+    // recorded; the credential itself has no business in a log, so the entry
+    // carries presence booleans, never the header values.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const entries: Record<string, unknown>[] = [];
+    const answering = vi.fn(async () => Response.json({ ok: true }));
+    const patched = patchFetch(
+      answering as unknown as typeof fetch,
+      als,
+      resolveConfig(),
+      {
+        debug: (entry) => {
+          entries.push(entry);
+        },
+      }
+    );
+    const sessionId = openCodeSessionIdFor("session-debug-1");
+    const url = "https://opencode.ai/zen/v1/chat/completions";
+    await patched(url, {
+      body: JSON.stringify({ messages: [] }),
+      headers: {
+        Authorization: "Bearer unused",
+        "User-Agent": "dsh/0.0.0",
+        "x-opencode-org-id": "wrk_debug",
+        [SESSION_HEADER]: sessionId,
+      },
+      method: "POST",
+    });
+    expect(entries).toHaveLength(1);
+    const [entry] = entries;
+    expect(entry?.auth).toBe(true);
+    expect(entry?.claimed).toBe(true);
+    expect(entry?.plane).toBe("opencode");
+    expect(entry?.session).toBe(sessionId);
+    expect(entry?.sessionFormat).toBe(true);
+    expect(entry?.org).toBe("wrk_debug");
+    // What was SENT, not what the caller offered: the patch installs its own
+    // User-Agent on every claimed request, so that is the value the entry
+    // records — a caller's UA never reaches the gateway.
+    expect(entry?.userAgent).toBe(OPENCODE_UA);
+    expect(entry?.status).toBe(200);
+    expect(entry?.url).toBe(url);
+  });
+
+  it("records an unauthenticated claim as absence, and skips foreign traffic", async () => {
+    // A claimed request with no credential is the key deployment's normal state,
+    // and the entry has to say so as absence — false and null, never a value
+    // that looks like one. What it may NOT do is leave the request bare: a
+    // session is always injected (derived when the deployment pinned none) and
+    // the CLI User-Agent always replaces the caller's. A request that is not ours
+    // is not examined at all, so it produces no entry rather than an empty one.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const entries: Record<string, unknown>[] = [];
+    const answering = vi.fn(async () => Response.json({ ok: true }));
+    const patched = patchFetch(
+      answering as unknown as typeof fetch,
+      als,
+      resolveConfig(),
+      {
+        debug: (entry) => {
+          entries.push(entry);
+        },
+      }
+    );
+    await patched("https://opencode.ai/zen/v1/chat/completions", {
+      body: JSON.stringify({ messages: [] }),
+      headers: {},
+      method: "POST",
+    });
+    await patched("https://api.deepseek.com/v1/chat/completions", {
+      body: "{}",
+      method: "POST",
+    });
+    expect(entries).toHaveLength(1);
+    const [entry] = entries;
+    expect(entry?.auth).toBe(false);
+    expect(entry?.claimed).toBe(true);
+    expect(entry?.session).toBe(openCodeSessionIdFor("default"));
+    expect(entry?.sessionFormat).toBe(true);
+    expect(entry?.org).toBeNull();
+    expect(entry?.userAgent).toBe(OPENCODE_UA);
+  });
+
   it("carries the credential's org, and nothing when it has none", async () => {
     // A session token is half a credential: the gateway gates the free tier on
     // the org that arrived with it, so a request carrying one without the other
