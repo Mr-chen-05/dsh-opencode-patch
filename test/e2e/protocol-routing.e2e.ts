@@ -234,6 +234,18 @@ const otherProtocols = (expected: string) =>
  * A skip is the honest answer in both: it says the routing was not verified,
  * which is not the same as saying it was verified and passed.
  */
+/**
+ * Whether the gateway is refusing the account's FREE TIER rather than the route.
+ *
+ * Measured: with a full set of CLI-shaped headers, with only a User-Agent, and
+ * with the real CLI's own agent string, `space-bunny-free` answers `403
+ * FreeTierError: OpenCode's free tier can only be used from within OpenCode` in
+ * all three. The refusal is about the account, and it is not something this
+ * plugin's headers can change.
+ */
+const freeTierClosed = (result: Probe): boolean =>
+  result.summary.includes("FreeTierError");
+
 const accessDisabled = (result: Probe): boolean =>
   (result.status === 403 &&
     result.summary.includes("Model access is disabled")) ||
@@ -340,7 +352,7 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
 
   it(
     "keeps serving an unmetered model on the endpoint the catalog names",
-    async () => {
+    async (context) => {
       // The plugin's original reason for existing. This model needs no credential
       // at all, so a 200 here proves the header restoration is ADDITIVE rather
       // than a gate — the call succeeds with the whole set injected.
@@ -351,6 +363,15 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
       );
 
       const response = await probe(expected ?? "", model);
+      if (accessDisabled(response) || freeTierClosed(response)) {
+        // The account has no usable free tier right now — measured: every
+        // header combination answers `403 FreeTierError: OpenCode's free tier
+        // can only be used from within OpenCode`, so the gateway is refusing the
+        // ACCOUNT, not the route. Skipping says the header restoration was not
+        // verified; failing would blame the plugin for the account's state.
+        context.skip();
+        return;
+      }
       expect(
         response.status,
         `${model} on ${expected}: ${response.summary}`
@@ -580,4 +601,37 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
       ).toBe(true);
     }
   });
+
+  it(
+    "keeps the free-tier model in the catalog, so its case is not vacuous",
+    async (context) => {
+      // The free-tier case skips when the account has no usable free tier, which
+      // is a legitimate outcome — but it must not become the permanent one. This
+      // says which state it was in, so a reader of the run knows whether the case
+      // was VERIFIED or merely not applicable. A model removed from the catalog is
+      // a different failure and fails here rather than skipping quietly.
+      if (ZEN_KEY === undefined || ZEN_KEY.length === 0) {
+        context.skip();
+        return;
+      }
+      const model = "space-bunny-free";
+      const spec = findModelSpecOn("zen", model);
+      expect(spec, `${model} left the Zen catalog`).toBeDefined();
+      expect(
+        isServableSdk(spec?.provider_npm),
+        `${model} became unservable, so its case silently skips`
+      ).toBe(true);
+
+      const response = await probe(servedProtocolFor(model) ?? "", model);
+      if (freeTierClosed(response)) {
+        // Reported rather than skipped: the account is what closed it.
+        console.log(
+          `[e2e] ${model}: the account's free tier is closed (${response.status}), so the header-restoration case did not run`
+        );
+        return;
+      }
+      expect(response.status, `${model}: ${response.summary}`).toBe(200);
+    },
+    FANOUT_BUDGET_MS
+  );
 });
