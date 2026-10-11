@@ -309,6 +309,99 @@ describe("google-bridge · the auth injectables it hands the collection", () => 
   });
 });
 
+describe("google-bridge · the request the adapter actually sends", () => {
+  /**
+   * Everything else in this file exercises a piece. This one runs the whole
+   * path the user would: the real `PiAiAdapter`, our profile, pi's Google
+   * implementation, and the credential the plugin resolves — with only the
+   * network intercepted.
+   *
+   * It is the test the earlier probe could not stand in for. The probe proved
+   * the ENDPOINT answers; this proves the REQUEST the bridge builds is one the
+   * endpoint accepts — the Gemini body needs a `role` on each content, and an
+   * earlier hand-written probe was rejected for omitting exactly that.
+   */
+  it("streams through the real adapter to the gateway, credential and all", async () => {
+    process.env.BRIDGE_STREAM_KEY = "oc_sk_stream_resolved";
+    const { llm, registered } = recordingLlm();
+    try {
+      registerGoogleBridge(bridgeInputs(llm, "BRIDGE_STREAM_KEY"));
+      const adapter = registered[0]?.adapter as {
+        stream: (options: unknown) => AsyncIterable<unknown>;
+      };
+      expect(adapter).toBeDefined();
+
+      const sent: {
+        body: string;
+        headers: Record<string, string>;
+        url: string;
+      }[] = [];
+      let failure: unknown;
+      const real = globalThis.fetch;
+      globalThis.fetch = (async (
+        input: unknown,
+        init?: { body?: unknown; headers?: unknown }
+      ) => {
+        const headers: Record<string, string> = {};
+        const candidate = init?.headers;
+        if (candidate instanceof Headers) {
+          for (const [key, value] of candidate.entries()) {
+            headers[key] = value;
+          }
+        } else if (typeof candidate === "object" && candidate !== null) {
+          for (const [key, value] of Object.entries(
+            candidate as Record<string, string>
+          )) {
+            headers[key] = value;
+          }
+        }
+        const raw = init?.body;
+        sent.push({
+          body: typeof raw === "string" ? raw : "",
+          headers,
+          url: typeof input === "string" ? input : String(input),
+        });
+        throw new Error("captured");
+      }) as typeof globalThis.fetch;
+      try {
+        for await (const _ of adapter.stream({
+          // The host's content is a block array, not a bare string: the
+          // adapter scans it for images before it resolves the key.
+          messages: [{ content: [{ text: "hi", type: "text" }], role: "user" }],
+          model: "gemini-3.8-flash",
+          provider: GOOGLE_INTERNAL_ROUTE,
+        })) {
+          // The capture refuses the call; nothing arrives.
+        }
+      } catch (error) {
+        // The capture refuses the request, which surfaces here. Keeping the
+        // error means a failure BEFORE the fetch says why, instead of looking
+        // like a capture that never fired.
+        failure = error;
+      } finally {
+        globalThis.fetch = real;
+      }
+
+      expect(sent.length, `no request reached fetch: ${String(failure)}`).toBe(
+        1
+      );
+      expect(sent[0]?.url).toBe(
+        "https://opencode.ai/zen/v1/models/gemini-3.8-flash:streamGenerateContent?alt=sse"
+      );
+      // The credential the plugin resolved, on the header this protocol reads.
+      expect(sent[0]?.headers["x-goog-api-key"]).toBe("oc_sk_stream_resolved");
+      // And a body the gateway has been measured to accept: the role is the
+      // part a hand-written probe got wrong.
+      const body = JSON.parse(sent[0]?.body ?? "{}") as {
+        contents?: { role?: string }[];
+      };
+      expect(body.contents?.[0]?.role).toBe("user");
+    } finally {
+      process.env.BRIDGE_STREAM_KEY = "";
+    }
+  });
+});
+
 describe("google-bridge · the key it resolves", () => {
   it("reads a set reference from the environment", async () => {
     process.env.BRIDGE_TEST_KEY = "oc_sk_from_env";

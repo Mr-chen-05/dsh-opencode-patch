@@ -194,7 +194,44 @@ export const googleProviderFor = (
     provider: GOOGLE_INTERNAL_ROUTE,
   }));
   return {
-    auth: { apiKey: { name: "OpenCode API key" } },
+    auth: {
+      apiKey: {
+        name: "OpenCode API key",
+        /**
+         * Hand the key pi's auth resolver asks for back to the protocol.
+         *
+         * pi never reads the credential itself: it resolves the provider's
+         * `auth.apiKey.resolve`, puts the `auth` this returns into the stream
+         * options, and the Google implementation reads `options.apiKey` from
+         * there. So a provider that declares only a name never authenticates —
+         * every request fails with "API key auth failed for provider …: apiKey.
+         * resolve is not a function" before a socket is opened, which is
+         * exactly what the stream-path test caught.
+         *
+         * It returns the value rather than a promise for it: pi awaits the
+         * result either way, and there is nothing here to wait for.
+         *
+         * The key arrives in the credential, because the adapter resolved it
+         * through this plugin's own `resolveApiKey` — the credentials service
+         * first, the launch environment second — and passed it as the request's
+         * `apiKey` override. Returning that is the whole job. The empty case
+         * throws rather than returning nothing: a silent `undefined` would send
+         * an unauthenticated request and answer with a gateway error that says
+         * the key is missing, rather than saying this plugin could not find one.
+         */
+        resolve: (input: {
+          credential?: { key?: string };
+        }): { auth: { apiKey: string }; source: string } => {
+          const key = input.credential?.key;
+          if (key === undefined || key.length === 0) {
+            throw new Error(
+              `${GOOGLE_INTERNAL_ROUTE} reached pi's auth resolver without a key`
+            );
+          }
+          return { auth: { apiKey: key }, source: "the plugin's resolved key" };
+        },
+      },
+    },
     getModels: () => models,
     id: GOOGLE_INTERNAL_ROUTE,
     name: "OpenCode (Google)",
