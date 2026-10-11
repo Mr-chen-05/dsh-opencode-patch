@@ -90,10 +90,14 @@ Built, in the order this file sets out:
 
 - **The device-flow client.** `src/console-auth.ts`: one client serves both logins, written against the measured responses. `start` asks for a code, `poll` reads the Console's own error field rather than its status, and `awaitAuthorization` waits at the endpoint's interval — doubling it after a `slow_down`, which is what that error asks for. The verification URI is resolved against the Console, because the endpoint answers a relative path and opening that verbatim opens nothing. `refresh` returns the pair together, because the Console rotates the refresh token with every access token and the caller must write both halves at once. Verified against the live Console: this module's own client obtained a code, read the interval, and reported two pending polls.
 
+- **A login in use.** `src/login-session.ts`: the store and the client are joined. A token inside the window is refreshed before it is handed out, so the call it authenticates is the one that succeeds; concurrent callers share one refresh, because a refresh rotates the refresh token and two of them would present one the server has already replaced. Nothing is invented: no login, no refresh token, and a refusal each report a failure rather than a credential that looks present and is not.
+
 Not built yet:
 
-- **The storage and the surface that starts a flow.** The client resolves; where a token lands and how a human reaches the verification page are not built. The tokens belong in the credential store under a reference the pool can list, and the surface that opens a flow needs the host's own settings card. The two endpoints that need a token this account does not hold — `/api/user` and `/api/orgs`, for v1's account and organization context — are measured only as unreachable here.
+- **The surface that starts a flow.** The client starts a login, the store keeps it and the session refreshes it; what is missing is the surface a human uses. A device flow is a code, a URL and a wait, and the host's settings card is the place for it — which means the card needs host methods to call, and the client bundle is not where a device flow belongs on its own.
 
-- **The settings card.** The pool's section is configuration-only for now, and says why: a list of credential references is not something to type into a settings form, and the card that would paste a key into the store belongs with the login surface.
+- **The settings card.** The pool's section is configuration-only, and says why: a list of credential references is not something to type into a settings form. The card that would paste a key into the store belongs with the login surface, since both are "put a credential here" and neither is a row of knobs.
+
+- **v1's account and organization context.** `/api/user` and `/api/orgs` are measured only as unreachable here: they need a token this account does not hold. The org-switching half of v1 is therefore unbuilt and unmeasurable until one does.
 
 The first OAuth grant is the one piece a test cannot finish: the approval step is a human in a browser. Everything around it can, and has.
