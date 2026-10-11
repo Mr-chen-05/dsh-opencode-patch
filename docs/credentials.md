@@ -65,4 +65,14 @@ The third row is the one that matters most: the objection that a pool would over
 
 ## Status
 
-The chain above is the design, measured end to end against OpenCode's own implementation and against the credential seam. The code is not built yet. The first piece worth building is the pool's own reference and the rotation behind it — the logins in the sections above are the second, and they are what fill the pool in the first place. The bridge itself uses step 2 only and introduces no switch, because it needs none.
+Built, in the order this file sets out:
+
+- **The pool and its rotation.** `src/credential-pool.ts`: entries are credential references per plane, selection is round-robin among the entries that are neither failed nor unresolved, an exhausted pool falls through rather than failing a request, and rotation writes the active key under the reference the pool owns. A route this plugin serves asks the pool directly — two streams through the bridge arrive with two different keys — and the mount publishes both planes through their references after the routes are up, which is the only path that reaches the routes the wrapper serves. A publish the seam refuses is reported and leaves the mount alone.
+- **The switch, and its default.** `credentialPool` carries `enabled`, `zen` and `go`. The defaults are `false` with empty lists, `createCredentialPool` answers `undefined` for that, and every caller then resolves exactly what it resolved before the pool existed. Listing credentials without turning the switch on changes nothing, which is the contract.
+
+Not built yet:
+
+- **The two logins.** Both are device flows against the same Console, and both endpoints are measured: the code endpoint answers with a `device_code`, a `user_code` and a relative `verification_uri`; the token endpoint answers `authorization_pending` while a human has not approved, and `invalid_grant` for a code it does not know. The polling loop, the atomic replacement of a rotated refresh token, and the settings surface that starts a flow are the work left, plus the two endpoints that need a token this account does not hold (`/api/user`, `/api/orgs`).
+- **The settings card.** The pool's section is configuration-only for now, and says why: a list of credential references is not something to type into a settings form, and the card that would paste a key into the store belongs with the logins.
+
+The first OAuth grant is the one piece that cannot be finished by a test alone: the approval step is a human in a browser. Everything around it can.
