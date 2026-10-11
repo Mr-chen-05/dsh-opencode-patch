@@ -48,6 +48,30 @@ An earlier version kept a hand-written list of which models redirect. A hand-pat
 
 `test/e2e/protocol-routing.e2e.ts` asks the gateway which endpoint recognises each shipped model. The unit tests read the same mapping they verify, so they cannot catch a stale mapping. Only the live gateway can. A wrong-endpoint cell answering `500` is what pins the route; a `403 FreeTierError` only proves the gateway parsed the model.
 
+### One base URL per plane is one base too many
+
+pi builds each protocol's request differently. The OpenAI protocols append `/chat/completions` or `/responses` to a base that already carries `/v1`; the Anthropic one hands its base straight to the Anthropic SDK, which appends `/v1/messages` itself.
+
+Measured both halves. Asking the SDK which URL a base produces:
+
+| Base URL given to the SDK | URL it requests | Gateway answers |
+| :-- | :-- | :-- |
+| `https://opencode.ai/zen` | `…/zen/v1/messages` | `400`, upstream reached |
+| `https://opencode.ai/zen/v1` | `…/zen/v1/v1/messages` | `404` |
+
+So an internal route mounted on its plane's base asked for `/v1/v1/messages` and could not answer — which is every model whose protocol is `anthropic-messages`, the ids the two planes disagree about. The mount takes its base per protocol from the table that records this, and the test that guards it names the route, the protocol and both URLs when it fails.
+
+pi's own catalog agrees, which is the reason a table of bases is worth keeping rather than deriving: for `opencode` it says `…/zen` for `anthropic-messages` and `…/zen/v1` for the rest.
+
+### What the two layers of testing each prove
+
+They are different checks, and neither stands in for the other:
+
+- The **live suite** asks the gateway which endpoint recognises each shipped model, with a hand-written body per protocol. It proves the endpoint answers and what the gateway rejects. Its bodies are written by the test, not produced by the plugin — the first Google probe was missing a `role` the Gemini body needs, and the gateway's refusal of that probe was a fact about the probe.
+- The **unit suite** runs the plugin's own request path with the network intercepted: the real `PiAiAdapter`, this plugin's profile, pi's protocol implementation and the resolved credential, asserting the URL, the auth header and the body. It proves the request the plugin builds is one the endpoint accepts.
+
+Between them, a wrong endpoint and a wrong request are separate failures instead of one blurred claim.
+
 ### How we support API endpoints in different formats
 
 The user sees a single OpenCode provider and a single model list. Nothing in the interface names a route, a protocol or an endpoint, and there is no per-model setting to get wrong. That consistency is the product, and everything below it exists to keep it.
