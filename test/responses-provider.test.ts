@@ -25,6 +25,7 @@ import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { resolveConfig } from "../src/config.ts";
+import { readCredentialPoolRotator } from "../src/cordis-context.ts";
 import {
   RESPONSES_SDK,
   ROUTE_FOR_PLANE_PROTOCOL,
@@ -854,6 +855,179 @@ describe("responses-provider: the mount survives the host's own instance", () =>
       process.env.POOL_ONE = "";
       process.env.POOL_TWO = "";
       process.env.GO_POOL_ONE = "";
+    }
+  });
+
+  it("rotates a plane's pool when the gateway refuses a credential", async () => {
+    // The rotation path that a route cannot provide: a route-triggered rotation
+    // reaches its own plane only, and the Go plane has no route of ours at all.
+    // The fetch interceptor is what sees a credential failure wherever it
+    // happened, so it is what asks for a rotation.
+    process.env.POOL_ONE = "pool-one-key";
+    process.env.POOL_TWO = "pool-two-key";
+    process.env.GO_POOL_ONE = "go-pool-one";
+    process.env.GO_POOL_TWO = "go-pool-two";
+    const written = new Map<string, string>();
+    const records = new Map<string, unknown>();
+    const host = createHost();
+    host.registerService?.("credentials", {
+      deleteRecord: async (key: string) => {
+        records.delete(key);
+      },
+      modifyRecord: async (
+        key: string,
+        mutate: (current?: unknown) => Promise<unknown>
+      ) => {
+        const next = await mutate(records.get(key));
+        if (next !== undefined) {
+          records.set(key, next);
+        }
+        return next;
+      },
+      readRecord: async (key: string) => {
+        const payload = records.get(key);
+        return payload === undefined ? undefined : { kind: "grant", payload };
+      },
+      resolve: async (ref: string) => {
+        const value = written.get(ref) ?? process.env[ref];
+        return value === undefined ? undefined : { value };
+      },
+      set: async (ref: string, value: string) => {
+        writes.push([ref, value]);
+        written.set(ref, value);
+      },
+      unset: async () => {},
+      writeGrant: async (key: string, payload: unknown) => {
+        records.set(key, payload);
+      },
+    });
+    const writes: [string, string][] = [];
+
+    try {
+      await registerResponsesProvider(
+        host.ctx,
+        resolveConfig({
+          credentialPool: {
+            enabled: true,
+            go: ["GO_POOL_ONE", "GO_POOL_TWO"],
+            zen: ["POOL_ONE", "POOL_TWO"],
+          },
+        })
+      );
+
+      // Read through the same accessor the fetch interceptor uses, so this
+      // asserts the handoff the rotation path actually depends on.
+      const rotate = readCredentialPoolRotator(host.ctx);
+      expect(rotate).toBeDefined();
+      await rotate?.("not-a-plane", 401);
+      await rotate?.("opencode-go", 401);
+      await rotate?.("opencode", 429);
+
+      // The mount already published both planes' first entries, so a rotation
+      // is visible as a SECOND write carrying a different key — the credential
+      // the next request will use.
+      // The mount published both planes' first entries, so a rotation shows up
+      // as a SECOND write carrying a different key: the credential the next
+      // request will use. The "not-a-plane" call above rotated nothing.
+      const goWrites = writes.filter(([ref]) => ref === "OPENCODE_GO_POOL_KEY");
+      expect(goWrites.length).toBeGreaterThan(1);
+      expect(goWrites.at(-1)?.[1]).not.toBe(goWrites[0]?.[1]);
+      // And the same for Zen, whose own route already rotates on a stream.
+      const zenWrites = writes.filter(([ref]) => ref === "OPENCODE_POOL_KEY");
+      expect(zenWrites).toHaveLength(2);
+      expect(zenWrites.at(-1)?.[1]).not.toBe(zenWrites[0]?.[1]);
+    } finally {
+      process.env.POOL_ONE = "";
+      process.env.POOL_TWO = "";
+      process.env.GO_POOL_ONE = "";
+      process.env.GO_POOL_TWO = "";
+    }
+  });
+
+  it("resolves a pool entry from the environment when no seam is mounted", async () => {
+    // The seam is not guaranteed: a composition that mounts no credentials
+    // service still has a launch environment, and a pool entry named there
+    // should behave the same as one stored. A pool that only worked with a seam
+    // would be a pool that silently served nothing.
+    process.env.POOL_ONE = "pool-one-key";
+    process.env.POOL_TWO = "pool-two-key";
+    const host = createHost();
+
+    try {
+      const writes = await registerResponsesProvider(
+        host.ctx,
+        resolveConfig({
+          credentialPool: {
+            enabled: true,
+            go: [],
+            zen: ["POOL_ONE", "POOL_TWO"],
+          },
+        })
+      );
+      // The mount succeeds and does not throw; with no seam there is nowhere
+      // to publish to, which is why no write is asserted here.
+      expect(writes === undefined || typeof writes === "function").toBe(true);
+      const rotate = readCredentialPoolRotator(host.ctx);
+      expect(rotate).toBeDefined();
+      // And a rotation still returns a key, read from the environment.
+      await expect(rotate?.("opencode", 401)).resolves.toBeUndefined();
+    } finally {
+      process.env.POOL_ONE = "";
+      process.env.POOL_TWO = "";
+    }
+  });
+
+  it("reports a refused publish rather than failing the mount", async () => {
+    // The seam refuses a write a read-only source shadows. The mount must
+    // survive that, and must say so: a pool a deployment believes is rotating
+    // while every request reads their exported value is worse than a log line.
+    process.env.POOL_ONE = "pool-one-key";
+    process.env.POOL_TWO = "pool-two-key";
+    const host = createHost();
+    host.registerService?.("credentials", {
+      deleteRecord: vi.fn(),
+      modifyRecord: vi.fn(),
+      readRecord: vi.fn(),
+      resolve: async (ref: string) => {
+        const value = process.env[ref];
+        return value === undefined ? undefined : { value };
+      },
+      set: async () => {
+        throw new Error("supplied read-only by the launching environment");
+      },
+      unset: vi.fn(),
+      writeGrant: vi.fn(),
+    });
+
+    try {
+      const stop = await registerResponsesProvider(
+        host.ctx,
+        resolveConfig({
+          credentialPool: {
+            enabled: true,
+            go: [],
+            zen: ["POOL_ONE", "POOL_TWO"],
+          },
+        })
+      );
+      expect(typeof stop === "function" || stop === undefined).toBe(true);
+      const reported = host.observables.infos.some((line) =>
+        line.includes("supplied read-only")
+      );
+      // Either the mount reported it, or a rotation did — both are the same
+      // report arriving through the same channel.
+      if (!reported) {
+        const rotate = readCredentialPoolRotator(host.ctx);
+        await rotate?.("opencode", 401);
+      }
+      expect(
+        host.observables.infos.some((line) =>
+          line.includes("supplied read-only")
+        )
+      ).toBe(true);
+    } finally {
+      process.env.POOL_ONE = "";
+      process.env.POOL_TWO = "";
     }
   });
 

@@ -294,6 +294,32 @@ export const readCredentialsWriter = (
   };
 };
 
+/**
+ * The pool rotator this composition's provider mount registered, if any.
+ *
+ * A handoff between two installers that must not know about each other: the
+ * provider mount owns the pools, and the fetch interceptor sees the credential
+ * failures a rotation should answer. Registering a rotator rather than sharing a
+ * pool keeps rotation in one place — and means an uninstalled provider mount
+ * simply has none, so a credential failure rotates nothing instead of throwing.
+ *
+ * @param ctx - the host context.
+ * @returns the registered rotator, or undefined when there is none.
+ */
+export const readCredentialPoolRotator = (
+  ctx: unknown
+): ((plane: string, status: number) => Promise<void>) | undefined => {
+  if (!isRecord(ctx)) {
+    return undefined;
+  }
+  const candidate = ctx.credentialPoolRotator;
+  if (!isFunctionLike(candidate)) {
+    return undefined;
+  }
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- isFunctionLike proves it is callable; the parameter list is this module's own contract and the provider mount is the only writer of the slot
+  return candidate as (plane: string, status: number) => Promise<void>;
+};
+
 export const readCredentialsResolver = (
   ctx: unknown
 ): CredentialsResolver | undefined => {

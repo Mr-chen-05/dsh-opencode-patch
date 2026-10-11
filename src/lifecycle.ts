@@ -25,7 +25,11 @@ import {
   type ResolvedPluginConfig,
   resolveConfig,
 } from "./config.ts";
-import { type CordisContext, readEntryOptions } from "./cordis-context.ts";
+import {
+  type CordisContext,
+  readCredentialPoolRotator,
+  readEntryOptions,
+} from "./cordis-context.ts";
 import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
 import { isFetchFunction } from "./guards.ts";
@@ -124,7 +128,25 @@ const installFetchPatch = (
     return false;
   }
 
-  const patched = patchFetch(originalFetch, als, config);
+  // Rotation is driven by the credential failures this interceptor is the only
+  // place to see — including the ones from routes the WRAPPER serves and from
+  // the Go plane, neither of which passes through a route of ours. The pool
+  // itself lives with the provider mount, so this asks it for a rotator and
+  // reports what it saw.
+  const rotateAfterFailure = async (
+    plane: string,
+    status: number
+  ): Promise<void> => {
+    const rotate = readCredentialPoolRotator(ctx);
+    if (rotate === undefined) {
+      return;
+    }
+    await rotate(plane, status);
+  };
+
+  const patched = patchFetch(originalFetch, als, config, (plane, status) => {
+    void rotateAfterFailure(plane, status);
+  });
 
   ctx.effect?.(() => {
     globalThis.fetch = patched;

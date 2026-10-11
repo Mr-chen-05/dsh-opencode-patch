@@ -37,6 +37,93 @@ afterEach(() => {
 });
 
 describe("patchFetch", () => {
+  it("reports a refused credential so a pool can rotate, and only for those", async () => {
+    // Rotation is driven from here because this interceptor is the only place
+    // that sees the answers of routes the WRAPPER serves and of the Go plane -
+    // neither of which passes through a route of ours. So the statuses that mean
+    // "this credential is spent" have to arrive here.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const seen: { plane: string; status: number }[] = [];
+
+    for (const [status, plane] of [
+      [401, "opencode"],
+      [429, "opencode-go"],
+    ] as const) {
+      seen.length = 0;
+      const failing = vi.fn(async () =>
+        Response.json({ error: { message: "no" } }, { status })
+      );
+      const patched = patchFetch(
+        failing as unknown as typeof fetch,
+        als,
+        resolveConfig(),
+        (seenPlane, seenStatus) => {
+          seen.push({ plane: seenPlane, status: seenStatus });
+        }
+      );
+      const url =
+        plane === "opencode"
+          ? "https://opencode.ai/zen/v1/chat/completions"
+          : "https://opencode.ai/zen/go/v1/chat/completions";
+      await patched(url, {
+        body: JSON.stringify({ messages: [] }),
+        headers: {},
+        method: "POST",
+      });
+      expect(seen, `status ${status}`).toEqual([{ plane, status }]);
+    }
+  });
+
+  it("does not report a status that is not about the credential", async () => {
+    // 403 is the gateway's answer for a model the account has not enabled, and
+    // rotating a working credential over that would move a deployment off a
+    // good key for a model problem. 200 is obviously not one either.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const seen: { plane: string; status: number }[] = [];
+    for (const status of [200, 403, 404, 500]) {
+      seen.length = 0;
+      const answering = vi.fn(async () =>
+        Response.json({ error: { message: "no" } }, { status })
+      );
+      const patched = patchFetch(
+        answering as unknown as typeof fetch,
+        als,
+        resolveConfig(),
+        (plane, seenStatus) => {
+          seen.push({ plane, status: seenStatus });
+        }
+      );
+      await patched("https://opencode.ai/zen/v1/chat/completions", {
+        body: JSON.stringify({ messages: [] }),
+        headers: {},
+        method: "POST",
+      });
+      expect(seen, `status ${status}`).toEqual([]);
+    }
+  });
+
+  it("never reports a request that is not gateway traffic, even on a 401", async () => {
+    // Stronger than checking the plane is empty: a URL that is not ours is not
+    // examined at all, so there is nothing to mis-attribute. Rotation is a side
+    // effect and the safest one is the one that does not happen.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const seen: { plane: string; status: number }[] = [];
+    const failing = vi.fn(async () => new Response("{}", { status: 401 }));
+    const patched = patchFetch(
+      failing as unknown as typeof fetch,
+      als,
+      resolveConfig(),
+      (plane, status) => {
+        seen.push({ plane, status });
+      }
+    );
+    await patched("https://api.deepseek.com/v1/chat/completions", {
+      body: "{}",
+      method: "POST",
+    });
+    expect(seen).toEqual([]);
+  });
+
   it("passes non-OpenCode requests through completely untouched", async () => {
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const { capture, mockFetch } = createCaptureFetch("upstream-ok");

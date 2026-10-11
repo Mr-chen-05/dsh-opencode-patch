@@ -31,6 +31,25 @@ import {
 import { maybeInjectCoreTools } from "./tool-fallback.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
 
+/**
+ * Which gateway plane a URL belongs to.
+ *
+ * From the URL alone, because the observer is called with nothing else and a
+ * mis-attributed rotation would move the wrong plane's credential. The Go plane
+ * lives under `/zen/go` and the Zen plane under `/zen`, so the longer path is
+ * matched first — and an unrecognised URL answers `""` rather than guessing,
+ * because a rotation is a side effect.
+ */
+const gatewayPlaneFor = (url: string): string => {
+  if (/\/zen\/go\//u.test(url)) {
+    return "opencode-go";
+  }
+  if (/\/zen\//u.test(url)) {
+    return "opencode";
+  }
+  return "";
+};
+
 const extractUrl = (input: RequestInfo | URL): string => {
   if (typeof input === "string") {
     return input;
@@ -133,10 +152,25 @@ const resolveSessionHeader = (
  * @param als - turn store consulted for the session id of the current turn.
  * @param config - resolved plugin configuration.
  */
+/**
+ * Told when the gateway refused a credential, so a pool can rotate.
+ *
+ * The interceptor is the only place in this plugin that sees EVERY gateway
+ * response, including the ones made by routes the wrapper serves and by the Go
+ * plane — which is why rotation is driven from here rather than from a route.
+ * A rotation triggered by a route only reaches that route's plane; a
+ * credential failure happens wherever the credential was used.
+ *
+ * @param plane - the gateway plane the request went to.
+ * @param status - the HTTP status the gateway answered with.
+ */
+export type CredentialFailureObserver = (plane: string, status: number) => void;
+
 export const patchFetch = (
   original: typeof fetch,
   als: AsyncLocalStorage<ActiveTurnState>,
-  config: ResolvedPluginConfig
+  config: ResolvedPluginConfig,
+  onCredentialFailure?: CredentialFailureObserver
 ): typeof fetch => {
   const patchedFetch = async function patchedFetch(
     this: unknown,
@@ -239,6 +273,21 @@ export const patchFetch = (
     }
 
     const response = await original.call(this, input, newInit);
+
+    // A refused credential or an exhausted rate limit is the one moment a pool
+    // can do something useful, and this is the only place that sees the answers
+    // of routes the wrapper serves — so the rotation is driven from here. The
+    // current request has already failed; this is about the next one.
+    //
+    // 403 is NOT included: the gateway answers a model the account has not
+    // enabled with 403, and rotating a key over that would move a deployment
+    // off a working credential for a model problem.
+    if (
+      onCredentialFailure !== undefined &&
+      (response.status === 401 || response.status === 429)
+    ) {
+      onCredentialFailure(gatewayPlaneFor(url), response.status);
+    }
 
     // If upstream returns 403 FreeTierError, demultiplex it to HTTP 400 so DSH's
     // error classifier doesn't falsely categorize it as an invalid API key ("AUTH").

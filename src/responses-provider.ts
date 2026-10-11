@@ -521,6 +521,34 @@ export const registerResponsesProvider = async (
   const poolConfig = config?.credentialPool;
   const credentials = readCredentialsWriter(ctx);
   const resolveRef = readCredentialsResolver(ctx) ?? fromEnvironment;
+  // The rotator the fetch interceptor reads. Rotation is driven by credential
+  // failures the interceptor is the only place to see — including those from
+  // routes the WRAPPER serves and from the Go plane, neither of which passes
+  // through a route of ours. Publishing the slot here rather than sharing a
+  // pool keeps rotation in one place, and an absent mount simply rotates
+  // nothing.
+  const rotateOnFailure = async (
+    plane: string,
+    _status: number
+  ): Promise<void> => {
+    if (plane !== "opencode" && plane !== "opencode-go") {
+      return;
+    }
+    const pool = poolFor(plane);
+    console.log(
+      "DEBUG rotate",
+      plane,
+      pool === undefined ? "NO POOL" : pool.refs
+    );
+    if (pool === undefined) {
+      return;
+    }
+    // The failed request is over; this is about the next one, so the new key is
+    // published through the pool's own reference before this returns.
+    await pool.next();
+  };
+  Object.assign(ctx, { credentialPoolRotator: rotateOnFailure });
+
   const poolFor = (
     plane: "opencode" | "opencode-go"
   ): CredentialPool | undefined =>
@@ -528,6 +556,15 @@ export const registerResponsesProvider = async (
       ? undefined
       : createCredentialPool({
           config: poolConfig,
+          // Without this the pool selects but cannot WRITE, so a rotation
+          // would reach this plugin's routes and no others - which is the
+          // defect this wiring exists to remove.
+          credentials,
+          onPublishRefused: (reason) => {
+            ctx.logger?.info?.(
+              `[dsh-opencode-patch] credential pool for ${plane}: ${reason}`
+            );
+          },
           plane,
           resolveRef,
         });
