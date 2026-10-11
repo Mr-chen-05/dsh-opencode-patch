@@ -6,16 +6,19 @@ Everything below is measured. Where something is not, it says so.
 
 ## The short version
 
-|  | This plugin today | OpenCode 1.19.0 |
+|  | An `oc_…` API key | An `st_…` session token |
 | :-- | :-- | :-- |
-| Model endpoint | `https://opencode.ai/zen/v1` | `https://opencode.ai/inference/openai/v1` |
-| Credential | `OPENCODE_API_KEY`, an `oc_…` key | `OPENCODE_CONSOLE_TOKEN`, an `st_…` session token |
-| Free-tier models | `403 FreeTierError` | served |
 | Paid models | served | served |
-| Org context | absent | `x-opencode-org-id: wrk_…`, required for the free tier |
-| Per-request id | absent | `x-opencode-request: msg_…` |
+| Free-tier models | `403 FreeTierError` | served |
+| Org context | not required | `x-opencode-org-id: wrk_…` |
+| Per-request id | not required | `x-opencode-request: msg_…` |
+| Where it comes from | a key a deployment pastes or exports | an account login |
 
-So: **paid models still work through what this plugin already does, and free models do not.** A deployment that wants the free tier needs the new credential, and the new credential comes from an account login rather than a key.
+**What decides a request is the credential, not the path.** Measured across both paths with one key: `grok-4.7` answers `400 ModelProtocolUnsupported` on `/zen/v1` and on `/inference/openai/v1` alike, and `qwen3.8-max` answers the same `403` upstream error on both. They are two paths into one gateway, and for a paid model the choice between them changes nothing.
+
+The difference is entirely in what a credential can reach. A key reaches paid models; a session token reaches paid models and free ones, because the free tier is gated on the token and the org that comes with it.
+
+So a deployment's API key keeps working exactly as it does today, and the free tier becomes reachable by logging in — not by changing a URL.
 
 ## What OpenCode 1.19.0 resolves for itself
 
@@ -91,6 +94,19 @@ The consequence is the design: **the server tells the client where to send reque
 
 What is NOT measured: how `st_…` is minted from the stored `oc_…` key. The account store holds an `api` credential and no account record on this machine, yet the captured request carried an `st_…` token, so an exchange happens somewhere this investigation did not reach. A migration needs that answer before it can produce the token itself.
 
+## The design this implies: route by credential, not by table
+
+The plugin derives an endpoint from a `(plane, protocol)` table and resolves one credential reference per plane. Both halves assume a credential is a credential. The measurement above says otherwise: what a credential can reach depends on its KIND, and the kind is visible in what a deployment configured.
+
+So the shape that follows:
+
+- **The credential decides the plane, not a hard-coded base URL.** A reference holding an `oc_…` key is the key plane; one holding an `st_…` token is the account plane, and the account plane carries an org with it.
+- **The org travels with the token.** It is not a separate setting to keep in step. A session token without its org answers `403 FreeTierError` for a free model — which is the failure this spec exists to explain — so the two are one credential in two fields, and treating them as one unit is what makes them impossible to get out of step.
+- **A model's reachability follows from the plane it resolved on.** Free models on a key plane are refused by the gateway, so the honest thing is for the picker to say so rather than to offer a model that will fail.
+- **Zero configuration survives.** A deployment that pastes a key gets the key plane and today's behaviour; one that logs in gets the account plane and the free tier. Neither names an endpoint.
+
+The endpoint, notably, is NOT part of this. Both paths answer identically for a paid model, so the plane is a description of what a credential can reach — not a different address. The tables stay as the key plane's description; the account plane is described by what the login returns.
+
 ## What this plugin would have to change
 
 Nothing, to keep serving paid models: `/zen/v1` with `OPENCODE_API_KEY` still answers, which the live suite exercises on every run.
@@ -98,15 +114,15 @@ Nothing, to keep serving paid models: `/zen/v1` with `OPENCODE_API_KEY` still an
 For the free tier, four things:
 
 1. **A credential that is a session token, not a key.** The pool already holds credential references and resolves them per operation, so an entry can name `OPENCODE_CONSOLE_TOKEN` — but the reference must resolve to an `st_…` token, which means a login, not a pasted key.
-2. **An org id per request.** The plugin's header injection is the place; the value comes from the account, and a deployment may have several.
-3. **The new endpoint**, which is per-provider rather than global, so the per-protocol base table is the wrong shape for it — the server-supplied config is the right one.
-4. **A server-driven config source**, if the plugin wants to follow the models and endpoints the vendor publishes rather than a catalog pinned in a dependency.
+2. **An org id per request, carried with the token.** The plugin's header injection is the place; the value comes from the account, and a deployment may have several.
+3. **A plane chosen by the credential's kind**, so a key deployment and a login deployment each route to what they can actually reach.
+4. **A server-driven model list for the account plane**, whose models arrive with the login rather than from the dependency's catalog.
 
-Steps 3 and 4 are the reason this is a specification rather than a patch: the plugin's routing derives an endpoint from a table, and the new API derives it from a login.
+Step 3 is the reason this is a specification rather than a patch: routing currently derives an endpoint from a table, and the measurement says the endpoint is the same either way — so what changes is what the plugin thinks a credential IS.
 
 ## What this changes about the plan
 
 - **The free tier is not reachable by adding a header.** Measured: the org id and the key together still answer `403`. Any plan that assumed a header fix is wrong.
 - **The device-flow client already written is the right shape.** Its endpoints, its grant type, its client id and its reading of the discriminated error all match the source. Its refresh window is 120s where the client uses 300s, which is a number to reconcile rather than a design to change.
-- **`/zen/v1` remains the paid path**, so the pool, the bridge and the protocol table keep their value. This is an addition, not a replacement.
-- **The user-agent is a version behind.** We claim `provider-utils/4.0.40`; the captured request sends `4.0.23`. Worth reconciling when the rest is settled, since the gateway groups usage by it.
+- **The paid path is unchanged in every respect**, endpoint included: both paths are one gateway and answer a paid model identically, so the pool, the bridge and the protocol table keep their value and their addresses. This is an addition, not a replacement.
+- **The user-agent is a version behind.** We claim `provider-utils/4.0.40`; the captured request sends `4.0.23`. Worth reconciling when the rest is settled, since the gateway groups usage by it — and the same capture is where to check the claim rather than trusting the constant.
