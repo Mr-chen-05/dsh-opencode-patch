@@ -46,7 +46,10 @@ export interface CredentialPool {
    * through to its own resolution rather than failing a request over a pool
    * that is merely exhausted.
    */
-  readonly next: () => Promise<string | undefined>;
+  readonly next: () => Promise<
+    | { readonly kind: "key"; readonly value: string }
+    | { readonly kind: "exhausted" }
+  >;
   /** The current entry's key without advancing. */
   readonly current: () => Promise<string | undefined>;
   /** Mark one entry failed, so the next advance skips it. */
@@ -61,8 +64,19 @@ export interface CredentialPool {
 export interface CredentialPoolInputs {
   readonly plane: Plane;
   readonly config: CredentialPoolConfig;
+  /**
+   * The seam, when this composition mounts one.
+   *
+   * Rotation WRITES the active key through it, which is the only mechanism a
+   * route the WRAPPER serves can be reached by. A pool without a seam still
+   * rotates; it is simply invisible outside this plugin.
+   */
+  readonly credentials?: CredentialsWriter;
   /** Resolve one reference's value; the environment is the fallback. */
   readonly resolveRef: (ref: string) => Promise<{ value?: string } | undefined>;
+  /** Called when a rotation's publish is refused; defaults to nothing. */
+  /** Called when a rotation's publish is refused; defaults to nothing. */
+  readonly onPublishRefused?: (reason: string | undefined) => void;
 }
 
 /**
@@ -156,13 +170,42 @@ export const createCredentialPool = (
     return values[found];
   };
 
+  const reference = POOL_REFERENCE[plane];
   return {
     current: () => select(index),
     markFailed: (ref: string) => {
       failed.add(ref);
     },
-    next: () => select((index + 1) % refs.length),
-    reference: POOL_REFERENCE[plane],
+    /**
+     * Advance the pool AND publish the new key.
+     *
+     * Publishing on every rotation — rather than once when the plugin mounts —
+     * is what the design claims. A route the wrapper serves resolves the pool's
+     * reference per operation, so a rotation reaches it only if the rotation
+     * writes. A pool that selected without writing would rotate perfectly and
+     * stay invisible to every route but this plugin's own.
+     *
+     * A refused publish does not fail the rotation: the caller asked for a key
+     * for a request it is making itself and already holds it. The publish
+     * exists for OTHER routes, so it is reported rather than turned into an
+     * error on a request that would have worked.
+     */
+    next: async () => {
+      const chosen = await select((index + 1) % refs.length);
+      // An exhausted pool is a RESULT, not an absent value: a caller that
+      // receives "exhausted" knows to fall through to its own credential, while
+      // one receiving `undefined` has to guess whether that meant exhaustion or
+      // a bug in the selection.
+      if (chosen === undefined) {
+        return { kind: "exhausted" };
+      }
+      const published = await publishKey(reference, chosen, inputs.credentials);
+      if (!published.ok) {
+        inputs.onPublishRefused?.(published.reason);
+      }
+      return { kind: "key", value: chosen };
+    },
+    reference,
     refs,
     restore: (ref: string) => {
       failed.delete(ref);
@@ -187,9 +230,22 @@ export const publishPoolKey = async (
   credentials?: CredentialsWriter
 ): Promise<{ ok: boolean; reason?: string }> => {
   const value = await pool.current();
-  if (value === undefined) {
-    return { ok: false, reason: "no pool entry resolves" };
-  }
+  return value === undefined
+    ? { ok: false, reason: "no pool entry resolves" }
+    : publishKey(pool.reference, value, credentials);
+};
+
+/**
+ * Write one value under one reference the pool owns.
+ *
+ * Shared by the mount-time publish and by rotation, so both take the same path
+ * and a refusal reads the same whichever produced it.
+ */
+const publishKey = async (
+  reference: string,
+  value: string,
+  credentials?: CredentialsWriter
+): Promise<{ ok: boolean; reason?: string }> => {
   if (credentials === undefined) {
     return {
       ok: false,
@@ -197,7 +253,7 @@ export const publishPoolKey = async (
     };
   }
   try {
-    await credentials.set(pool.reference, value);
+    await credentials.set(reference, value);
     return { ok: true };
   } catch (error) {
     return {

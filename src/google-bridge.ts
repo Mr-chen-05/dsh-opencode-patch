@@ -358,9 +358,12 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
     // A pool this plugin resolves itself is true round-robin: the next call
     // takes the next entry, with no reference write in between. A deployment
     // without one never reaches this branch, which is the whole default.
+    // Taking an entry from the pool also PUBLISHES it through the pool's own
+    // reference, so a route the wrapper serves sees the rotation too — not only
+    // the ones asking this adapter.
     const pooled = await inputs.pool?.next();
-    if (pooled !== undefined) {
-      return pooled;
+    if (pooled?.kind === "key") {
+      return pooled.value;
     }
     // An enabled pool that is exhausted falls through to the profile's own
     // reference rather than failing the request.

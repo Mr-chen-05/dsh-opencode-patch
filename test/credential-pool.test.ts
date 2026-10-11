@@ -142,12 +142,102 @@ describe("credential-pool: rotation among the entries a plane declared", () => {
       }
     );
     expect(pool?.refs).toEqual(["A", "B"]);
-    await expect(pool?.next()).resolves.toBe("key-b");
-    await expect(pool?.next()).resolves.toBe("key-a");
-    await expect(pool?.next()).resolves.toBe("key-b");
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "key-b",
+    });
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "key-a",
+    });
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "key-b",
+    });
     // `current` reports without consuming the turn.
     await expect(pool?.current()).resolves.toBe("key-b");
-    await expect(pool?.next()).resolves.toBe("key-a");
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "key-a",
+    });
+  });
+
+  it("publishes on EVERY rotation, not only when the pool is created", async () => {
+    // The defect this guards: the pool selected entries without writing, and
+    // the mount published once at startup. A route the wrapper serves resolves
+    // the pool's reference per operation, so it kept reading the key that was
+    // current at mount while this plugin's own routes had already rotated past
+    // it — a rotation that reached exactly one of the two kinds of route.
+    const { credentials, set } = writerFor();
+    const refusals: string[] = [];
+    const pool = createCredentialPool({
+      config: { enabled: true, go: [], zen: ["A", "B"] },
+      credentials,
+      onPublishRefused: (reason) => {
+        refusals.push(String(reason));
+      },
+      plane: "opencode",
+      resolveRef: resolverFor({ A: "key-a", B: "key-b" }),
+    });
+
+    await pool?.next();
+    expect(set).toHaveBeenCalledWith("OPENCODE_POOL_KEY", "key-b");
+    await pool?.next();
+    // The SECOND rotation publishes too — this is the line the mount-only
+    // version failed.
+    expect(set).toHaveBeenCalledWith("OPENCODE_POOL_KEY", "key-a");
+    expect(set).toHaveBeenCalledTimes(2);
+    expect(refusals).toEqual([]);
+  });
+
+  it("reports a refused publish without failing the rotation", async () => {
+    // The caller asked for a key for a request it is making itself and already
+    // has it; the publish exists for OTHER routes. Turning a refusal into an
+    // error would fail a request that would have worked.
+    const refusals: string[] = [];
+    const pool = createCredentialPool({
+      config: { enabled: true, go: [], zen: ["A"] },
+      credentials: {
+        deleteRecord: vi.fn(),
+        readRecord: vi.fn(),
+        resolve: vi.fn(),
+        set: async () => {
+          throw new Error("supplied read-only by the launching environment");
+        },
+        unset: vi.fn(),
+        writeGrant: vi.fn(),
+      },
+      onPublishRefused: (reason) => {
+        refusals.push(String(reason));
+      },
+      plane: "opencode",
+      resolveRef: resolverFor({ A: "key-a" }),
+    });
+
+    const result = await pool?.next();
+    // The key still comes back — the request it was for is served.
+    expect(result).toEqual({ kind: "key", value: "key-a" });
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toContain("supplied read-only");
+  });
+
+  it("rotates without a seam, and says the publish did not happen", async () => {
+    const refusals: string[] = [];
+    const pool = createCredentialPool({
+      config: { enabled: true, go: [], zen: ["A"] },
+      onPublishRefused: (reason) => {
+        refusals.push(String(reason));
+      },
+      plane: "opencode",
+      resolveRef: resolverFor({ A: "key-a" }),
+    });
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "key-a",
+    });
+    // A pool with nothing to write through still rotates; it is simply
+    // invisible outside this plugin, and says so.
+    expect(refusals[0]).toContain("credentials service");
   });
 
   it("keeps the planes apart: a Zen key never answers a Go request", async () => {
@@ -159,8 +249,11 @@ describe("credential-pool: rotation among the entries a plane declared", () => {
     const values = { GO_ONE: "go-key", ZEN_ONE: "zen-key" };
     const zen = poolFor(config, values, "opencode");
     const go = poolFor(config, values, "opencode-go");
-    await expect(zen?.next()).resolves.toBe("zen-key");
-    await expect(go?.next()).resolves.toBe("go-key");
+    await expect(zen?.next()).resolves.toEqual({
+      kind: "key",
+      value: "zen-key",
+    });
+    await expect(go?.next()).resolves.toEqual({ kind: "key", value: "go-key" });
     expect(zen?.reference).toBe("OPENCODE_POOL_KEY");
     expect(go?.reference).toBe("OPENCODE_GO_POOL_KEY");
     // And the references are the documented names, not derived from anything.
@@ -177,13 +270,25 @@ describe("credential-pool: rotation among the entries a plane declared", () => {
         B: "key-b",
       }
     );
-    await expect(pool?.next()).resolves.toBe("key-b");
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "key-b",
+    });
     pool?.markFailed("B");
-    await expect(pool?.next()).resolves.toBe("key-a");
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "key-a",
+    });
     // Still only A, twice: the failed entry is out until it is put back.
-    await expect(pool?.next()).resolves.toBe("key-a");
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "key-a",
+    });
     pool?.restore("B");
-    await expect(pool?.next()).resolves.toBe("key-b");
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "key-b",
+    });
   });
 
   it("skips an entry that resolves to nothing, without giving up", async () => {
@@ -195,10 +300,13 @@ describe("credential-pool: rotation among the entries a plane declared", () => {
         B: "key-b",
       }
     );
-    await expect(pool?.next()).resolves.toBe("key-b");
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "key-b",
+    });
     // A blank stored value is the same absence as no value at all.
     const blank = poolFor({ enabled: true, go: [], zen: ["A"] }, { A: "" });
-    await expect(blank?.next()).resolves.toBeUndefined();
+    await expect(blank?.next()).resolves.toEqual({ kind: "exhausted" });
   });
 
   it("falls through rather than erroring when every entry is spent", async () => {
@@ -213,7 +321,7 @@ describe("credential-pool: rotation among the entries a plane declared", () => {
     );
     pool?.markFailed("A");
     pool?.markFailed("B");
-    await expect(pool?.next()).resolves.toBeUndefined();
+    await expect(pool?.next()).resolves.toEqual({ kind: "exhausted" });
     await expect(pool?.current()).resolves.toBeUndefined();
   });
 });
@@ -301,8 +409,14 @@ describe("credential-pool: a changed value is noticed on the next selection", ()
       plane: "opencode",
       resolveRef: async (ref: string) => ({ value: values[ref] }),
     });
-    await expect(pool?.next()).resolves.toBe("first");
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "first",
+    });
     values.A = "second";
-    await expect(pool?.next()).resolves.toBe("second");
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "second",
+    });
   });
 });
