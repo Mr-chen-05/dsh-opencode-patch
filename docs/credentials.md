@@ -12,13 +12,15 @@ One reference resolves per route, and the pool only enters the picture when the 
 
 ## The pools are per plane
 
-Zen credentials serve Zen calls, Go credentials serve Go calls, and never the other way: the planes are different accounts with different keys, different endpoints and different catalogs. Each pool holds any mix of:
+Zen credentials serve Zen calls, Go credentials serve Go calls, and never the other way: the planes are different accounts with different keys, different endpoints and different catalogs.
 
-| Entry    | Origin                                                 | Refresh |
-| :------- | :----------------------------------------------------- | :------ |
-| API key  | pasted in the plugin's settings, or the environment    | none    |
-| OAuth v2 | `auth login opencode` — the provider credential path   | yes     |
-| OAuth v1 | `console login` — the account path, with org switching | yes     |
+A pool holds **API keys**, and that is a measured constraint rather than a first choice — the section below shows a login token is refused by the model endpoints the same way a wrong key is. So:
+
+| Entry   | Origin                                                  | Refresh |
+| :------ | :------------------------------------------------------ | :------ |
+| API key | a reference in the credential store, or the environment | none    |
+
+A pool of two or more keys is what rotation means here: a deployment past a rate limit or a per-key spend cap names the keys it holds, and the plugin serves the next one.
 
 ## An OAuth token is not a credential the gateway serves (measured)
 
