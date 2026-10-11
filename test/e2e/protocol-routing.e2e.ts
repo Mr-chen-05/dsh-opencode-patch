@@ -184,12 +184,28 @@ const probe = async (
     key === undefined || key.length === 0
       ? {}
       : (AUTH_FOR[protocol]?.(key) ?? {});
-  const response = await fetch(`${base}${path}`, {
-    body: JSON.stringify(payload),
-    headers: { ...PLUGIN_HEADERS, ...auth },
-    method: "POST",
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${base}${path}`, {
+      body: JSON.stringify(payload),
+      headers: { ...PLUGIN_HEADERS, ...auth },
+      method: "POST",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (error) {
+    // Status 0 means "the gateway did not answer" — neither agreement nor
+    // refusal. Measured while writing this: under rate limiting the gateway
+    // answers 429 at first and then holds the connection open without a
+    // response until the client gives up, so a timeout here is the gateway being
+    // busy rather than this plugin being wrong. Reporting it as a status is what
+    // lets the case SKIP instead of failing on an answer nobody received.
+    return {
+      status: 0,
+      summary: `no answer: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
   const body = await response.text();
   return {
     status: response.status,
@@ -201,8 +217,30 @@ const otherProtocols = (expected: string) =>
   Object.keys(PATH_FOR).filter((protocol) => protocol !== expected);
 
 /** Whether the gateway refused on ENTITLEMENT rather than on anything we control. */
+/**
+ * Whether the gateway's answer makes routing UNOBSERVABLE, so the case skips.
+ *
+ * Two shapes qualify, and both are the gateway speaking about the ACCOUNT
+ * rather than about the route:
+ *
+ * - `403 Model access is disabled` — the account has no paid access, so every
+ *   endpoint answers alike and nothing about routing can be seen.
+ * - `429` — the account is rate limited. Measured while writing this: the
+ *   gateway answers `429 Upstream request failed` on the first calls, and then
+ *   HOLDS THE CONNECTION open without a response for a minute, which is what
+ *   turned a routing case into a timeout rather than a skip. Every endpoint
+ *   would answer alike here too, so the same reasoning applies.
+ *
+ * A skip is the honest answer in both: it says the routing was not verified,
+ * which is not the same as saying it was verified and passed.
+ */
 const accessDisabled = (result: Probe): boolean =>
-  result.status === 403 && result.summary.includes("Model access is disabled");
+  (result.status === 403 &&
+    result.summary.includes("Model access is disabled")) ||
+  result.status === 429 ||
+  // No answer at all is the third shape of "cannot tell": the gateway is busy,
+  // so nothing about the route was observed either way.
+  result.status === 0;
 
 /**
  * The protocol the model is SERVED ON, per the shipped catalog on the Zen plane.
