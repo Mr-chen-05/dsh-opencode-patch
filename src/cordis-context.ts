@@ -190,6 +190,67 @@ export const readEntryOptions = (ctx: unknown): EntryOptions | undefined => {
  *
  * @param ctx - the plugin context, mock or real.
  */
+/** The write side of the credential seam, as far as this plugin needs it. */
+export interface CredentialsWriter {
+  /** Resolve one reference, or undefined while unconfigured. */
+  readonly resolve: (ref: string) => Promise<{ value?: string } | undefined>;
+  /** Durably store one value; rejects while a read-only source shadows it. */
+  readonly set: (ref: string, value: string) => Promise<void>;
+  /** Remove one reference; removing an absent one is a no-op. */
+  readonly unset: (ref: string) => Promise<void>;
+}
+
+/**
+ * The credential service itself, when this composition mounts one.
+ *
+ * Separate from {@link readCredentialsResolver} because writing is a different
+ * question from reading: the seam refuses a write that a read-only source would
+ * shadow, and a caller that cannot tell a refusal from a success would believe a
+ * rotation landed when it did not.
+ *
+ * @param ctx - the host context.
+ * @returns the service's resolve, set and unset, or undefined when absent.
+ */
+export const readCredentialsWriter = (
+  ctx: unknown
+): CredentialsWriter | undefined => {
+  if (!isRecord(ctx) || !isFunctionLike(ctx.get)) {
+    return undefined;
+  }
+  const { get } = ctx;
+  let host: unknown;
+  try {
+    host = Reflect.apply(get, ctx, ["credentials"]);
+  } catch {
+    return undefined;
+  }
+  if (
+    !isRecord(host) ||
+    !isFunctionLike(host.resolve) ||
+    !isFunctionLike(host.set) ||
+    !isFunctionLike(host.unset)
+  ) {
+    return undefined;
+  }
+  const { resolve, set, unset } = host;
+  return {
+    resolve: async (ref: string): Promise<{ value?: string } | undefined> => {
+      const hit: unknown = await Reflect.apply(resolve, host, [ref]);
+      if (!isRecord(hit)) {
+        return undefined;
+      }
+      const { value } = hit;
+      return typeof value === "string" ? { value } : undefined;
+    },
+    set: async (ref: string, value: string): Promise<void> => {
+      await Reflect.apply(set, host, [ref, value]);
+    },
+    unset: async (ref: string): Promise<void> => {
+      await Reflect.apply(unset, host, [ref]);
+    },
+  };
+};
+
 export const readCredentialsResolver = (
   ctx: unknown
 ): CredentialsResolver | undefined => {

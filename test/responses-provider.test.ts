@@ -24,6 +24,7 @@
 import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 import { describe, expect, it, vi } from "vitest";
 
+import { resolveConfig } from "../src/config.ts";
 import {
   RESPONSES_SDK,
   ROUTE_FOR_PLANE_PROTOCOL,
@@ -505,7 +506,14 @@ const createHost = (options: { onPlugin?: (config: unknown) => void } = {}) => {
     },
   }) as unknown as CordisContext;
 
-  return { ctx, mountHostInstance, mountIsolated, observables, piAi };
+  return {
+    ctx,
+    mountHostInstance,
+    mountIsolated,
+    observables,
+    piAi,
+    registerService,
+  };
 };
 
 describe("responses-provider: registration is best-effort", () => {
@@ -774,6 +782,124 @@ describe("responses-provider: the mount survives the host's own instance", () =>
     expect(providers["opencode-responses"]?.baseURL).toBe(
       "https://opencode.ai/zen/v1"
     );
+  });
+
+  it("publishes an enabled pool through the reference the pool owns", async () => {
+    // The path the wrapper's routes can reach: their credential resolution is
+    // the wrapper's, so the only thing this plugin can hand them is a value
+    // behind a reference. The write must name the POOL's reference and never a
+    // reference the deployment declared.
+    process.env.POOL_ONE = "pool-one-key";
+    process.env.POOL_TWO = "pool-two-key";
+    process.env.GO_POOL_ONE = "go-pool-key";
+    const written = new Map<string, string>();
+    const host = createHost();
+    host.registerService?.("credentials", {
+      resolve: async (ref: string) => {
+        const value = written.get(ref) ?? process.env[ref];
+        return value === undefined ? undefined : { value };
+      },
+      set: async (ref: string, value: string) => {
+        written.set(ref, value);
+      },
+      unset: async (ref: string) => {
+        written.delete(ref);
+      },
+    });
+
+    try {
+      await registerResponsesProvider(
+        host.ctx,
+        resolveConfig({
+          credentialPool: {
+            enabled: true,
+            go: ["GO_POOL_ONE"],
+            zen: ["POOL_ONE", "POOL_TWO"],
+          },
+        })
+      );
+
+      // The references are the pool's own, per plane.
+      expect([...written.keys()].toSorted()).toEqual([
+        "OPENCODE_GO_POOL_KEY",
+        "OPENCODE_POOL_KEY",
+      ]);
+      expect(written.get("OPENCODE_POOL_KEY")).toBe("pool-one-key");
+      expect(written.get("OPENCODE_GO_POOL_KEY")).toBe("go-pool-key");
+      // And nothing a deployment declared was written behind.
+      expect(written.has("OPENCODE_API_KEY")).toBe(false);
+      expect(written.has("OPENCODE_GO_API_KEY")).toBe(false);
+    } finally {
+      process.env.POOL_ONE = "";
+      process.env.POOL_TWO = "";
+      process.env.GO_POOL_ONE = "";
+    }
+  });
+
+  it("writes nothing when the pool is off, which is the default", async () => {
+    const written = new Map<string, string>();
+    const host = createHost();
+    host.registerService?.("credentials", {
+      resolve: async (ref: string) => {
+        const value = written.get(ref) ?? process.env[ref];
+        return value === undefined ? undefined : { value };
+      },
+      set: async (ref: string, value: string) => {
+        written.set(ref, value);
+      },
+      unset: async (ref: string) => {
+        written.delete(ref);
+      },
+    });
+
+    // A deployment that lists credentials and never turns the switch on. The
+    // listing alone changes nothing, which is the whole contract.
+    process.env.POOL_ONE = "pool-one-key";
+    try {
+      await registerResponsesProvider(
+        host.ctx,
+        resolveConfig({
+          credentialPool: { enabled: false, go: [], zen: ["POOL_ONE"] },
+        })
+      );
+      expect([...written.keys()]).toEqual([]);
+    } finally {
+      process.env.POOL_ONE = "";
+    }
+  });
+
+  it("says why a pool could not publish, without failing the mount", async () => {
+    // A seam that refuses the write — the shadowing case — must not undo a
+    // mount that already succeeded, and must say what happened.
+    process.env.POOL_ONE = "pool-one-key";
+    const host = createHost();
+    host.registerService?.("credentials", {
+      resolve: async (ref: string) => {
+        const value = process.env[ref];
+        return value === undefined ? undefined : { value };
+      },
+      set: async () => {
+        throw new Error("supplied read-only by the launching environment");
+      },
+      unset: async () => {},
+    });
+
+    try {
+      const stop = await registerResponsesProvider(
+        host.ctx,
+        resolveConfig({
+          credentialPool: { enabled: true, go: [], zen: ["POOL_ONE"] },
+        })
+      );
+      expect(stop).toBeDefined();
+      expect(
+        host.observables.infos.some((line) =>
+          line.includes("supplied read-only")
+        )
+      ).toBe(true);
+    } finally {
+      process.env.POOL_ONE = "";
+    }
   });
 
   it("releases the mount on dispose", async () => {

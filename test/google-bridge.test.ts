@@ -20,6 +20,7 @@ import semver from "semver";
 import { describe, expect, it } from "vitest";
 
 import { OPENCODE_ZEN_CATALOG } from "../src/catalog-data.ts";
+import { createCredentialPool } from "../src/credential-pool.ts";
 import {
   ambientAuthContext,
   emptyCredentialStore,
@@ -399,6 +400,106 @@ describe("google-bridge · the request the adapter actually sends", () => {
     } finally {
       process.env.BRIDGE_STREAM_KEY = "";
     }
+  });
+});
+
+describe("google-bridge · a pool the deployment opted into", () => {
+  /**
+   * The opt-in has to be observable on the wire, not in a unit of its own: the
+   * adapter resolves the credential per stream, so two streams through an
+   * enabled pool must arrive with two different keys.
+   */
+  it("rotates per stream, and resolves exactly the profile key when there is no pool", async () => {
+    const values: Record<string, string> = {
+      POOL_ONE: "pool-key-one",
+      POOL_TWO: "pool-key-two",
+      BRIDGE_STREAM_KEY: "profile-key",
+    };
+    const pool = createCredentialPool({
+      config: { enabled: true, go: [], zen: ["POOL_ONE", "POOL_TWO"] },
+      plane: "opencode",
+      resolveRef: async (ref: string) => ({ value: values[ref] }),
+    });
+    expect(pool).toBeDefined();
+
+    const keysSeen: string[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (
+      _input: unknown,
+      init?: { headers?: unknown }
+    ) => {
+      const headers = new Headers(init?.headers as HeadersInit | undefined);
+      keysSeen.push(headers.get("x-goog-api-key") ?? "");
+      throw new Error("captured");
+    }) as typeof globalThis.fetch;
+
+    const streamOnce = async (): Promise<void> => {
+      const { llm, registered } = recordingLlm();
+      registerGoogleBridge({
+        ...bridgeInputs(llm, "BRIDGE_STREAM_KEY"),
+        pool,
+      });
+      const adapter = registered[0]?.adapter as {
+        stream: (options: unknown) => AsyncIterable<unknown>;
+      };
+      try {
+        for await (const _ of adapter.stream({
+          messages: [{ content: [{ text: "hi", type: "text" }], role: "user" }],
+          model: "gemini-3.8-flash",
+          provider: GOOGLE_INTERNAL_ROUTE,
+        })) {
+          // The capture refuses the call.
+        }
+      } catch {
+        // Expected.
+      }
+    };
+
+    try {
+      await streamOnce();
+      await streamOnce();
+    } finally {
+      globalThis.fetch = real;
+    }
+
+    // Two calls, two different pool keys, and neither of them the profile's.
+    expect(keysSeen).toHaveLength(2);
+    expect(new Set(keysSeen).size).toBe(2);
+    expect(keysSeen).not.toContain("profile-key");
+    expect(keysSeen.toSorted()).toEqual(["pool-key-one", "pool-key-two"]);
+
+    // And the default: no pool at all, the profile's own reference answers,
+    // which is what every deployment that never opted in sees.
+    process.env.BRIDGE_STREAM_KEY = "profile-key";
+    const { llm, registered } = recordingLlm();
+    registerGoogleBridge(bridgeInputs(llm, "BRIDGE_STREAM_KEY"));
+    const adapter = registered[0]?.adapter as {
+      stream: (options: unknown) => AsyncIterable<unknown>;
+    };
+    const one: string[] = [];
+    globalThis.fetch = (async (
+      _input: unknown,
+      init?: { headers?: unknown }
+    ) => {
+      const h = new Headers(init?.headers as HeadersInit | undefined);
+      one.push(h.get("x-goog-api-key") ?? "");
+      throw new Error("captured");
+    }) as typeof globalThis.fetch;
+    try {
+      for await (const _ of adapter.stream({
+        messages: [{ content: [{ text: "hi", type: "text" }], role: "user" }],
+        model: "gemini-3.8-flash",
+        provider: GOOGLE_INTERNAL_ROUTE,
+      })) {
+        // The capture refuses the call.
+      }
+    } catch {
+      // Expected.
+    } finally {
+      globalThis.fetch = real;
+      process.env.BRIDGE_STREAM_KEY = "";
+    }
+    expect(one).toEqual(["profile-key"]);
   });
 });
 

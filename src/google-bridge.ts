@@ -49,6 +49,7 @@ import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 
 import type { CatalogModelSpec } from "./catalog-data.ts";
 import { readCredentialsResolver } from "./cordis-context.ts";
+import type { CredentialPool } from "./credential-pool.ts";
 import { type Plane, piModelFor } from "./pi-provider.ts";
 import { GOOGLE_INTERNAL_ROUTE } from "./responses-routes.ts";
 
@@ -294,6 +295,15 @@ export interface GoogleBridgeInputs {
   readonly specs: readonly CatalogModelSpec[];
   /** The credential reference inherited from the deployment's own route. */
   readonly apiKeyRef: string;
+  /**
+   * The credential pool for this plane, when a deployment enabled one.
+   *
+   * Optional by construction: `createCredentialPool` answers undefined for a
+   * deployment that did not opt in, so this is undefined in every default
+   * composition and the route resolves exactly what it resolved before the pool
+   * existed.
+   */
+  readonly pool?: CredentialPool;
 }
 
 /**
@@ -341,11 +351,21 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
   };
   const profiles = new Map([[GOOGLE_INTERNAL_ROUTE, profile]]);
 
-  const resolveApiKey = (
+  const resolveApiKey = async (
     route: unknown,
     resolved: { apiKeyEnv?: unknown }
-  ): Promise<string | undefined> =>
-    resolveGatewayKey(ctx, resolved.apiKeyEnv, String(route));
+  ): Promise<string | undefined> => {
+    // A pool this plugin resolves itself is true round-robin: the next call
+    // takes the next entry, with no reference write in between. A deployment
+    // without one never reaches this branch, which is the whole default.
+    const pooled = await inputs.pool?.next();
+    if (pooled !== undefined) {
+      return pooled;
+    }
+    // An enabled pool that is exhausted falls through to the profile's own
+    // reference rather than failing the request.
+    return resolveGatewayKey(ctx, resolved.apiKeyEnv, String(route));
+  };
 
   const built: unknown = Reflect.construct(adapter, [
     {

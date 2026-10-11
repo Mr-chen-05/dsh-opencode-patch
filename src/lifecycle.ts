@@ -160,7 +160,9 @@ const installFetchPatch = (
       stopResponsesProvider = undefined;
     };
     void (async () => {
-      const stop = await registerResponsesProvider(ctx);
+      // The resolved config rides in: the credential pool is opt-in through
+      // it, and a mount without it can only serve the profile's own key.
+      const stop = await registerResponsesProvider(ctx, config);
       if (released) {
         stop?.();
         return;

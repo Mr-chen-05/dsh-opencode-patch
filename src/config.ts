@@ -64,7 +64,38 @@ export const DEFAULT_USAGE_KEY_ENV = "OPENCODE_GO_API_KEY";
  * user values fall back to these; the `Config` schema `.default()`s to the
  * same values.
  */
+/**
+ * Several credentials, one active at a time, as a deployment declares them.
+ *
+ * Entries are credential REFERENCES, never values: the pool resolves them
+ * through the same seam every other route uses, so a deployment's key stays
+ * where it put it.
+ */
+export interface CredentialPoolConfig {
+  /** Whether the deployment opted in. Without this, nothing about the pool runs. */
+  readonly enabled: boolean;
+  /** Credential references for the Zen plane, in preference order. */
+  readonly zen: readonly string[];
+  /** Credential references for the Go plane, in preference order. */
+  readonly go: readonly string[];
+}
+
+/**
+ * The credential pool's default: off, with nothing in it.
+ *
+ * Declared apart from {@link CONFIG_DEFAULTS} and explicitly typed, because
+ * that table is `as const` and a nested array inside it becomes readonly — which
+ * the schema's `string[]` will not accept. The same reason
+ * {@link DEFAULT_GATEWAY_URLS} lives outside it.
+ */
+export const DEFAULT_CREDENTIAL_POOL: CredentialPoolConfig = {
+  enabled: false,
+  go: [],
+  zen: [],
+};
+
 export const CONFIG_DEFAULTS = {
+  credentialPool: DEFAULT_CREDENTIAL_POOL,
   debug: false,
   enrichModels: true,
   freeModelMarker: DEFAULT_FREE_MODEL_MARKER,
@@ -83,6 +114,7 @@ export const CONFIG_DEFAULTS = {
 
 /** The raw shape a cordis row's `config` may carry (all optional). */
 export interface PluginConfig {
+  credentialPool?: { enabled?: boolean; go?: string[]; zen?: string[] };
   debug?: boolean;
   debugFile?: string;
   enrichModels?: boolean;
@@ -103,6 +135,8 @@ export interface PluginConfig {
 
 /** The fully-defaulted shape the plugin's runtime branches read. */
 export interface ResolvedPluginConfig {
+  /** The credential pool as configured. Off and empty unless declared. */
+  readonly credentialPool: CredentialPoolConfig;
   debug: boolean;
   debugFile?: string;
   enrichModels: boolean;
@@ -143,6 +177,25 @@ const resolvedKeySource = (raw: unknown): KeySourcePolicy => {
   return isKeySourcePolicy(value) ? value : CONFIG_DEFAULTS.keySource;
 };
 
+/**
+ * The pool's configuration, with the deployment's own defaults filling in.
+ *
+ * A row that omits the section entirely, or sets the switch without listing
+ * anything, resolves to a pool that serves nothing — which is the same as no
+ * pool, and is what `createCredentialPool` turns into "resolve the profile's
+ * own credential".
+ */
+const resolveCredentialPool = (
+  raw: PluginConfig["credentialPool"]
+): CredentialPoolConfig => {
+  const pool = raw ?? {};
+  return {
+    enabled: readBoolean(pool.enabled, DEFAULT_CREDENTIAL_POOL.enabled),
+    go: readStringList(pool.go),
+    zen: readStringList(pool.zen),
+  };
+};
+
 export const resolveConfig = (
   rawInput: PluginConfig = {}
 ): ResolvedPluginConfig => {
@@ -152,6 +205,7 @@ export const resolveConfig = (
   const gatewayUrls = readStringList(config.gatewayUrls);
 
   return {
+    credentialPool: resolveCredentialPool(config.credentialPool),
     debug: readBoolean(config.debug, CONFIG_DEFAULTS.debug),
     debugFile: readString(config.debugFile),
     enrichModels: readBoolean(
@@ -296,6 +350,38 @@ export const Config = z.object({
     .default(CONFIG_DEFAULTS.usageBaseURL)
     .volatile()
     .description("OpenCode Go gateway base URL."),
+  credentialPool: z
+    .object({
+      enabled: z
+        .boolean()
+        .default(CONFIG_DEFAULTS.credentialPool.enabled)
+        .description(
+          "Rotate several credentials behind one reference. Off by default: " +
+            "with this false the plugin resolves exactly what the profile " +
+            "declares, whatever this section lists."
+        ),
+      zen: z
+        .array(z.string())
+        .default([...CONFIG_DEFAULTS.credentialPool.zen])
+        .description(
+          "Credential references for the Zen plane, in preference order."
+        ),
+      go: z
+        .array(z.string())
+        .default([...CONFIG_DEFAULTS.credentialPool.go])
+        .description(
+          "Credential references for the Go plane, in preference order."
+        ),
+    })
+    .default({
+      enabled: DEFAULT_CREDENTIAL_POOL.enabled,
+      go: [...DEFAULT_CREDENTIAL_POOL.go],
+      zen: [...DEFAULT_CREDENTIAL_POOL.zen],
+    })
+    .description(
+      "Several credentials, one active at a time. Opt-in: a deployment opts " +
+        "in here AND points a route at this pool's reference."
+    ),
   debug: z
     .boolean()
     .default(CONFIG_DEFAULTS.debug)

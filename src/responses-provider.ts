@@ -37,8 +37,17 @@
  * @module dsh-opencode-patch/responses-provider
  */
 
-import { DEFAULT_USAGE_KEY_ENV } from "./config.ts";
-import type { CordisContext } from "./cordis-context.ts";
+import { DEFAULT_USAGE_KEY_ENV, type ResolvedPluginConfig } from "./config.ts";
+import {
+  type CordisContext,
+  readCredentialsResolver,
+  readCredentialsWriter,
+} from "./cordis-context.ts";
+import {
+  type CredentialPool,
+  createCredentialPool,
+  publishPoolKey,
+} from "./credential-pool.ts";
 import { registerGoogleBridge } from "./google-bridge.ts";
 import { isFunctionLike, isRecord } from "./guards.ts";
 import {
@@ -314,6 +323,21 @@ const sdksForProtocol = (protocol: string): string[] =>
  * the route's own endpoint, which is why the mount reads all three here rather
  * than from a module constant.
  */
+/**
+ * The environment fallback the credential seam itself uses.
+ *
+ * A pool entry then behaves the same whether it was stored or exported, and a
+ * blank is absent in both — which is the seam's rule, not this module's.
+ */
+const fromEnvironment = (
+  ref: string
+): Promise<{ value?: string } | undefined> => {
+  const found = process.env[ref];
+  return Promise.resolve(
+    found === undefined || found.length === 0 ? undefined : { value: found }
+  );
+};
+
 const planeSource = (plane: string, ctx: unknown) =>
   plane === "opencode-go"
     ? { apiKeyEnv: DEFAULT_USAGE_KEY_ENV, catalog: getLiveGoCatalog() }
@@ -484,12 +508,29 @@ const mountScope = (
  *   mounted.
  */
 export const registerResponsesProvider = async (
-  ctx: CordisContext
+  ctx: CordisContext,
+  config?: ResolvedPluginConfig
 ): Promise<(() => void) | undefined> => {
   const { llm } = ctx;
   if (llm === undefined || typeof llm.registerAdapter !== "function") {
     return undefined;
   }
+  // Both planes' pools, or none. `createCredentialPool` answers undefined for a
+  // deployment that did not opt in, so everything below reads the same in the
+  // default composition: one undefined, and the profile's own credential.
+  const poolConfig = config?.credentialPool;
+  const credentials = readCredentialsWriter(ctx);
+  const resolveRef = readCredentialsResolver(ctx) ?? fromEnvironment;
+  const poolFor = (
+    plane: "opencode" | "opencode-go"
+  ): CredentialPool | undefined =>
+    poolConfig === undefined
+      ? undefined
+      : createCredentialPool({
+          config: poolConfig,
+          plane,
+          resolveRef,
+        });
   const declared = declaredRoutes(llm);
   // The bridge route first. It registers on the real service through this
   // plugin's own adapter, so it needs nothing from the wrapper's mount below:
@@ -501,6 +542,7 @@ export const registerResponsesProvider = async (
     ? undefined
     : registerGoogleBridge({
         apiKeyRef: inheritedCredentialRef(ctx),
+        pool: poolFor("opencode"),
         ctx,
         host: loadPiAi(ctx),
         // The bridge reads the RAW catalog, not the config-shaped profile:
@@ -619,6 +661,29 @@ export const registerResponsesProvider = async (
       return bridgeDispose;
     }
     ctx.logger?.info?.("[dsh-opencode-patch] mounted %s", mounted.join("; "));
+    // Publish each plane's active key through the reference the pool owns, so
+    // the routes the WRAPPER serves read a rotating credential: their
+    // resolution is the wrapper's, and this is the only path that reaches it.
+    // Best-effort by design — a pool that cannot publish has said why in its
+    // result, and a refused write must not undo a mount that succeeded.
+    await Promise.all(
+      (["opencode", "opencode-go"] as const).flatMap((plane) => {
+        const pool = poolFor(plane);
+        if (pool === undefined) {
+          return [];
+        }
+        return [
+          publishPoolKey(pool, credentials).then((published) => {
+            if (!published.ok) {
+              ctx.logger?.info?.(
+                `[dsh-opencode-patch] credential pool for ${plane}: ${published.reason}`
+              );
+            }
+          }),
+        ];
+      })
+    );
+
     return () => {
       bridgeDispose?.();
       for (const handle of captured) {
