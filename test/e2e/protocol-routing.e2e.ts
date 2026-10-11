@@ -235,13 +235,19 @@ const otherProtocols = (expected: string) =>
  * which is not the same as saying it was verified and passed.
  */
 /**
- * Whether the gateway is refusing the account's FREE TIER rather than the route.
+ * Whether the gateway is refusing the FREE TIER rather than the route.
  *
- * Measured: with a full set of CLI-shaped headers, with only a User-Agent, and
- * with the real CLI's own agent string, `space-bunny-free` answers `403
- * FreeTierError: OpenCode's free tier can only be used from within OpenCode` in
- * all three. The refusal is about the account, and it is not something this
- * plugin's headers can change.
+ * The free tier moved with OpenCode 1.19.0's new API, and it is gated on a
+ * credential this plugin does not hold. Measured, one request each, on
+ * `space-bunny-free`: the deployment's `oc_…` key answers `403 FreeTierError` on
+ * both `…/zen/v1` and the new `…/inference/openai/v1`, with and without
+ * `x-opencode-org-id`; the literal `public` answers the same; and the real
+ * client — whose captured request carries an `st_…` session token — is served.
+ *
+ * So this is not the account and not the route: the paid path still works with
+ * an API key, and the free path needs a session token from an account login.
+ * `docs/opencode-1.19-api.md` has the endpoints, the captured headers and the
+ * login flow.
  */
 const freeTierClosed = (result: Probe): boolean =>
   result.summary.includes("FreeTierError");
@@ -364,11 +370,10 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
 
       const response = await probe(expected ?? "", model);
       if (accessDisabled(response) || freeTierClosed(response)) {
-        // The account has no usable free tier right now — measured: every
-        // header combination answers `403 FreeTierError: OpenCode's free tier
-        // can only be used from within OpenCode`, so the gateway is refusing the
-        // ACCOUNT, not the route. Skipping says the header restoration was not
-        // verified; failing would blame the plugin for the account's state.
+        // The free tier needs a session token this plugin does not hold — see
+        // `freeTierClosed` and `docs/opencode-1.19-api.md`. The
+        // header-restoration claim cannot be checked on `…/zen/v1` while that is
+        // true, and failing would blame this plugin for a vendor-side move.
         context.skip();
         return;
       }
@@ -626,7 +631,7 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
       if (freeTierClosed(response)) {
         // Reported rather than skipped: the account is what closed it.
         console.log(
-          `[e2e] ${model}: the account's free tier is closed (${response.status}), so the header-restoration case did not run`
+          `[e2e] ${model}: the free tier needs a session token this plugin does not hold (${response.status}) — see docs/opencode-1.19-api.md; the header-restoration case did not run`
         );
         return;
       }
