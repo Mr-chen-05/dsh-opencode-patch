@@ -195,6 +195,16 @@ export interface FetchPatchHooks {
    * none — which is every key deployment, and the reason this is optional.
    */
   readonly resolveOrg?: (plane: string) => string | undefined;
+  /**
+   * One entry per claimed request, for the debug file.
+   *
+   * The question it exists to answer is why a request that should have been
+   * patched was not, or was patched wrongly — which is invisible from the
+   * outside, because the gateway's answer for a malformed session id reads
+   * exactly like the answer for a bad credential. So it records what the
+   * interceptor SAW and what it SENT, never the credential itself.
+   */
+  readonly debug?: (entry: Record<string, unknown>) => void;
 }
 
 export const patchFetch = (
@@ -313,6 +323,22 @@ export const patchFetch = (
     }
 
     const response = await original.call(this, input, newInit);
+
+    // One line per request the interceptor touched, so a run that misbehaves can
+    // be read back instead of guessed at. Presence, never values: whether a
+    // credential, a session and an org were SENT is what explains an answer, and
+    // the credential itself has no business in a log.
+    hooks.debug?.({
+      auth: headers.get("Authorization") !== null,
+      claimed: true,
+      org: headers.get("x-opencode-org-id") ?? null,
+      plane: gatewayPlaneFor(url),
+      session: headers.get(SESSION_HEADER) ?? null,
+      sessionFormat: isOpenCodeSessionId(headers.get(SESSION_HEADER)),
+      status: response.status,
+      url,
+      userAgent: headers.get("User-Agent") ?? null,
+    });
 
     // A refused credential or an exhausted rate limit is the one moment a pool
     // can do something useful, and this is the only place that sees the answers

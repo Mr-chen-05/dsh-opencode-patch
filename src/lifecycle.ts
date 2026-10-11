@@ -18,7 +18,6 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { appendFileSync } from "node:fs";
 
 import {
   type PluginConfig,
@@ -31,6 +30,7 @@ import {
   readCredentialsWriter,
   readEntryOptions,
 } from "./cordis-context.ts";
+import { recordDebug } from "./debug.ts";
 import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
 import { isFetchFunction, isFunctionLike, isRecord } from "./guards.ts";
@@ -184,6 +184,11 @@ const installFetchPatch = (
     // login for the plane the request is bound for, and a plane whose credential
     // is a plain key has none.
     resolveOrg: (plane) => readAccountOrg(plane) ?? config.credentialOrg,
+    // One JSONL line per request this interceptor touched, when the deployment
+    // asked for debugging. It is the only way to see a request that was patched
+    // wrongly: the gateway's answer for a malformed session id reads exactly
+    // like the answer for a bad credential.
+    ...debugHook(config, ctx),
   });
 
   // Warm the org cache before the first request can need it. Best-effort and
@@ -326,22 +331,35 @@ const withCredentials = (
   }) as CordisContext;
 };
 
+/**
+ * The request-monitoring hook, when the deployment asked for it.
+ *
+ * `debug` turns it on and `debugFile` says where the JSONL goes; with either
+ * missing there is nowhere to write and nothing to record.
+ *
+ * @param config - the resolved plugin configuration.
+ * @param ctx - the host context, for reporting a write failure.
+ * @returns the hook, or nothing when debugging is off.
+ */
+const debugHook = (
+  config: ResolvedPluginConfig,
+  ctx: CordisContext
+): { debug?: (entry: Record<string, unknown>) => void } => {
+  const file = config.debugFile;
+  if (!config.debug || file === undefined) {
+    return {};
+  }
+  return {
+    debug: (entry: Record<string, unknown>) => {
+      void recordDebug(ctx, file, entry);
+    },
+  };
+};
+
 export const apply = (
   ctx: CordisContext,
   rawConfig: PluginConfig = {}
 ): void => {
-  // TEMPORARY: the host terminal has shown none of this plugin's output, so a
-  // file is the one channel that can be read back — and it answers whether the
-  // host half runs at all. Remove once the meter renders.
-  try {
-    appendFileSync(
-      "/tmp/dsh-opencode-patch.log",
-      `[dsh-opencode-patch] apply() ran; providers=[${[...resolveConfig(rawConfig).providers].join(",")}]\n`
-    );
-  } catch {
-    // A missing /tmp write must not stop the plugin.
-  }
-
   /**
    * The host context, with the credential service made reachable.
    *
