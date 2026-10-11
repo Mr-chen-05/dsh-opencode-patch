@@ -57,8 +57,10 @@ describe("patchFetch", () => {
         failing as unknown as typeof fetch,
         als,
         resolveConfig(),
-        (seenPlane, seenStatus) => {
-          seen.push({ plane: seenPlane, status: seenStatus });
+        {
+          onCredentialFailure: (seenPlane, seenStatus) => {
+            seen.push({ plane: seenPlane, status: seenStatus });
+          },
         }
       );
       const url =
@@ -89,8 +91,10 @@ describe("patchFetch", () => {
         answering as unknown as typeof fetch,
         als,
         resolveConfig(),
-        (plane, seenStatus) => {
-          seen.push({ plane, status: seenStatus });
+        {
+          onCredentialFailure: (plane, seenStatus) => {
+            seen.push({ plane, status: seenStatus });
+          },
         }
       );
       await patched("https://opencode.ai/zen/v1/chat/completions", {
@@ -113,8 +117,10 @@ describe("patchFetch", () => {
       failing as unknown as typeof fetch,
       als,
       resolveConfig(),
-      (plane, status) => {
-        seen.push({ plane, status });
+      {
+        onCredentialFailure: (plane, status) => {
+          seen.push({ plane, status });
+        },
       }
     );
     await patched("https://api.deepseek.com/v1/chat/completions", {
@@ -122,6 +128,53 @@ describe("patchFetch", () => {
       method: "POST",
     });
     expect(seen).toEqual([]);
+  });
+
+  it("carries the credential's org, and nothing when it has none", async () => {
+    // A session token is half a credential: the gateway gates the free tier on
+    // the org that arrived with it, so a request carrying one without the other
+    // is answered as though it carried a plain key. And a key deployment has no
+    // org, which must not become an empty header.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const sent: Record<string, string> = {};
+    const capture = vi.fn(
+      async (_url: unknown, init?: { headers?: unknown }) => {
+        const headers = new Headers(init?.headers as HeadersInit | undefined);
+        sent.org = headers.get("x-opencode-org-id") ?? "(absent)";
+        return new Response("{}", { status: 200 });
+      }
+    );
+
+    const withOrg = patchFetch(
+      capture as unknown as typeof fetch,
+      als,
+      resolveConfig(),
+      { resolveOrg: (plane) => (plane === "opencode" ? "wrk_test" : undefined) }
+    );
+    await withOrg("https://opencode.ai/zen/v1/chat/completions", {
+      body: "{}",
+      method: "POST",
+    });
+    expect(sent.org).toBe("wrk_test");
+
+    // The Go plane's resolver said no, so no header is invented for it.
+    await withOrg("https://opencode.ai/zen/go/v1/chat/completions", {
+      body: "{}",
+      method: "POST",
+    });
+    expect(sent.org).toBe("(absent)");
+
+    // And with no resolver at all — every key deployment — there is none.
+    const withoutOrg = patchFetch(
+      capture as unknown as typeof fetch,
+      als,
+      resolveConfig()
+    );
+    await withoutOrg("https://opencode.ai/zen/v1/chat/completions", {
+      body: "{}",
+      method: "POST",
+    });
+    expect(sent.org).toBe("(absent)");
   });
 
   it("passes non-OpenCode requests through completely untouched", async () => {

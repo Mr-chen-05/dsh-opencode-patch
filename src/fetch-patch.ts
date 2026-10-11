@@ -166,11 +166,37 @@ const resolveSessionHeader = (
  */
 export type CredentialFailureObserver = (plane: string, status: number) => void;
 
+/**
+ * What the interceptor needs from the plugin beyond its configuration.
+ *
+ * An object rather than more positional parameters, because these are the
+ * plugin's own seams into the request path and there will be more of them. The
+ * configuration stays separate: it is what the deployment wrote, and these are
+ * what the running plugin knows.
+ */
+export interface FetchPatchHooks {
+  /** Told when the gateway refused a credential, so a pool can rotate. */
+  readonly onCredentialFailure?: CredentialFailureObserver;
+  /**
+   * The org a plane's credential belongs to, when it has one.
+   *
+   * Asked per request rather than captured once, because a login can arrive
+   * while the process runs. The org is not a setting: it is part of the
+   * credential, and a request carrying a token without its org is answered as
+   * though the token were a plain key.
+   *
+   * @param plane - the gateway plane the request is bound for.
+   * @returns the org id, `wrk_...`, or undefined when the plane's credential has
+   * none — which is every key deployment, and the reason this is optional.
+   */
+  readonly resolveOrg?: (plane: string) => string | undefined;
+}
+
 export const patchFetch = (
   original: typeof fetch,
   als: AsyncLocalStorage<ActiveTurnState>,
   config: ResolvedPluginConfig,
-  onCredentialFailure?: CredentialFailureObserver
+  hooks: FetchPatchHooks = {}
 ): typeof fetch => {
   const patchedFetch = async function patchedFetch(
     this: unknown,
@@ -246,6 +272,15 @@ export const patchFetch = (
       headers.set("User-Agent", config.userAgent ?? OPENCODE_UA);
     }
 
+    // 2b. The org, when this plane's credential belongs to one. A session token
+    // is only half a credential: the gateway gates the free tier on the org that
+    // arrived with it, and a request carrying one without the other is answered
+    // as though it carried a plain key.
+    const org = hooks.resolveOrg?.(gatewayPlaneFor(url));
+    if (org !== undefined && org.length > 0) {
+      headers.set("x-opencode-org-id", org);
+    }
+
     // 3. Client & Project origin headers: injected when enabled
     if (config.injectOriginHeaders) {
       headers.set("x-opencode-client", config.originClient);
@@ -283,10 +318,10 @@ export const patchFetch = (
     // enabled with 403, and rotating a key over that would move a deployment
     // off a working credential for a model problem.
     if (
-      onCredentialFailure !== undefined &&
+      hooks.onCredentialFailure !== undefined &&
       (response.status === 401 || response.status === 429)
     ) {
-      onCredentialFailure(gatewayPlaneFor(url), response.status);
+      hooks.onCredentialFailure(gatewayPlaneFor(url), response.status);
     }
 
     // If upstream returns 403 FreeTierError, demultiplex it to HTTP 400 so DSH's

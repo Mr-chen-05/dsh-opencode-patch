@@ -86,6 +86,28 @@ export interface ConsoleTokens {
   readonly account?: string;
 }
 
+/**
+ * The account a session token belongs to.
+ *
+ * Read once at login, because the token cannot be interpreted without it: the
+ * gateway gates the free tier on an account and an org, so a stored token that
+ * has forgotten whose it is can only reach the paid models.
+ */
+export interface ConsoleAccount {
+  /** The account id, `acc_…`. */
+  readonly id: string;
+  /** The account's email, for a settings surface to show. */
+  readonly email: string;
+}
+
+/** One organization a session token may act within. */
+export interface ConsoleOrg {
+  /** The org id, `wrk_…`, which is what a request must carry. */
+  readonly id: string;
+  /** The org's display name. */
+  readonly name: string;
+}
+
 /** Why a poll did not produce a token yet, or ever will. */
 export type PollOutcome =
   | { readonly kind: "pending" }
@@ -214,6 +236,91 @@ export class ConsoleAuthClient {
       };
     }
     return isRecord(parsed) ? parsed : { error: "unreadable_response" };
+  }
+
+  /**
+   * One GET from the Console, with the session token as a bearer credential.
+   *
+   * Answered as read, like {@link ConsoleAuthClient.#post}: the two callers
+   * below each pick the fields they know, and a shape this module did not expect
+   * should fail at the caller rather than be narrowed into existence here.
+   */
+  async #get(path: string, accessToken: string): Promise<unknown> {
+    const response = await this.#fetch(`${this.#baseUrl}${path}`, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      method: "GET",
+    });
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return {
+        error: "unreadable_response",
+        error_description: text.slice(0, 200),
+      };
+    }
+  }
+
+  /**
+   * The account a session token belongs to.
+   *
+   * `GET /api/user`, measured against the source: the same read the client makes
+   * before it stores a login, which is why a stored credential knows its owner
+   * rather than having to guess later.
+   *
+   * @param accessToken - the session token from {@link ConsoleTokens}.
+   * @returns the account.
+   * @throws {Error} when the Console refuses the token or answers a shape
+   * without an id or an email.
+   */
+  async account(accessToken: string): Promise<ConsoleAccount> {
+    const raw = await this.#get("/api/user", accessToken);
+    if (!isRecord(raw)) {
+      throw new TypeError("the Console answered no account object");
+    }
+    const id = readString(raw, "id");
+    const email = readString(raw, "email");
+    if (id === undefined || email === undefined) {
+      throw new Error(
+        `the Console's account has no id or email: ${errorDetail(raw)}`
+      );
+    }
+    return { email, id };
+  }
+
+  /**
+   * The organizations a session token may act within.
+   *
+   * `GET /api/orgs`, measured against the source. The FIRST one is what the
+   * client activates, so a caller that must choose one without a user present
+   * chooses the same.
+   *
+   * @param accessToken - the session token.
+   * @returns the organizations, in the Console's own order.
+   * @throws {Error} when the Console refuses the token or answers a shape that
+   * is not a list of `{ id, name }`.
+   */
+  async orgs(accessToken: string): Promise<readonly ConsoleOrg[]> {
+    const raw = await this.#get("/api/orgs", accessToken);
+    if (!Array.isArray(raw)) {
+      throw new TypeError("the Console answered no organization list");
+    }
+    return raw.map((entry: unknown) => {
+      if (!isRecord(entry)) {
+        throw new Error(
+          "the Console's organization list has a non-object entry"
+        );
+      }
+      const id = readString(entry, "id");
+      const name = readString(entry, "name");
+      if (id === undefined || name === undefined) {
+        throw new TypeError("the Console's organization has no id or name");
+      }
+      return { id, name };
+    });
   }
 
   /**

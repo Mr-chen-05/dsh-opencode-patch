@@ -24,15 +24,46 @@
  * @module dsh-opencode-patch/token-store
  */
 
-import type { ConsoleTokens } from "./console-auth.ts";
+import type {
+  ConsoleAccount,
+  ConsoleOrg,
+  ConsoleTokens,
+} from "./console-auth.ts";
 import type { CredentialsWriter } from "./cordis-context.ts";
 
 /** What this module writes, in the shape the seam stores verbatim. */
 interface StoredGrant {
   readonly accessToken: string;
+  /** The account NAME the token response carried, when it carried one. */
   readonly account: string | undefined;
+  /**
+   * The account this login belongs to.
+   *
+   * Read at login from `/api/user`, and stored here rather than re-derived: the
+   * gateway gates the free tier on an account and an org, so a token whose owner
+   * has been forgotten can only reach the paid models.
+   */
+  readonly owner: ConsoleAccount | undefined;
+  /** The organizations this login may act within, from `/api/orgs`. */
+  readonly orgs: readonly ConsoleOrg[] | undefined;
+  /** The org a request must carry, `wrk_…`; the first of {@link orgs} at login. */
+  readonly orgId: string | undefined;
   readonly expiresAt: number;
   readonly refreshToken: string | undefined;
+}
+
+/**
+ * A stored login: the token pair, and everything known about whose it is.
+ *
+ * The context is optional so that a pair stored before this existed still reads,
+ * and so a caller that only has tokens can still write one — but a login that
+ * went through the device flow has all of it, because the flow reads it before
+ * it stores anything.
+ */
+export interface StoredLogin extends ConsoleTokens {
+  readonly owner?: ConsoleAccount;
+  readonly orgs?: readonly ConsoleOrg[];
+  readonly orgId?: string;
 }
 
 /** The record as it comes back out, which may have been written by an older build. */
@@ -57,7 +88,7 @@ export interface TokenStore {
    * A record this plugin did not write is not interpreted: it is someone
    * else's payload, and reading it as a grant would be guessing.
    */
-  readonly read: () => Promise<ConsoleTokens | undefined>;
+  readonly read: () => Promise<StoredLogin | undefined>;
   /**
    * Store a pair, replacing whatever was there in one operation.
    *
@@ -65,7 +96,7 @@ export interface TokenStore {
    * token that sat unread across a restart is expired on read rather than
    * treated as fresh.
    */
-  readonly write: (tokens: ConsoleTokens) => Promise<void>;
+  readonly write: (login: StoredLogin) => Promise<void>;
   /** Remove the stored login, if any. Removing an absent record is a no-op. */
   readonly clear: () => Promise<void>;
   /**
@@ -128,7 +159,7 @@ export const createTokenStore = (
   }
   const key = `${scope}/${plane}`;
 
-  const read = async (): Promise<ConsoleTokens | undefined> => {
+  const read = async (): Promise<StoredLogin | undefined> => {
     const record = await credentials.readRecord(key);
     if (record === undefined || record.kind !== "grant") {
       return undefined;
@@ -149,16 +180,25 @@ export const createTokenStore = (
         0,
         Math.floor((payload.expiresAt - Date.now()) / 1000)
       ),
+      ...(payload.owner === undefined ? {} : { owner: payload.owner }),
+      ...(payload.orgs === undefined ? {} : { orgs: payload.orgs }),
+      ...(payload.orgId === undefined ? {} : { orgId: payload.orgId }),
       refreshToken: payload.refreshToken,
     };
   };
 
-  const write = async (tokens: ConsoleTokens): Promise<void> => {
+  const write = async (login: StoredLogin): Promise<void> => {
     const payload: StoredGrant = {
-      accessToken: tokens.accessToken,
-      account: tokens.account,
-      expiresAt: Date.now() + tokens.expiresInSeconds * 1000,
-      refreshToken: tokens.refreshToken,
+      accessToken: login.accessToken,
+      account: login.account,
+      expiresAt: Date.now() + login.expiresInSeconds * 1000,
+      // The owner travels with the token, in the same write. It is what the
+      // login learned before it stored anything, and keeping the two in one
+      // record is what makes them impossible to get out of step.
+      orgId: login.orgId,
+      orgs: login.orgs,
+      owner: login.owner,
+      refreshToken: login.refreshToken,
     };
     await credentials.writeGrant(key, payload);
   };

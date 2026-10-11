@@ -95,6 +95,7 @@ export const DEFAULT_CREDENTIAL_POOL: CredentialPoolConfig = {
 };
 
 export const CONFIG_DEFAULTS = {
+  credentialOrg: undefined as string | undefined,
   credentialPool: DEFAULT_CREDENTIAL_POOL,
   debug: false,
   enrichModels: true,
@@ -114,6 +115,7 @@ export const CONFIG_DEFAULTS = {
 
 /** The raw shape a cordis row's `config` may carry (all optional). */
 export interface PluginConfig {
+  credentialOrg?: string;
   credentialPool?: { enabled?: boolean; go?: string[]; zen?: string[] };
   debug?: boolean;
   debugFile?: string;
@@ -135,6 +137,17 @@ export interface PluginConfig {
 
 /** The fully-defaulted shape the plugin's runtime branches read. */
 export interface ResolvedPluginConfig {
+  /**
+   * The org to send with an account credential, when the credential does not
+   * carry one itself.
+   *
+   * A session token is only half a credential: the gateway gates the free tier
+   * on the org that arrived with it. A login performed by this plugin stores the
+   * org beside the token, so a deployment that logged in needs nothing here —
+   * this is for one whose token came from somewhere else, which is the case
+   * until the login surface exists.
+   */
+  readonly credentialOrg: string | undefined;
   /** The credential pool as configured. Off and empty unless declared. */
   readonly credentialPool: CredentialPoolConfig;
   debug: boolean;
@@ -205,6 +218,7 @@ export const resolveConfig = (
   const gatewayUrls = readStringList(config.gatewayUrls);
 
   return {
+    credentialOrg: readString(config.credentialOrg),
     credentialPool: resolveCredentialPool(config.credentialPool),
     debug: readBoolean(config.debug, CONFIG_DEFAULTS.debug),
     debugFile: readString(config.debugFile),
@@ -350,6 +364,14 @@ export const Config = z.object({
     .default(CONFIG_DEFAULTS.usageBaseURL)
     .volatile()
     .description("OpenCode Go gateway base URL."),
+  credentialOrg: z
+    .string()
+    .volatile()
+    .description(
+      "The org id (wrk_...) to send with an account credential. A login through " +
+        "this plugin stores the org with the token, so this is only for a token " +
+        "that came from elsewhere."
+    ),
   credentialPool: z
     .object({
       enabled: z

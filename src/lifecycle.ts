@@ -28,6 +28,7 @@ import {
 import {
   type CordisContext,
   readCredentialPoolRotator,
+  readCredentialsWriter,
   readEntryOptions,
 } from "./cordis-context.ts";
 import { patchFetch } from "./fetch-patch.ts";
@@ -47,6 +48,7 @@ import {
 import { registerResponsesProvider } from "./responses-provider.ts";
 import { isServableSdk } from "./responses-routes.ts";
 import { createStreamHook } from "./stream-hook.ts";
+import { createTokenStore } from "./token-store.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
 import { GoUsageService } from "./usage.ts";
 
@@ -133,6 +135,36 @@ const installFetchPatch = (
   // the Go plane, neither of which passes through a route of ours. The pool
   // itself lives with the provider mount, so this asks it for a rotator and
   // reports what it saw.
+  /**
+   * The org each plane's credential belongs to, read once and kept.
+   *
+   * A session token is only half a credential — the gateway gates the free tier
+   * on the org that arrived with it — so the request path needs this on every
+   * call, and a store read per request would be a file read per request. The
+   * cache is warmed at mount and refreshed when a credential failure suggests it
+   * is stale; `undefined` is a real answer, because a plane whose credential is
+   * a plain key has no org and must not carry a header for one.
+   */
+  const orgByPlane = new Map<string, string | undefined>();
+  const warmOrg = async (plane: string): Promise<void> => {
+    try {
+      const store = createTokenStore({
+        credentials: readCredentialsWriter(ctx),
+        plane,
+        scope: name,
+      });
+      const login = await store?.read();
+      orgByPlane.set(plane, login?.orgId);
+    } catch {
+      // A store that cannot be read leaves the plane without an org rather than
+      // failing a request: a key deployment is exactly this case, and it is the
+      // default.
+      orgByPlane.set(plane, undefined);
+    }
+  };
+  const readAccountOrg = (plane: string): string | undefined =>
+    orgByPlane.get(plane);
+
   const rotateAfterFailure = async (
     plane: string,
     status: number
@@ -144,9 +176,22 @@ const installFetchPatch = (
     await rotate(plane, status);
   };
 
-  const patched = patchFetch(originalFetch, als, config, (plane, status) => {
-    void rotateAfterFailure(plane, status);
+  const patched = patchFetch(originalFetch, als, config, {
+    onCredentialFailure: (plane, status) => {
+      void rotateAfterFailure(plane, status);
+    },
+    // The org is part of the credential, not a setting: it comes from the stored
+    // login for the plane the request is bound for, and a plane whose credential
+    // is a plain key has none.
+    resolveOrg: (plane) => readAccountOrg(plane) ?? config.credentialOrg,
   });
+
+  // Warm the org cache before the first request can need it. Best-effort and
+  // deliberately not awaited: a store that cannot be read leaves a plane without
+  // an org, which is the key deployment's normal state.
+  for (const plane of ["opencode", "opencode-go"]) {
+    void warmOrg(plane);
+  }
 
   ctx.effect?.(() => {
     globalThis.fetch = patched;

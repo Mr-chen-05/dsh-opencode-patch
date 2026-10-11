@@ -44,6 +44,13 @@ export const CONFIG_ONLY_FIELDS: readonly {
   reason: string;
 }[] = [
   {
+    field: "credentialOrg",
+    reason:
+      "the org an account credential belongs to; a login through this plugin " +
+      "stores it with the token, so the row is for a token that came from " +
+      "elsewhere and has no UI to belong to",
+  },
+  {
     field: "credentialPool",
     reason:
       "several credentials and their rotation; a card for it comes with the " +

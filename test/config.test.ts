@@ -174,6 +174,7 @@ describe("Config schema", () => {
     // oxlint-disable-next-line unicorn/no-array-sort -- `Object.keys` returns a fresh array, so in-place sort mutates nothing shared.
     expect(Object.keys(validated).sort()).toEqual(
       [
+        "credentialOrg",
         "credentialPool",
         "debug",
         "enrichModels",
@@ -196,6 +197,7 @@ describe("Config schema", () => {
     expect(resolveConfig(validated as PluginConfig)).toMatchObject({
       // The pool's default is the whole contract: with no configuration at all,
       // nothing about a credential pool runs.
+      credentialOrg: undefined,
       credentialPool: { enabled: false, go: [], zen: [] },
       debug: false,
       enrichModels: true,
