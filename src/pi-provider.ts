@@ -84,6 +84,28 @@ export const protocolFor = (spec: CatalogModelSpec): string | undefined =>
     ? "openai-completions"
     : GATEWAY_PROTOCOL_FOR_SDK[spec.provider_npm];
 
+/** Whether a string names a plane this table carries. */
+const isPlane = (value: string): value is Plane =>
+  value === "opencode" || value === "opencode-go";
+
+/**
+ * The base URL one protocol of one plane is served from.
+ *
+ * The table is keyed by {@link Plane} so a missing plane is a type error where
+ * the table is written. Callers walk a route table whose key is a plain string,
+ * so they come through here: a plane the table does not carry has no base, and
+ * saying so is better than indexing past the end of a record.
+ *
+ * @param plane - the gateway plane.
+ * @param protocol - the protocol the request speaks.
+ * @returns the base URL, or undefined when the table does not carry that plane.
+ */
+export const baseForProtocol = (
+  plane: string,
+  protocol: string
+): string | undefined =>
+  isPlane(plane) ? BASE_FOR_PROTOCOL[plane]?.[protocol] : undefined;
+
 /**
  * The pi model object for one catalogued model.
  *

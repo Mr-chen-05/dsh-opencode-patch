@@ -46,6 +46,7 @@ import {
   getLiveGoCatalog,
   getLiveZenCatalog,
 } from "./models-catalog.ts";
+import { baseForProtocol } from "./pi-provider.ts";
 import {
   GOOGLE_INTERNAL_ROUTE,
   GOOGLE_SDK,
@@ -539,7 +540,17 @@ export const registerResponsesProvider = async (
           plane,
           protocol,
           route,
-          baseURL: entry.baseURL,
+          // Per protocol, NOT the plane's base. pi builds each protocol's
+          // request differently: the OpenAI ones append `/chat/completions` or
+          // `/responses` to a base that already carries `/v1`, while the
+          // Anthropic one hands the base straight to the Anthropic SDK, which
+          // appends `/v1/messages` itself. Mounting the Anthropic route on the
+          // plane's base therefore asks for `/v1/v1/messages`, which the gateway
+          // answers with 404 — measured, along with the base that works.
+          // The plane's own base stays the fallback for a protocol this table
+          // does not carry, so an unknown protocol degrades to today's
+          // behaviour rather than to an undefined URL.
+          baseURL: baseForProtocol(plane, protocol) ?? entry.baseURL,
         }))
   );
   if (wanted.length === 0) {

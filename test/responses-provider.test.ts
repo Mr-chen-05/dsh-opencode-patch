@@ -36,6 +36,7 @@ import {
   SELF_MOUNTED_ROUTES,
 } from "../src/index.ts";
 import type { CordisContext } from "../src/index.ts";
+import { baseForProtocol } from "../src/pi-provider.ts";
 
 const MUSE = "muse-spark-1.3-contributor-free";
 
@@ -733,6 +734,48 @@ describe("responses-provider: the mount survives the host's own instance", () =>
     }
   });
 
+  it("mounts each route on its PROTOCOL's base, not the plane's", async () => {
+    // The bug this guards, measured on the gateway: pi hands an Anthropic
+    // route's base straight to the Anthropic SDK, which appends `/v1/messages`
+    // itself, so the plane's `/v1` base asks for `/v1/v1/messages` — a 404.
+    // The OpenAI protocols append their own path to a base that already has
+    // `/v1`, so those keep it. One base for every route is wrong for at least
+    // one protocol.
+    const spy = vi.fn();
+    const host = createHost({
+      onPlugin: (config) => {
+        spy(config);
+      },
+    });
+
+    await registerResponsesProvider(host.ctx);
+
+    const [config] = spy.mock.calls[0] ?? [];
+    const { providers } = (config ?? {}) as {
+      providers: Record<string, { api: string; baseURL: string }>;
+    };
+
+    for (const [route, profile] of Object.entries(providers)) {
+      expect(
+        profile.baseURL,
+        `${route} (${profile.api}) is mounted on the wrong base`
+      ).toBe(baseForProtocol(routePlaneOf(route), profile.api));
+      // And the positive control: the bases are not all the same string, which
+      // is what makes this assert something rather than restate the mount.
+      expect(profile.baseURL.length).toBeGreaterThan(0);
+    }
+    expect(
+      new Set(Object.values(providers).map((profile) => profile.baseURL)).size
+    ).toBeGreaterThan(1);
+    // Spot-check the two that differ, in the gateway's own terms.
+    expect(providers["opencode-anthropic"]?.baseURL).toBe(
+      "https://opencode.ai/zen"
+    );
+    expect(providers["opencode-responses"]?.baseURL).toBe(
+      "https://opencode.ai/zen/v1"
+    );
+  });
+
   it("releases the mount on dispose", async () => {
     const host = createHost();
     const stop = await registerResponsesProvider(host.ctx);
@@ -757,6 +800,15 @@ describe("responses-provider: the mount survives the host's own instance", () =>
  * stand-in rejects it with the host's own error. Without these, the passing
  * mount above could be passing because the stand-in models nothing.
  */
+/**
+ * Which plane a mounted route serves, read back from the route table rather
+ * than guessed from the route's name.
+ */
+const routePlaneOf = (route: string): string =>
+  Object.entries(ROUTE_FOR_PLANE_PROTOCOL).find(([, entry]) =>
+    Object.values(entry.routes).includes(route)
+  )?.[0] ?? "";
+
 describe("responses-provider: the stand-in refuses the shapes that used to be passed", () => {
   const rawConfig = () => ({
     providers: {
