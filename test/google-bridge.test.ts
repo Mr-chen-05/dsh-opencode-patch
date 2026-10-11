@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 
 import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import semver from "semver";
 import { describe, expect, it } from "vitest";
 
@@ -35,7 +36,7 @@ const geminiSpecs = OPENCODE_ZEN_CATALOG.filter(
 );
 
 /** One model the provider serves, as this file reads it back. */
-interface ModelLike {
+interface ModelLike extends Record<string, unknown> {
   api: string;
   baseUrl: string;
   id: string;
@@ -103,6 +104,51 @@ describe("google-bridge · the provider it builds", () => {
       // resolution sets it — not the plane the model was catalogued on.
       expect(model.provider).toBe(GOOGLE_INTERNAL_ROUTE);
     }
+  });
+
+  it("keeps every field the installed catalog knows about the model", () => {
+    // The regression this guards: building the model object field by field
+    // drops everything pi knows that this module does not model — the
+    // compatibility switches, the reasoning flag, the thinking-level map, the
+    // input limits — and each of those changes the request silently. The
+    // wrapper's own materialization spreads the catalog entry for exactly this
+    // reason; the claim here is that the bridge does too.
+    const pi = builtinProviders().find(
+      (provider) => provider.id === "opencode"
+    );
+    expect(pi).toBeDefined();
+    const installed = pi?.getModels() ?? [];
+    const ours = providerAs(geminiSpecs).getModels();
+    // The fields this module deliberately sets; everything else must come
+    // through untouched from the installed entry.
+    const oursToSet = new Set([
+      "api",
+      "baseUrl",
+      "contextWindow",
+      "cost",
+      "id",
+      "input",
+      "maxTokens",
+      "name",
+      "provider",
+    ]);
+    let compared = 0;
+    for (const model of ours) {
+      const entry = installed.find((candidate) => candidate.id === model.id);
+      if (entry === undefined) {
+        // pi does not ship this id, so there was nothing to inherit.
+        continue;
+      }
+      for (const [key, value] of Object.entries(entry)) {
+        if (oursToSet.has(key)) {
+          continue;
+        }
+        expect(model[key], `${model.id} lost ${key}`).toEqual(value);
+        compared += 1;
+      }
+    }
+    // A vacuous pass would compare nothing; say so instead.
+    expect(compared).toBeGreaterThan(0);
   });
 
   it("sends each model to the gateway with the resolved key", async () => {

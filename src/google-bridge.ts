@@ -45,11 +45,34 @@
  */
 
 import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy";
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 
 import type { CatalogModelSpec } from "./catalog-data.ts";
 import { readCredentialsResolver } from "./cordis-context.ts";
-import { piModelFor } from "./pi-provider.ts";
+import { type Plane, piModelFor } from "./pi-provider.ts";
 import { GOOGLE_INTERNAL_ROUTE } from "./responses-routes.ts";
+
+/**
+ * pi's installed catalog entry for one model on one plane, or undefined when
+ * pi does not know it.
+ *
+ * The bridge builds its models by hand rather than reusing a catalog route, so
+ * this is where the entry the installed provider already carries comes back:
+ * the compatibility switches, the `reasoning` flag, the thinking-level map and
+ * the input limits are all things pi knows and this module does not, and a model
+ * built without them would serve requests with those behaviours silently off.
+ * Spreading that entry is what the wrapper's own materialization does.
+ *
+ * @param plane - the gateway plane, which is also pi's provider id.
+ * @param id - the model id.
+ * @returns the installed entry, or undefined when the catalog lacks it.
+ */
+const installedEntryFor = (plane: Plane, id: string): object | undefined =>
+  // The plane's whole installed catalog, searched for the id, rather than a
+  // lookup by literal-typed key: the ids looked up here come from our own
+  // catalog, which is ahead of the installed one, and half of them are not in
+  // it at all. A miss is simply no entry to inherit.
+  getBuiltinModels(plane).find((model) => model.id === id);
 
 /**
  * The stream-idle interval a route defaults to, read from the wrapper's own
@@ -162,7 +185,12 @@ export const googleProviderFor = (
 ): Record<string, unknown> => {
   const api = googleGenerativeAIApi();
   const models = specs.map((spec) => ({
-    ...piModelFor("opencode", spec, "google-generative-ai"),
+    ...piModelFor(
+      "opencode",
+      spec,
+      "google-generative-ai",
+      installedEntryFor("opencode", spec.id)
+    ),
     provider: GOOGLE_INTERNAL_ROUTE,
   }));
   return {

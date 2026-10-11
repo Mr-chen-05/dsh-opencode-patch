@@ -92,16 +92,32 @@ export const protocolFor = (spec: CatalogModelSpec): string | undefined =>
  * vocabulary: camelCase where the catalog is snake_case, and its rates are per
  * million tokens, which is what the catalog already carries.
  *
+ * **The installed catalog entry is the floor, never the whole object.** Building
+ * these models field by field drops everything pi knows that this module does
+ * not model — the compatibility switches a Claude or Grok request needs, the
+ * `reasoning` flag, the `thinkingLevelMap` that maps a thinking level onto the
+ * wire's own spelling, the `inputLimits` that bound an image. The wrapper's own
+ * model materialization spreads the catalog entry for the same reason, and says
+ * so: enumerating would silently drop every field the package does not model.
+ *
+ * So the entry is spread first and only then overlaid, which also makes the
+ * precedence deliberate: our catalog is fresher than the installed one for the
+ * fields we set, and the installed one is the only source for the fields we do
+ * not know about.
+ *
  * @param plane - the gateway plane this model is served on.
  * @param spec - the catalogued model.
  * @param protocol - the protocol it speaks, from {@link protocolFor}.
+ * @param base - pi's installed catalog entry for this id, when it has one.
  * @returns the model object pi's provider dispatches on.
  */
 export const piModelFor = (
   plane: Plane,
   spec: CatalogModelSpec,
-  protocol: string
+  protocol: string,
+  base?: object
 ) => ({
+  ...base,
   api: protocol,
   baseUrl: BASE_FOR_PROTOCOL[plane]?.[protocol],
   contextWindow: spec.context_window,
