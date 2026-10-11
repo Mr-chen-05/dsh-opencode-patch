@@ -67,6 +67,17 @@ The pool owns a reference of its own instead:
 
 What this does not need: a takeover, a record another plugin owns, or any write to a reference the deployment declared. It needs one fresh reference name and the seam's own write path.
 
+## The opt-in assertion, measured
+
+The load-bearing claim in this file is that pointing a route at the pool's reference is the whole opt-in — the wrapper resolves whatever reference the profile names, per operation, so a rotation reaches it without a restart. Two requests to the same endpoint, differing only in the credential, answer differently in a way that confirms it:
+
+| Credential | Answer |
+| :-- | :-- |
+| the deployment's real key | `403 Model access is disabled` — accepted; that model is not enabled for the account |
+| a made-up value in the pool's position | `401 AuthError: Invalid API key.` |
+
+So the gateway validates whatever sits in the slot, which makes rotation safe by construction rather than by promise: a key the pool cycles in that the gateway refuses answers `401`, and that is a credential to mark failed and skip, not a routing fault to debug. The pool's failure-skip is therefore load-bearing on the first request, not a nicety.
+
 ## Verified, not assumed
 
 Run against the real `dsh-credentials-local` provider on a temporary document, so the measurement never touched a real `~/.dsh/.credentials.yaml`:
