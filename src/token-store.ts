@@ -69,19 +69,24 @@ export interface TokenStore {
   /** Remove the stored login, if any. Removing an absent record is a no-op. */
   readonly clear: () => Promise<void>;
   /**
-   * Store a pair only when the stored one is missing or close to expiry.
+   * Whether the stored login can still be used, and the tokens when it can.
    *
-   * This is what makes a refresh SAFE to call on every operation: the write
-   * happens under the seam's lock and is a no-op when another process refreshed
-   * first, so two processes racing cannot lose the token the other obtained.
+   * A discriminated result rather than a flag beside a value, because the two
+   * facts are not independent: a token is present exactly when `stale` is
+   * false, and a caller reading them separately has to re-derive that. `stale`
+   * also covers having no login at all, which is the state a refresh cannot
+   * fix.
    *
    * @param withinMs - treat a token expiring within this window as stale.
-   * @returns whether a refresh is needed, and the token to use meanwhile.
+   * @returns `current` with a usable token, or `stale` when one must be
+   * refreshed first.
    */
-  readonly needsRefresh: (withinMs?: number) => Promise<{
-    readonly fresh: ConsoleTokens | undefined;
-    readonly stale: boolean;
-  }>;
+  readonly needsRefresh: (
+    withinMs?: number
+  ) => Promise<
+    | { readonly kind: "current"; readonly token: ConsoleTokens }
+    | { readonly kind: "stale" }
+  >;
 }
 
 /** What {@link createTokenStore} needs. */
@@ -164,15 +169,14 @@ export const createTokenStore = (
     needsRefresh: async (withinMs = 60_000) => {
       const current = await read();
       if (current === undefined) {
-        return { fresh: undefined, stale: true };
+        return { kind: "stale" };
       }
       // Expiry arrives as a REMAINING duration, so it has to be compared
       // against a remaining window rather than against an instant.
       const remainingMs = current.expiresInSeconds * 1000;
-      return {
-        fresh: remainingMs <= withinMs ? undefined : current,
-        stale: remainingMs <= withinMs,
-      };
+      return remainingMs <= withinMs
+        ? { kind: "stale" }
+        : { kind: "current", token: current };
     },
     read,
     write,

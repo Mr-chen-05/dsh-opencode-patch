@@ -307,9 +307,10 @@ describe("token-store: deciding whether a refresh is needed", () => {
       expiresInSeconds: 3600,
       refreshToken: "r",
     });
-    const check = await store?.needsRefresh();
-    expect(check?.stale).toBe(false);
-    expect(check?.fresh?.accessToken).toBe("a");
+    await expect(store?.needsRefresh()).resolves.toEqual({
+      kind: "current",
+      token: expect.objectContaining({ accessToken: "a" }),
+    });
   });
 
   it("calls a token close to expiry stale, so a refresh can start in time", async () => {
@@ -325,10 +326,11 @@ describe("token-store: deciding whether a refresh is needed", () => {
       expiresInSeconds: 30,
       refreshToken: "r",
     });
-    const check = await store?.needsRefresh(60_000);
-    expect(check?.stale).toBe(true);
-    // Nothing fresh to hand out: a token about to expire is not a token to use.
-    expect(check?.fresh).toBeUndefined();
+    // A discriminated `stale`, with no token attached: a token about to expire
+    // is not a token to hand out, and one attached would invite its use.
+    await expect(store?.needsRefresh(60_000)).resolves.toEqual({
+      kind: "stale",
+    });
   });
 
   it("calls an absent login stale, because there is nothing to refresh", async () => {
@@ -338,10 +340,7 @@ describe("token-store: deciding whether a refresh is needed", () => {
       plane: "opencode",
       scope: "dsh-opencode-patch",
     });
-    await expect(store?.needsRefresh()).resolves.toEqual({
-      fresh: undefined,
-      stale: true,
-    });
+    await expect(store?.needsRefresh()).resolves.toEqual({ kind: "stale" });
   });
 
   it("keeps the two planes apart", async () => {
