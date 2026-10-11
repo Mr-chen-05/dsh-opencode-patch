@@ -198,6 +198,21 @@ export interface CredentialsWriter {
   readonly set: (ref: string, value: string) => Promise<void>;
   /** Remove one reference; removing an absent one is a no-op. */
   readonly unset: (ref: string) => Promise<void>;
+  /** The stored record under one key, with its value, or undefined. */
+  readonly readRecord: (
+    key: string
+  ) => Promise<{ kind?: string; payload?: unknown } | undefined>;
+  /**
+   * Store one grant payload atomically.
+   *
+   * The seam's `modifyRecord` is the only write path for a record, and this
+   * hands it a mutation that replaces the payload outright — which is what a
+   * rotating refresh token needs: the write must not be able to lose a token
+   * another process obtained in between a read and a write.
+   */
+  readonly writeGrant: (key: string, payload: unknown) => Promise<void>;
+  /** Remove one record; removing an absent one is a no-op. */
+  readonly deleteRecord: (key: string) => Promise<void>;
 }
 
 /**
@@ -228,11 +243,14 @@ export const readCredentialsWriter = (
     !isRecord(host) ||
     !isFunctionLike(host.resolve) ||
     !isFunctionLike(host.set) ||
-    !isFunctionLike(host.unset)
+    !isFunctionLike(host.unset) ||
+    !isFunctionLike(host.readRecord) ||
+    !isFunctionLike(host.modifyRecord) ||
+    !isFunctionLike(host.deleteRecord)
   ) {
     return undefined;
   }
-  const { resolve, set, unset } = host;
+  const { deleteRecord, modifyRecord, readRecord, resolve, set, unset } = host;
   return {
     resolve: async (ref: string): Promise<{ value?: string } | undefined> => {
       const hit: unknown = await Reflect.apply(resolve, host, [ref]);
@@ -247,6 +265,31 @@ export const readCredentialsWriter = (
     },
     unset: async (ref: string): Promise<void> => {
       await Reflect.apply(unset, host, [ref]);
+    },
+    readRecord: async (
+      key: string
+    ): Promise<{ kind?: string; payload?: unknown } | undefined> => {
+      const record: unknown = await Reflect.apply(readRecord, host, [key]);
+      if (!isRecord(record)) {
+        return undefined;
+      }
+      const { kind, payload } = record;
+      return {
+        ...(typeof kind === "string" ? { kind } : {}),
+        ...(payload === undefined ? {} : { payload }),
+      };
+    },
+    writeGrant: async (key: string, payload: unknown): Promise<void> => {
+      // One mutation, under the seam's own lock: the payload is replaced whole,
+      // so an access token and the refresh token that goes with it can never
+      // land as two writes a reader could interleave with.
+      await Reflect.apply(modifyRecord, host, [
+        key,
+        () => Promise.resolve({ kind: "grant", payload }),
+      ]);
+    },
+    deleteRecord: async (key: string): Promise<void> => {
+      await Reflect.apply(deleteRecord, host, [key]);
     },
   };
 };

@@ -793,6 +793,7 @@ describe("responses-provider: the mount survives the host's own instance", () =>
     process.env.POOL_TWO = "pool-two-key";
     process.env.GO_POOL_ONE = "go-pool-key";
     const written = new Map<string, string>();
+    const records = new Map<string, unknown>();
     const host = createHost();
     host.registerService?.("credentials", {
       resolve: async (ref: string) => {
@@ -804,6 +805,26 @@ describe("responses-provider: the mount survives the host's own instance", () =>
       },
       unset: async (ref: string) => {
         written.delete(ref);
+      },
+      // The record half. A pool never touches a record, but the accessor
+      // requires all six methods, and a stub that answered nothing where the
+      // seam stores a grant would be a stub lying about storage.
+      deleteRecord: async (key: string) => {
+        records.delete(key);
+      },
+      modifyRecord: async (
+        key: string,
+        mutate: (current?: unknown) => Promise<unknown>
+      ) => {
+        const next = await mutate(records.get(key));
+        if (next !== undefined) {
+          records.set(key, next);
+        }
+        return next;
+      },
+      readRecord: async (key: string) => {
+        const payload = records.get(key);
+        return payload === undefined ? undefined : { kind: "grant", payload };
       },
     });
 
@@ -838,6 +859,7 @@ describe("responses-provider: the mount survives the host's own instance", () =>
 
   it("writes nothing when the pool is off, which is the default", async () => {
     const written = new Map<string, string>();
+    const records = new Map<string, unknown>();
     const host = createHost();
     host.registerService?.("credentials", {
       resolve: async (ref: string) => {
@@ -849,6 +871,26 @@ describe("responses-provider: the mount survives the host's own instance", () =>
       },
       unset: async (ref: string) => {
         written.delete(ref);
+      },
+      // The record half. A pool never touches a record, but the accessor
+      // requires all six methods, and a stub that answered nothing where the
+      // seam stores a grant would be a stub lying about storage.
+      deleteRecord: async (key: string) => {
+        records.delete(key);
+      },
+      modifyRecord: async (
+        key: string,
+        mutate: (current?: unknown) => Promise<unknown>
+      ) => {
+        const next = await mutate(records.get(key));
+        if (next !== undefined) {
+          records.set(key, next);
+        }
+        return next;
+      },
+      readRecord: async (key: string) => {
+        const payload = records.get(key);
+        return payload === undefined ? undefined : { kind: "grant", payload };
       },
     });
 
@@ -872,6 +914,7 @@ describe("responses-provider: the mount survives the host's own instance", () =>
     // A seam that refuses the write — the shadowing case — must not undo a
     // mount that already succeeded, and must say what happened.
     process.env.POOL_ONE = "pool-one-key";
+    const records = new Map<string, unknown>();
     const host = createHost();
     host.registerService?.("credentials", {
       resolve: async (ref: string) => {
@@ -882,6 +925,26 @@ describe("responses-provider: the mount survives the host's own instance", () =>
         throw new Error("supplied read-only by the launching environment");
       },
       unset: async () => {},
+      // The record half. A pool never touches a record, but the accessor
+      // requires all six methods, and a stub that answered nothing where the
+      // seam stores a grant would be a stub lying about storage.
+      deleteRecord: async (key: string) => {
+        records.delete(key);
+      },
+      modifyRecord: async (
+        key: string,
+        mutate: (current?: unknown) => Promise<unknown>
+      ) => {
+        const next = await mutate(records.get(key));
+        if (next !== undefined) {
+          records.set(key, next);
+        }
+        return next;
+      },
+      readRecord: async (key: string) => {
+        const payload = records.get(key);
+        return payload === undefined ? undefined : { kind: "grant", payload };
+      },
     });
 
     try {

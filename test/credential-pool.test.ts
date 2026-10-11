@@ -24,25 +24,45 @@ const resolverFor = (values: Record<string, string>) =>
     return value === undefined ? undefined : { value };
   });
 
+/**
+ * A credential seam over two maps: references on one side, records on the
+ * other, because the seam keeps them in different address spaces.
+ *
+ * The record half is here even though no pool case uses it — the accessor's
+ * type requires all six, and a stub that quietly provided three would type-error
+ * rather than test anything.
+ */
 const writerFor = () => {
-  const store = new Map<string, string>();
+  const refs = new Map<string, string>();
+  const records = new Map<string, unknown>();
   const set = vi.fn(async (ref: string, value: string) => {
-    store.set(ref, value);
+    refs.set(ref, value);
   });
   const unset = vi.fn(async (ref: string) => {
-    store.delete(ref);
+    refs.delete(ref);
   });
   return {
     credentials: {
+      deleteRecord: async (key: string) => {
+        records.delete(key);
+      },
+      readRecord: async (key: string) => {
+        const payload = records.get(key);
+        return payload === undefined ? undefined : { kind: "grant", payload };
+      },
       resolve: async (ref: string) => {
-        const value = store.get(ref);
+        const value = refs.get(ref);
         return value === undefined ? undefined : { value };
       },
       set,
       unset,
+      writeGrant: async (key: string, payload: unknown) => {
+        records.set(key, payload);
+      },
     },
+    records,
+    refs,
     set,
-    store,
     unset,
   };
 };
@@ -200,7 +220,7 @@ describe("credential-pool: rotation among the entries a plane declared", () => {
 
 describe("credential-pool: publishing through the reference it owns", () => {
   it("writes the active key under the pool's own reference", async () => {
-    const { credentials, set, store } = writerFor();
+    const { credentials, refs, set } = writerFor();
     const pool = poolFor({ enabled: true, go: [], zen: ["A"] }, { A: "key-a" });
 
     await expect(publishPoolKey(pool, credentials)).resolves.toEqual({
@@ -211,7 +231,7 @@ describe("credential-pool: publishing through the reference it owns", () => {
     await expect(credentials.resolve("OPENCODE_POOL_KEY")).resolves.toEqual({
       value: "key-a",
     });
-    expect(store.get("OPENCODE_POOL_KEY")).toBe("key-a");
+    expect(refs.get("OPENCODE_POOL_KEY")).toBe("key-a");
   });
 
   it("never writes a reference the deployment declared", async () => {
@@ -243,6 +263,9 @@ describe("credential-pool: publishing through the reference it owns", () => {
       resolve: vi.fn(),
       set: refuse,
       unset: async () => {},
+      deleteRecord: vi.fn(),
+      readRecord: vi.fn(),
+      writeGrant: vi.fn(),
     });
     expect(result.ok).toBe(false);
     expect(result.reason).toContain("supplied read-only");

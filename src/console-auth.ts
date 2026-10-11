@@ -65,11 +65,25 @@ export interface DeviceAuthorization {
 /** The pair the refresh grant rotates, and the only thing worth storing. */
 export interface ConsoleTokens {
   readonly accessToken: string;
-  readonly refreshToken: string | undefined;
+  /**
+   * The refresh token, when the Console issued one.
+   *
+   * Optional because a grant can come without it — and a caller that stores an
+   * absent refresh token must not be able to present it, which is why this is
+   * undefined rather than an empty string.
+   */
+  readonly refreshToken?: string;
   /** Seconds until the access token expires. */
   readonly expiresInSeconds: number;
-  /** The account this grant belongs to, when the endpoint says. */
-  readonly account: string | undefined;
+  /**
+   * The account this grant belongs to, when the endpoint said.
+   *
+   * Optional because the Console does not always say: v2's grant carries the
+   * provider credential and its org, while a token response that names neither
+   * is still a usable login. A required field would have callers writing
+   * 'unknown' into a value the vendor never sent.
+   */
+  readonly account?: string;
 }
 
 /** Why a poll did not produce a token yet, or ever will. */
