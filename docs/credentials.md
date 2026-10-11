@@ -20,6 +20,22 @@ Zen credentials serve Zen calls, Go credentials serve Go calls, and never the ot
 | OAuth v2 | `auth login opencode` — the provider credential path   | yes     |
 | OAuth v1 | `console login` — the account path, with org switching | yes     |
 
+## An OAuth token is not a credential the gateway serves (measured)
+
+The login flows produce an access token. Whether that token can authenticate a MODEL call is a separate question, and the gateway answers it plainly. Three requests to `/chat/completions` on the Zen base, differing only in the credential:
+
+| Credential sent                  | Answer                            |
+| :------------------------------- | :-------------------------------- |
+| none                             | `401 AuthError: Missing API key.` |
+| `Bearer not-a-real-token-abc123` | `401 AuthError: Invalid API key.` |
+| `Bearer <a JWT-shaped string>`   | `401 AuthError: Invalid API key.` |
+
+The last two are indistinguishable. The Bearer slot on a model endpoint reads an API key and nothing else, so an OAuth access token presented there is an invalid API key — which is a different credential from the one a login produces.
+
+So the pool's entries are API keys, and a login is not one of them. What a login IS good for is the Console's own API — the per-account catalog at `/api/config`, the account and organization context at `/api/user` and `/api/orgs` — and a deployment that wants a login's models needs the Console to exchange it for a key, which is the vendor's flow, not this plugin's.
+
+Recording this because the alternative is building a rotation that silently sends an access token to an endpoint that answers "Invalid API key" for it, and debugging that as a routing fault.
+
 ## What the logins are (measured from OpenCode's own source)
 
 Both are device flows against the same Console, differing in what they store and what they unlock:
