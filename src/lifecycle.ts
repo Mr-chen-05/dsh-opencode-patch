@@ -33,7 +33,7 @@ import {
 } from "./cordis-context.ts";
 import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
-import { isFetchFunction } from "./guards.ts";
+import { isFetchFunction, isFunctionLike, isRecord } from "./guards.ts";
 import { LEGACY_NAME, LEGACY_PKG, name } from "./identity.ts";
 import {
   type CatalogModelSpec,
@@ -311,6 +311,21 @@ const installModelDiscovery = (
  * @param ctx - the Cordis host context.
  * @param rawConfig - the row config, if any.
  */
+const withCredentials = (
+  base: CordisContext,
+  service: unknown
+): CordisContext => {
+  if (service === undefined) {
+    return base;
+  }
+  return Object.create(base, {
+    get: {
+      value: (serviceName: string): unknown =>
+        serviceName === "credentials" ? service : base.get?.(serviceName),
+    },
+  }) as CordisContext;
+};
+
 export const apply = (
   ctx: CordisContext,
   rawConfig: PluginConfig = {}
@@ -326,16 +341,54 @@ export const apply = (
   } catch {
     // A missing /tmp write must not stop the plugin.
   }
+
+  /**
+   * The host context, with the credential service made reachable.
+   *
+   * The plugin declares `inject = ["llm"]` and reads credentials optionally, and
+   * an optional service is NOT reachable by reading it off the context: cordis
+   * hands a plugin only what it declared, so `ctx.get("credentials")` answers
+   * undefined and every credential lookup silently degrades to the environment.
+   * The wrapper does the same thing for its own optional services —
+   * `ctx.inject(["settings"], child => …)` — and this is that pattern for the one
+   * service this plugin needs but cannot require.
+   *
+   * The override goes on a prototype-preserving copy rather than a spread: a cordis
+   * context carries its behaviour on the prototype, and copying own properties
+   * would drop every method the rest of this module calls.
+   *
+   * @param ctx - the host context.
+   * @param service - the captured credential service, when one was mounted.
+   * @returns a context that answers `get("credentials")` with it.
+   */
+
   const config = resolveConfig(rawConfig);
   const als = new AsyncLocalStorage<ActiveTurnState>();
 
-  logRenameNotice(ctx);
-  installUsageService(ctx, config);
+  // The credential service is optional, so it is captured rather than declared.
+  // Until this exists the plugin read it off the context, where cordis answers
+  // undefined for anything not in `inject` — which is why the Go meter showed
+  // no data while its endpoint answered 200 for the same key.
+  let credentialService: unknown;
+  try {
+    ctx.inject?.(["credentials"], (scope: unknown) => {
+      credentialService =
+        isRecord(scope) && isFunctionLike(scope.get)
+          ? Reflect.apply(scope.get, scope, ["credentials"])
+          : undefined;
+    });
+  } catch {
+    // A context without `inject` (a test double) simply has no optional service.
+  }
+  const host = withCredentials(ctx, credentialService);
 
-  if (!installFetchPatch(ctx, config, als)) {
+  logRenameNotice(host);
+  installUsageService(host, config);
+
+  if (!installFetchPatch(host, config, als)) {
     return;
   }
 
-  installStreamHook(ctx, config, als);
-  installModelDiscovery(ctx, config);
+  installStreamHook(host, config, als);
+  installModelDiscovery(host, config);
 };
