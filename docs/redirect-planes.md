@@ -181,4 +181,17 @@ What the bridge is, precisely:
 - **The route is `opencode-google`, and it stays internal.** Not `google` — that name belongs to a deployment that may want the real Google AI Studio, and taking it would be the hijack this design refuses. The picker lists the models under the plane route; the stream hook dispatches the call, exactly as it does for the protocol routes.
 - **The credential is the deployment's own.** The inherited `apiKeyEnv` reference, resolved through the credentials service with the launch environment as fallback, and a miss that fails loud — handing pi an `undefined` for a named reference would let it bill whatever ambient key it finds first. The pool in `credentials.md` is not wired here: the bridge is zero-configuration, and the pool must stay opt-in.
 
+### What is verified, and in what composition
+
+Recorded because "unit tested" and "runs" are different claims, and this plugin has been wrong about the second one before — the provider declared only an auth name, no test noticed, and every request would have failed with `apiKey.resolve is not a function` before a socket opened.
+
+What is now established:
+
+- **The built bundle loads under plain Node**, resolving its one external pi import, with the bundle gate confirming that import stays external and no local path reaches the artifact.
+- **The bridge runs through the REAL `PiAiAdapter` class** — the wrapper's own, reached through the loader — with pi's own Google implementation: a stream through it reaches `…/zen/v1/models/gemini-3.8-flash:streamGenerateContent?alt=sse` carrying the resolved credential on `x-goog-api-key`, and a body with `role: user` and a `thinkingConfig` whose level comes from the inherited `thinkingLevelMap`.
+- **The live endpoint agrees**: a probe with a correct Gemini body answers `200` with real SSE, and the same model on the completions endpoint answers `400 ModelProtocolUnsupported`.
+- **A service with the host's own registration semantics accepts the bridge** — the same duplicate check, the same handle shape — and streams through it to the URL above.
+
+What is NOT established: a live DSH host loading this build. The host is restarted to pick up a plugin, and this session runs inside the host it would restart, so that check waits for a window where restarting is free. Everything short of it is measured.
+
 The same construction would serve `@ai-sdk/mistral`. pi implements `mistral-conversations`; a bridge on this pattern is one lazy import and one row in the tables away. It is not built, because that dialect at the gateway is unmeasured — an earlier probe could not even observe the request it produces — and no entitled key exists to measure it against. The decision lives in `UNSERVED_SDKS` with a pointer here, which is the record of how it would be served the day that changes.

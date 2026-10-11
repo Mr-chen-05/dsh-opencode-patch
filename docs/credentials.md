@@ -94,7 +94,9 @@ Built, in the order this file sets out:
 
 Not built yet:
 
-- **The surface that starts a flow.** The client starts a login, the store keeps it and the session refreshes it; what is missing is the surface a human uses. A device flow is a code, a URL and a wait, and the host's settings card is the place for it — which means the card needs host methods to call, and the client bundle is not where a device flow belongs on its own.
+- **The surface that starts a flow.** The client starts a login, the store keeps it, the session refreshes it; what is missing is the surface a human uses. A device flow is a code, a URL and a wait, so it belongs in the host's settings card over a Typert remote — the same path `usage.ts` takes for the meter, where the host holds the credential and the client only renders.
+
+  It is deliberately NOT written yet. The remote contract and its codec are testable offline and are the mechanical half; the half that matters — a human seeing a code, opening a URL, and the card returning to "signed in" — is only provable in a browser with a real account, and a card written to satisfy the type checker alone would be a claim nothing checks. The pieces below it are built and tested, so the card is assembly, not discovery.
 
 - **The settings card.** The pool's section is configuration-only, and says why: a list of credential references is not something to type into a settings form. The card that would paste a key into the store belongs with the login surface, since both are "put a credential here" and neither is a row of knobs.
 
