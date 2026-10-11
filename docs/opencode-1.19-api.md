@@ -92,7 +92,25 @@ So the free tier's gate is the **session token**, and the org id alone does not 
 
 The consequence is the design: **the server tells the client where to send requests and what to send.** The endpoint, the models and the org header are not compiled into the client; they arrive with the login.
 
-What is NOT measured: how `st_…` is minted from the stored `oc_…` key. The account store holds an `api` credential and no account record on this machine, yet the captured request carried an `st_…` token, so an exchange happens somewhere this investigation did not reach. A migration needs that answer before it can produce the token itself.
+### Where the token actually lives, confirmed
+
+The account is not a file. It is a row in the client's own SQLite database, and reading it closes the loop:
+
+```
+account        acc_01KWJYKM6GNVMY1EVB5ZC9H08G
+               viztorix@gmail.com
+               https://opencode.ai/console          <- the Console this plugin targets
+               access_token  st_...(39)             <- the token the request carried
+               refresh_token rt_...(39)
+               token_expiry  1793948786727
+account_state  active_account_id acc_...
+               active_org_id     wrk_01KWJYKNFF34P8F0JZDBX1WTB8
+                                                    <- the org the request carried
+```
+
+**So there is no exchange, and no second credential.** `st_...` IS the device flow's access token — the one this plugin's `console-auth.ts` already obtains, from the same `https://opencode.ai/console` base — and `rt_...` is its refresh token. The org is the one `/api/orgs` answered at login.
+
+That explains the free tier exactly: the gateway gates it on a token tied to an account and an org, which is why a bare `oc_...` key cannot reach it no matter which headers accompany it.
 
 ## The design this implies: route by credential, not by table
 
@@ -101,7 +119,10 @@ The plugin derives an endpoint from a `(plane, protocol)` table and resolves one
 So the shape that follows:
 
 - **The credential decides the plane, not a hard-coded base URL.** A reference holding an `oc_…` key is the key plane; one holding an `st_…` token is the account plane, and the account plane carries an org with it.
-- **The org travels with the token.** It is not a separate setting to keep in step. A session token without its org answers `403 FreeTierError` for a free model — which is the failure this spec exists to explain — so the two are one credential in two fields, and treating them as one unit is what makes them impossible to get out of step.
+- **A stored credential carries its owner.** The account, the email and the org are known AT LOGIN — the flow fetches `/api/user` and `/api/orgs` before it stores anything — so they belong in the same record as the token rather than being re-derived later. A session token without its org answers `403 FreeTierError` for a free model, which is the failure this spec exists to explain; keeping the two in one record is what makes that impossible.
+
+  This plugin already has the shape for it: `token-store.ts` writes a `grant` whose payload is the owner's to define, and an account and an org are exactly that. What it must NOT do is infer the plane from the token's prefix — `st_...` is a useful confirmation, not a contract, and the login is where the answer is actually known.
+
 - **A model's reachability follows from the plane it resolved on.** Free models on a key plane are refused by the gateway, so the honest thing is for the picker to say so rather than to offer a model that will fail.
 - **Zero configuration survives.** A deployment that pastes a key gets the key plane and today's behaviour; one that logs in gets the account plane and the free tier. Neither names an endpoint.
 
@@ -113,8 +134,8 @@ Nothing, to keep serving paid models: `/zen/v1` with `OPENCODE_API_KEY` still an
 
 For the free tier, four things:
 
-1. **A credential that is a session token, not a key.** The pool already holds credential references and resolves them per operation, so an entry can name `OPENCODE_CONSOLE_TOKEN` — but the reference must resolve to an `st_…` token, which means a login, not a pasted key.
-2. **An org id per request, carried with the token.** The plugin's header injection is the place; the value comes from the account, and a deployment may have several.
+1. **A login that stores what it learned.** The device flow this plugin already implements, extended by the two reads that follow it — `/api/user` and `/api/orgs` — and by writing the account, the email, the org and the token pair as ONE grant record. That is the whole difference between a credential that can reach the free tier and one that cannot.
+2. **An org id per request, read from that record.** The plugin's header injection is the place; the value comes from the credential, so a deployment with several accounts needs no extra setting.
 3. **A plane chosen by the credential's kind**, so a key deployment and a login deployment each route to what they can actually reach.
 4. **A server-driven model list for the account plane**, whose models arrive with the login rather than from the dependency's catalog.
 
