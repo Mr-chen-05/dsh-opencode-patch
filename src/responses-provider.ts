@@ -524,9 +524,14 @@ export const registerResponsesProvider = async (
   // The rotator the fetch interceptor reads. Rotation is driven by credential
   // failures the interceptor is the only place to see — including those from
   // routes the WRAPPER serves and from the Go plane, neither of which passes
-  // through a route of ours. Publishing the slot here rather than sharing a
+  // through a route of ours. Registering the slot here rather than sharing a
   // pool keeps rotation in one place, and an absent mount simply rotates
   // nothing.
+  //
+  // `provide`, never an ad-hoc property set: this runs on a live context proxy
+  // while the fiber is running, and the proxy rejects a name that was never
+  // provided — `Object.assign(ctx, …)` here is a fatal load failure, not a
+  // rotation that quietly does not happen.
   const rotateOnFailure = async (
     plane: string,
     _status: number
@@ -535,11 +540,6 @@ export const registerResponsesProvider = async (
       return;
     }
     const pool = poolFor(plane);
-    console.log(
-      "DEBUG rotate",
-      plane,
-      pool === undefined ? "NO POOL" : pool.refs
-    );
     if (pool === undefined) {
       return;
     }
@@ -547,7 +547,7 @@ export const registerResponsesProvider = async (
     // published through the pool's own reference before this returns.
     await pool.next();
   };
-  Object.assign(ctx, { credentialPoolRotator: rotateOnFailure });
+  ctx.provide?.("credentialPoolRotator", rotateOnFailure);
 
   const poolFor = (
     plane: "opencode" | "opencode-go"

@@ -116,6 +116,8 @@ const createHost = (options: { onPlugin?: (config: unknown) => void } = {}) => {
     extended: [] as string[],
     /** What the plugin reported at INFO, so a mount failure names its cause. */
     infos: [] as string[],
+    /** Every service name `provide` registered, in order. */
+    provided: [] as string[],
   };
 
   /** The fiber `plugin` starts, reduced to what the mount observes. */
@@ -150,6 +152,7 @@ const createHost = (options: { onPlugin?: (config: unknown) => void } = {}) => {
     };
     on: (event?: string, callback?: unknown) => void;
     plugin: (plugin: unknown, config?: unknown) => FakeFiber;
+    provide: (name: string, value: unknown) => () => void;
   };
 
   const ENTRY_ID = "dsh-opencode-patch";
@@ -212,6 +215,29 @@ const createHost = (options: { onPlugin?: (config: unknown) => void } = {}) => {
     };
     ctx.get = function get(this: HostCtx, name: string) {
       return resolveService(this[ISOLATE] as Map<string, symbol>, name);
+    };
+    // cordis: a service is registered through `provide`, which stores it
+    // against the isolation scope the reading context resolves in; the proxy
+    // then answers `ctx[name]` from that store. The stand-in mirrors the half
+    // the rotation handoff depends on: a provided name is readable on the
+    // context, and the registration can be withdrawn.
+    ctx.provide = function provide(
+      this: HostCtx,
+      name: string,
+      value: unknown
+    ) {
+      const label = (this[ISOLATE] as Map<string, symbol>).get(name) ?? ROOT;
+      const realm = realms.get(label) ?? new Map<string, unknown>();
+      realms.set(label, realm);
+      realm.set(name, value);
+      observables.provided.push(name);
+      Object.defineProperty(this, name, {
+        configurable: true,
+        get: () => resolveService(this[ISOLATE] as Map<string, symbol>, name),
+      });
+      return () => {
+        realm.delete(name);
+      };
     };
     // A Service is a getter defined ONCE on the root context and resolved per
     // read through `this`, so a child sees its OWN isolation and a shadowed
@@ -915,6 +941,10 @@ describe("responses-provider: the mount survives the host's own instance", () =>
         })
       );
 
+      // Registered as a service, not an ad-hoc property set: the host's
+      // context proxy rejects a name that was never provided while the fiber
+      // is running, which is a load failure rather than a silent no-op.
+      expect(host.observables.provided).toContain("credentialPoolRotator");
       // Read through the same accessor the fetch interceptor uses, so this
       // asserts the handoff the rotation path actually depends on.
       const rotate = readCredentialPoolRotator(host.ctx);
@@ -924,11 +954,8 @@ describe("responses-provider: the mount survives the host's own instance", () =>
       await rotate?.("opencode", 429);
 
       // The mount already published both planes' first entries, so a rotation
-      // is visible as a SECOND write carrying a different key — the credential
-      // the next request will use.
-      // The mount published both planes' first entries, so a rotation shows up
-      // as a SECOND write carrying a different key: the credential the next
-      // request will use. The "not-a-plane" call above rotated nothing.
+      // shows up as a SECOND write carrying a different key: the credential
+      // the next request will use. The "not-a-plane" call above rotated nothing.
       const goWrites = writes.filter(([ref]) => ref === "OPENCODE_GO_POOL_KEY");
       expect(goWrites.length).toBeGreaterThan(1);
       expect(goWrites.at(-1)?.[1]).not.toBe(goWrites[0]?.[1]);

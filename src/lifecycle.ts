@@ -130,11 +130,6 @@ const installFetchPatch = (
     return false;
   }
 
-  // Rotation is driven by the credential failures this interceptor is the only
-  // place to see — including the ones from routes the WRAPPER serves and from
-  // the Go plane, neither of which passes through a route of ours. The pool
-  // itself lives with the provider mount, so this asks it for a rotator and
-  // reports what it saw.
   /**
    * The org each plane's credential belongs to, read once and kept.
    *
@@ -165,6 +160,11 @@ const installFetchPatch = (
   const readAccountOrg = (plane: string): string | undefined =>
     orgByPlane.get(plane);
 
+  // Rotation is driven by the credential failures this interceptor is the only
+  // place to see — including the ones from routes the WRAPPER serves and from
+  // the Go plane, neither of which passes through a route of ours. The pool
+  // itself lives with the provider mount, so this asks it for a rotator and
+  // reports what it saw.
   const rotateAfterFailure = async (
     plane: string,
     status: number

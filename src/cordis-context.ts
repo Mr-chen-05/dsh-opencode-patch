@@ -102,6 +102,13 @@ export interface CordisContext {
    * it registers no auth flows and cannot collide with the host's own.
    */
   isolate?: (name: string) => CordisContext;
+  /**
+   * Register a service on the current fiber. The only write a live context
+   * proxy accepts from a running fiber: an ad-hoc property set for a name that
+   * was never provided is rejected, which is a load failure rather than a
+   * degraded feature.
+   */
+  provide?: (name: string, value: unknown) => unknown;
   logger?: {
     info?: (msg: string, ...args: unknown[]) => void;
     warn?: (msg: string, ...args: unknown[]) => void;
