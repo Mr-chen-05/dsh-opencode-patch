@@ -320,7 +320,7 @@ describe("patchFetch", () => {
   it("uses the configured session id env outside a turn", async () => {
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const { capture, mockFetch } = createCaptureFetch();
-    process.env.MY_SESSION_ID = "ses_envprovided000000000";
+    process.env.MY_SESSION_ID = "ses_0123456789abZZZZZZZZZZZZZZ";
     try {
       const patched = patchFetch(
         mockFetch,
@@ -331,7 +331,7 @@ describe("patchFetch", () => {
         method: "POST",
       });
       expect(headerOf(capture.init, SESSION_HEADER)).toBe(
-        "ses_envprovided000000000"
+        "ses_0123456789abZZZZZZZZZZZZZZ"
       );
     } finally {
       delete process.env.MY_SESSION_ID;
@@ -384,9 +384,11 @@ describe("patchFetch", () => {
     expect(headerOf(c2.init, SESSION_HEADER)).toBe(testSession);
   });
 
-  it("preserves an existing valid session header and uses env fallback otherwise", async () => {
+  it("keeps a real session header, replaces a malformed one, and honours a pinned env id", async () => {
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const config = resolveConfig();
+    // A real id: ses_ + 12 hex + 14 base62, which is what the client sends.
+    const real = "ses_ed62aae61ffeA6UwzEFN9YNKk8";
 
     const { capture: keep, mockFetch: keepFetch } = createCaptureFetch();
     await patchFetch(
@@ -394,11 +396,29 @@ describe("patchFetch", () => {
       als,
       config
     )("https://opencode.ai/zen/v1/responses", {
-      headers: { [SESSION_HEADER]: "ses_existing_valid_01" },
+      headers: { [SESSION_HEADER]: real },
     });
-    expect(headerOf(keep.init, SESSION_HEADER)).toBe("ses_existing_valid_01");
+    expect(headerOf(keep.init, SESSION_HEADER)).toBe(real);
 
-    process.env.OPENCODE_SESSION_ID = "ses_env_fallback_02";
+    // A header that merely starts with `ses_` is not a session id. Sending it
+    // earns a 401 Invalid API key, which reads like a credential fault — so it
+    // is replaced by a derived id instead. Measured: `ses_dsh_default` is a real
+    // value a deployment pinned, and the auto-review pass, which runs outside any
+    // tracked turn, is where it would have been used.
+    const { capture: malformed, mockFetch: malformedFetch } =
+      createCaptureFetch();
+    await patchFetch(
+      malformedFetch,
+      als,
+      config
+    )("https://opencode.ai/zen/v1/responses", {
+      headers: { [SESSION_HEADER]: "ses_dsh_default" },
+    });
+    const replaced = headerOf(malformed.init, SESSION_HEADER);
+    expect(replaced).not.toBe("ses_dsh_default");
+    expect(replaced).toMatch(/^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/u);
+
+    process.env.OPENCODE_SESSION_ID = "ses_0123456789abZZZZZZZZZZZZZZ";
     const { capture: envCap, mockFetch: envFetch } = createCaptureFetch();
     await patchFetch(
       envFetch,
@@ -407,7 +427,9 @@ describe("patchFetch", () => {
     )("https://opencode.ai/zen/v1/responses", {
       headers: { [SESSION_HEADER]: "bogus" },
     });
-    expect(headerOf(envCap.init, SESSION_HEADER)).toBe("ses_env_fallback_02");
+    expect(headerOf(envCap.init, SESSION_HEADER)).toBe(
+      "ses_0123456789abZZZZZZZZZZZZZZ"
+    );
   });
 
   it("respects injectUserAgent false and custom userAgent override", async () => {

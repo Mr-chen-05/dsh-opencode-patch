@@ -138,12 +138,33 @@ export const headerValueFor = (
  * @param envName - environment variable consulted first; defaults to
  * `OPENCODE_SESSION_ID` when blank.
  */
+/**
+ * Whether a string is a session id the gateway will accept.
+ *
+ * The shape is `ses_` + 12 hex + 14 base62, which is what {@link
+ * openCodeSessionIdFor} derives and what the client's own ids look like.
+ *
+ * This exists because a prefix is not a format. A configuration that pins
+ * `x-opencode-session: ses_dsh_default` starts with `ses_` and is not a session
+ * id at all — the gateway answers it `401 Invalid API key`, which reads as a
+ * credential fault and is really a malformed header. Anything that cannot be
+ * accepted is better replaced with a derived id than sent as written.
+ *
+ * @param value - the candidate.
+ * @returns whether it is a session id the gateway accepts.
+ */
+export const isOpenCodeSessionId = (value: unknown): value is string =>
+  typeof value === "string" && /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/u.test(value);
+
 export const fallbackSessionId = (envName?: string): string => {
   const name =
     envName !== undefined && envName.length > 0 ? envName : undefined;
   if (name !== undefined) {
     const envId: unknown = process.env[name];
-    if (typeof envId === "string" && envId.length > 0) {
+    // Validated for the same reason a pinned header is: an id the gateway
+    // rejects earns a 401 that reads like a credential fault, and a derived id
+    // is strictly better than one that cannot be accepted.
+    if (isOpenCodeSessionId(envId)) {
       return envId;
     }
   }

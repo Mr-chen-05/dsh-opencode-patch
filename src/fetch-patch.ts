@@ -22,6 +22,7 @@ import {
 import { enrichModelsResponse, isModelsListingUrl } from "./models-catalog.ts";
 import {
   fallbackSessionId,
+  isOpenCodeSessionId,
   OPENCODE_UA,
   PARENT_SESSION_ALT_HEADER,
   PARENT_SESSION_HEADER,
@@ -137,8 +138,12 @@ const resolveSessionHeader = (
   if (state) {
     return state.value;
   }
+  // A header a deployment pinned is honoured only when the gateway would accept
+  // it. `ses_dsh_default` starts with `ses_` and is not a session id, and sending
+  // it earns a 401 that reads like a credential fault — so a malformed one is
+  // replaced by a derived id rather than passed through.
   const existing = headers.get(SESSION_HEADER);
-  if (typeof existing === "string" && existing.startsWith("ses_")) {
+  if (isOpenCodeSessionId(existing)) {
     return existing;
   }
   return fallbackSessionId(sessionIdEnv);

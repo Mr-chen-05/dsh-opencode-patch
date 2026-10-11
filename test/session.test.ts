@@ -15,6 +15,7 @@ import {
   SESSION_HEADER,
   hasSessionHeader,
   headerValueFor,
+  isOpenCodeSessionId,
   openCodeSessionIdFor,
   type ActiveTurnState,
   withStore,
@@ -302,5 +303,34 @@ describe("session id · the session's own creation time", () => {
     const id = headerValueFor("s1", createdAt) ?? "";
     const hex = id.slice(4, 16);
     expect(Number(BigInt(`0x${hex}`) / 0x1000n)).toBe(createdAt % 2 ** 36);
+  });
+});
+
+describe("session: a session id the gateway will accept", () => {
+  it("accepts what the derivation produces and what the client sends", () => {
+    // Measured: the client's own ids are ses_ + 12 hex + 14 base62.
+    expect(isOpenCodeSessionId(openCodeSessionIdFor("abc"))).toBe(true);
+    expect(isOpenCodeSessionId("ses_ed62aae61ffeA6UwzEFN9YNKk8")).toBe(true);
+  });
+
+  it("rejects a pinned header that merely starts with ses_", () => {
+    // The failure this exists for: a deployment pinned
+    // `x-opencode-session: ses_dsh_default`, which starts with `ses_` and is not
+    // a session id. The gateway answers it 401 Invalid API key, which reads as a
+    // credential fault and is really a malformed header — and a request outside
+    // any tracked turn, such as an auto-review pass, is exactly where the pinned
+    // value would be used.
+    for (const bad of [
+      "ses_dsh_default",
+      "ses_e2e0000000000abcdefghij",
+      "ses_",
+      "ses_short",
+      "ses_ZZZZZZZZZZZZaaaaaaaaaaaaaa",
+      "not-a-session",
+      "",
+    ]) {
+      expect(isOpenCodeSessionId(bad), bad).toBe(false);
+    }
+    expect(isOpenCodeSessionId(42)).toBe(false);
   });
 });
