@@ -105,10 +105,22 @@ const installUsageService = (
     );
     return;
   }
-  ctx.plugin(GoUsageService, {
-    baseURL: () => resolveGoBaseURL(ctx, config.usageBaseURL),
-    keySource: config.keySource,
-  });
+  // A throw here is not local: `apply` runs its installers in order, so an
+  // unguarded throw takes every installer AFTER this one down with it - silently,
+  // because nothing catches it either. Reported and contained instead, so a
+  // meter that cannot mount is a meter that says so rather than one that also
+  // takes the rest of the plugin with it.
+  try {
+    ctx.plugin(GoUsageService, {
+      baseURL: () => resolveGoBaseURL(ctx, config.usageBaseURL),
+      keySource: config.keySource,
+    });
+  } catch (error) {
+    ctx.logger?.warn?.(
+      "[dsh-opencode-patch] the usage service did not mount; the meter will render nothing",
+      error
+    );
+  }
 };
 
 /**
@@ -341,7 +353,14 @@ const installLoginService = (ctx: CordisContext): void => {
     );
     return;
   }
-  ctx.plugin(LoginService, {});
+  try {
+    ctx.plugin(LoginService, {});
+  } catch (error) {
+    ctx.logger?.warn?.(
+      "[dsh-opencode-patch] the login service did not mount",
+      error
+    );
+  }
 };
 
 export const apply = (
