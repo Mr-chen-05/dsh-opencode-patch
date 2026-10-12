@@ -464,6 +464,21 @@ export const apply = (ctx: ClientContext): void => {
       ["modelDirectories", "remote", "slots", "remote.opencodeGoUsage"],
       registerMeter
     );
+    // A scoped wait that never resolves is the last silent failure on this
+    // path, and the one that produces the exact symptom this meter has been
+    // reported with: a card that renders, no figures, and nothing anywhere to
+    // read. The wait is for the HOST's remote face, so if it has not appeared
+    // after a generous moment the console says which names are still missing -
+    // and the meter is registered anyway, so the read can report its own
+    // reason rather than the mount never happening at all.
+    const settle = setTimeout(() => {
+      console.warn(
+        "[dsh-opencode-patch] usage remote: still waiting for",
+        "remote.opencodeGoUsage after 10s; the meter mounts anyway so the read can say why"
+      );
+      registerMeter(ctx);
+    }, 10_000);
+    settle.unref?.();
   } else {
     registerMeter(ctx);
   }
