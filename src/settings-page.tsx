@@ -303,8 +303,20 @@ export const apply = (ctx: ClientContext): void => {
   ctx.effect?.(() => {
     let dispose: (() => void) | undefined;
     const mount = async (): Promise<void> => {
+      // The two optional chains here are what made this silent: an absent
+      // `remote`, or a remote without `$mount`, evaluates to undefined WITHOUT
+      // throwing, so the catch below never ran and the meter simply never
+      // mounted. Say which of the two it is, because "no meter" is otherwise
+      // indistinguishable from a meter whose service answered nothing.
+      if (ctx.remote === undefined || typeof ctx.remote.$mount !== "function") {
+        console.warn(
+          "[dsh-opencode-patch] usage remote: the settings context has no remote to mount on",
+          Object.keys(ctx)
+        );
+        return;
+      }
       try {
-        dispose = await ctx.remote?.$mount?.(usageRemote);
+        dispose = await ctx.remote.$mount(usageRemote);
       } catch (error) {
         // Report it rather than swallow it. The meter renders nothing when this
         // mount fails, and "renders nothing" is indistinguishable from every
