@@ -202,6 +202,13 @@ No try/catch is needed: the store's `read` is documented to answer `undefined` w
 
 **And a second one, in the same shape: the org cache is warmed once, at startup.** `lifecycle.ts` reads the stored grant for both planes before the first request can need it, and `orgByPlane` is then consulted per request. But a LOGIN happens after that — the user signs in from the card, minutes or hours into the process — so the cache still holds whatever was true at startup, and the requests that follow carry no `x-opencode-org-id` even though the grant now has one.
 
+**The shape of that fix, since the hook cannot await.** `patchFetch` asks for the org synchronously — `hooks.resolveOrg?.(plane)` — so the reader cannot go to the store itself; it has to be told. Two ways, and the second is smaller:
+
+- the login, on completing, refreshes the cache for the plane it wrote; or
+- the cache lives in its own small module that both `lifecycle.ts` and the login service import, so writing a grant updates what the next request reads.
+
+The second is one new file and no plumbing, and it is the same answer as the token reader: the value is kept next to the thing that changes it.
+
 Both gaps are the same mistake: a value that can change while the process runs, read once and kept. The token reader was the first; this is the second, and the fix is the same shape — read it where it is needed, or refresh it when the thing that feeds it changes. The login completing is exactly that event, and it already knows which plane it wrote.
 
 Measured earlier in this file: the account token is not plane-specific. The same token serves `/inference/openai/v1` with its org, and the same key answers on both planes. So one sign-in should serve both, and the reader should try the plane it was asked for and then the other one before answering `undefined` — three lines in `loginTokenReader`, plus the case that pins it.
