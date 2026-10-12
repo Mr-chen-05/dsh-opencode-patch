@@ -29,7 +29,7 @@ A file's name does not decide whether it is public — its content does. Inciden
 ## Rules a change must follow
 
 - **Start from the host's built-ins.** Read `@deepseek-ai/dsh-client-ui-primitives` before writing any UI. It ships the components _and_ one CSS module each, which is the fastest inventory of the design language available. A component we hand-roll is one whose CSS module we never opened.
-- **Declare cross-plugin services.** `ctx.inject(['slots', 'modelDirectories'], scope => …)` — reading them off the root context fails silently, because every access in that path is optional.
+- **Declare cross-plugin services, and know how each access fails.** Measured against cordis: `ctx.get(name)` reads the scope's store and does **not** consult `inject`, so an undeclared service answers `undefined` silently; only property access (`ctx.name`) throws `cannot get property "name" without inject`. Capture an optional service through `ctx.inject([name], scope => …)`, which is a real child scope that can see it — and do **not** hand-roll a context wrapper to make one reachable: a copy that replaces `get` is not a cordis context, and passing it where the host's own context was expected takes the whole host down.
 - **The `Tooltip` clones its child.** Wrap a DOM node, never a component, or the tooltip attaches handlers to something that ignores them and never appears.
 - **One switch per surface.** A switch whose effect only exists inside another switch's surface is a state, not a decision.
 - **Opt into the theme; do not re-declare it.** `data-menu-material="translucent"` and no hand-set stroke, so both themes stay right.
@@ -48,6 +48,12 @@ Host bundle (`lib/index.mjs`), a thin `apply` barrel over small modules:
 - `src/catalog-data.ts` · `src/models-catalog.ts` · `src/models-discovery.ts` — the generated static shim, the `models.dev` parser with SWR refresh, and discovery decoration. `catalog-data.ts` is **generated**; never hand-edit it.
 - `src/responses-routes.ts` · `src/responses-provider.ts` — the protocol table and the in-process mount of the host's `llm-pi-ai`.
 - `src/session-cost.ts` · `src/cordis-context.ts` · `src/debug.ts` — per-turn accounting, the typed host interfaces, and stream debug logging.
+- `src/pi-provider.ts` — the per-protocol base URLs, the pi model object, and the gateway headers. Every value here is measured; see `docs/redirect-planes.md`.
+- `src/google-bridge.ts` — the Google models, served through the plugin's own adapter on the real `llm` service. It is the ONLY module that imports pi at runtime, and its route is `opencode-google` so the `google` name stays free for a real deployment.
+- `src/credential-pool.ts` — several credentials per plane, one active at a time. Off unless a deployment enables it, and rotation WRITES through the reference the pool owns, which is the only path that reaches the routes the wrapper serves.
+- `src/console-auth.ts` — the Console device flow and the two reads a login needs: `/api/user` and `/api/orgs`.
+- `src/token-store.ts` — a login as one `grant` record: the token pair and its owner, written atomically.
+- `src/login-flow.ts` — the flow that keeps what it learned. A login that cannot read its owner FAILS rather than storing a token without its org.
 
 Web client bundle (`lib/client.js`): `src/settings-page.tsx` (entry, wiring only), the `settings-*` card and its controls, and the meter — `src/usage-pill.tsx` (state), `src/usage-panel.tsx` (pure views), `src/usage-ui.ts` (logic and stylesheet).
 
