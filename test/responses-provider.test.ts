@@ -26,6 +26,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { resolveConfig } from "../src/config.ts";
 import { readCredentialPoolRotator } from "../src/cordis-context.ts";
+import { name as pluginName } from "../src/identity.ts";
 import {
   RESPONSES_SDK,
   ROUTE_FOR_PLANE_PROTOCOL,
@@ -40,6 +41,7 @@ import {
 import type { CordisContext } from "../src/index.ts";
 import { baseForProtocol } from "../src/pi-provider.ts";
 import { loginTokenReader } from "../src/responses-provider.ts";
+import { createTokenStore } from "../src/token-store.ts";
 
 const MUSE = "muse-spark-1.3-contributor-free";
 
@@ -1535,5 +1537,66 @@ describe("responses-provider · the login token a route falls back to", () => {
     // needs no guard around this: a deployment with no login simply falls through
     // to the adapter's own ambient auth, exactly as it did before.
     await expect(loginTokenReader({})("opencode")).resolves.toBeUndefined();
+  });
+});
+
+describe("responses-provider · a login and the reader actually meet", () => {
+  it("answers with the token a login stored, on either plane", async () => {
+    // The two halves of this are tested apart - the login writes a grant, the
+    // bridge asks this reader - and this is the seam: a grant written through the
+    // store comes back out of the reader, which is the whole of what "signing in
+    // is enough" means. The second plane is asked because the ACCOUNT is not
+    // plane-specific, measured, and the sign-in card defaults to one of them.
+    const records = new Map<string, unknown>();
+    const credentials = {
+      deleteRecord: async (key: string) => {
+        records.delete(key);
+      },
+      readRecord: async (key: string) => {
+        const payload = records.get(key);
+        return payload === undefined ? undefined : { kind: "grant", payload };
+      },
+      // `readCredentialsWriter` requires all seven: a seam that cannot write a
+      // record atomically is not one a rotating grant can be kept in, so it
+      // answers undefined rather than handing back half a writer.
+      modifyRecord: async (
+        key: string,
+        mutate: (current?: unknown) => Promise<unknown>
+      ) => {
+        const next = await mutate(records.get(key));
+        if (next !== undefined) {
+          records.set(key, next);
+        }
+        return next;
+      },
+      resolve: vi.fn(),
+      set: vi.fn(),
+      unset: vi.fn(),
+      writeGrant: async (key: string, payload: unknown) => {
+        records.set(key, payload);
+      },
+    };
+    const ctx = {
+      get: (which: string) =>
+        which === "credentials" ? credentials : undefined,
+    };
+
+    const store = createTokenStore({
+      credentials,
+      plane: "opencode",
+      scope: pluginName,
+    });
+    await store?.write({
+      accessToken: "st_from_login",
+      expiresInSeconds: 3600,
+    });
+
+    expect(records.size, "the write did not land").toBe(1);
+    await expect(loginTokenReader(ctx)("opencode")).resolves.toBe(
+      "st_from_login"
+    );
+    await expect(loginTokenReader(ctx)("opencode-go")).resolves.toBe(
+      "st_from_login"
+    );
   });
 });
