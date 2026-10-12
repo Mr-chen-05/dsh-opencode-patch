@@ -144,10 +144,14 @@ Two more details worth copying. Secrets are `Redacted`, so they are never string
 
 So the shape to copy is two-layered, and both layers already exist here in some form: a source list (literal, config, installation, captured request) and an order that puts everything the user declared ahead of everything inferred. Reading a file is one entry in the first list, and the switch that turns it on belongs to the user, not to this plugin's default.
 
-**The last link, and the one still missing.** `resolveGatewayKey` already does the right thing for a route that names a reference: it asks the credential service, then the environment, and when neither answers it raises a NAMED error — `MISSING_CREDENTIAL`, with the reference and the route in the message. That is the shape the rest of this file should have, and two gaps sit either side of it.
+**The two resolution paths, and which one is a gap.** `resolveGatewayKey` is deliberately two-faced, and the difference is tested:
 
-- **A route with no reference returns `undefined` silently.** Correct for a local service that needs no key, wrong for a gateway route that does — and the two are indistinguishable at that point. The answer is the URL: a request bound for a claimed gateway host with no key resolved should raise rather than go out and earn a `401` that reads like a bad credential.
-- **A login's token is not usable as a route's credential.** `warmOrg` reads the stored grant for the plane's ORG and nothing else, so a deployment that has signed in still needs `apiKeyEnv` on every route. Wiring the grant's access token into the same resolution is what would make a login sufficient on its own, which is the point of having one.
+- **A named reference that resolves nothing RAISES.** The message carries the reference and the route, and `MISSING_CREDENTIAL` is in it. The reason is in the test: `undefined` would tell the underlying adapter to "resolve ambient auth instead", and it would bill whatever key it found first.
+- **No reference at all answers `undefined`.** That is not a silent failure; it is the instruction the adapter is built to take, and a route that means to authenticate some other way depends on it.
+
+So the reported `401 Invalid API key` on a route with no reference is not this function going quiet — it is the adapter's ambient resolution finding nothing, or finding a key that is not the one the route wanted. Both are answered by naming a reference, and neither is answered by making this function throw.
+
+**The gap that is real is the other one.** A login's token is not usable as a route's credential: `warmOrg` reads the stored grant for the plane's ORG and nothing else, so a deployment that has signed in still needs `apiKeyEnv` on every route. Wiring the grant's access token into the same resolution is what would make a login sufficient on its own, which is the point of having one — and it is the half of the core model that is still missing.
 
 ## Status
 
