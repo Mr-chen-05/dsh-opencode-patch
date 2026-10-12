@@ -543,8 +543,12 @@ export const registerResponsesProvider = async (
     if (pool === undefined) {
       return;
     }
-    // The failed request is over; this is about the next one, so the new key is
-    // published through the pool's own reference before this returns.
+    // The entry that was in use is the one the gateway refused, so it is marked
+    // failed BEFORE advancing: leaving it in rotation would hand the same key out
+    // again on the next lap, which is the failure this whole path exists to
+    // avoid. The failed request is over; this is about the next one, and the new
+    // key is published through the pool's own reference before this returns.
+    pool.markCurrentFailed();
     await pool.next();
   };
   ctx.provide?.("credentialPoolRotator", rotateOnFailure);

@@ -262,6 +262,39 @@ describe("credential-pool: rotation among the entries a plane declared", () => {
     );
   });
 
+  it("marks the entry in use, so a refused key does not come back around", async () => {
+    // The wiring this guards was missing while every unit test passed: the pool
+    // could mark an entry failed and nothing ever called it, so a key the
+    // gateway refused stayed in rotation and was handed out again on the next
+    // lap. The caller knows a request failed; the pool is the only one that
+    // knows which entry was behind it.
+    const pool = poolFor(
+      { enabled: true, go: [], zen: ["A", "B", "C"] },
+      {
+        A: "key-a",
+        B: "key-b",
+        C: "key-c",
+      }
+    );
+    await expect(pool?.next()).resolves.toEqual({
+      kind: "key",
+      value: "key-b",
+    });
+    // B was the one in use, so B is the one the failure belongs to.
+    expect(pool?.markCurrentFailed()).toBe("B");
+    // The healthy entries keep rotating and B never comes back: a full lap
+    // returns to the keys that work, not to the one the gateway just refused.
+    const seen: string[] = [];
+    for (let turn = 0; turn < 5; turn += 1) {
+      const result = await pool?.next();
+      if (result?.kind === "key") {
+        seen.push(result.value);
+      }
+    }
+    expect(seen).toEqual(["key-c", "key-a", "key-c", "key-a", "key-c"]);
+    expect(seen).not.toContain("key-b");
+  });
+
   it("skips a failed entry and restores it when told", async () => {
     const pool = poolFor(
       { enabled: true, go: [], zen: ["A", "B"] },

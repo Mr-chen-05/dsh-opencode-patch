@@ -353,6 +353,8 @@ These exist in the schema but render no control — each is a literal, a marker,
 | `sessionIdEnv` | `OPENCODE_SESSION_ID` | Names an env var only a caller-supplied session id uses |
 | `freeModelMarker` | `free` | Model-id substring; `*` forces the fallback, `''` disables it |
 | `usageBaseURL` | `https://opencode.ai/zen/go/v1` | Endpoint override; auto-discovered from the composition |
+| `credentialPool` | `{ enabled: false, zen: [], go: [] }` | Several credentials per plane, rotated. Off unless declared, and the entries are credential references rather than values |
+| `credentialOrg` | — | The org id an account credential belongs to, for a token that came from somewhere other than a login through this plugin |
 | `debug` / `debugFile` | `false` / — | Diagnostic JSONL logging, not a behaviour anyone tunes in the UI |
 
 ```yaml
@@ -387,6 +389,39 @@ These exist in the schema but render no control — each is a literal, a marker,
 > **Host reload rule:** restart `dsh web` after any host change (`lib/index.mjs`); a browser refresh is enough for client UI changes (`lib/client.js`).
 
 ---
+
+## 🔑 Rotating Several Credentials
+
+A deployment with more than one key for a plane — past a rate limit, or splitting spend across accounts — can have the plugin rotate them. **Nothing about this happens unless you declare it**, and the declaration is two steps, because the pool owns a reference of its own rather than writing behind the key you configured.
+
+```yaml
+- insert:
+    - id: dsh-opencode-patch
+      name: "dsh-opencode-patch"
+      config:
+        credentialPool:
+          enabled: true
+          zen: [OPENCODE_API_KEY, OPENCODE_API_KEY_BACKUP]
+          go: [OPENCODE_GO_API_KEY]
+```
+
+Then point the route at the reference the pool publishes:
+
+```yaml
+# the llm row that declares the route
+opencode:
+  apiKeyEnv: OPENCODE_POOL_KEY # instead of OPENCODE_API_KEY
+opencode-go:
+  apiKeyEnv: OPENCODE_GO_POOL_KEY
+```
+
+Three things are worth knowing about how it behaves:
+
+- **It never writes behind your key.** The pool publishes through `OPENCODE_POOL_KEY` / `OPENCODE_GO_POOL_KEY`, names nothing else writes. Writing `OPENCODE_API_KEY` itself would either replace the credential you declared or be refused outright — the credential seam rejects a write that a read-only source shadows, precisely so a rotation cannot silently fail to take effect.
+- **A rotation is visible to every route, including the ones the wrapper serves**, because it writes on every rotation rather than once at startup, and the wrapper resolves the reference per operation.
+- **An exhausted pool falls through.** Entries that do not resolve are skipped, an entry the gateway refuses is marked failed, and when nothing is left the plugin resolves what the route declared instead of failing the request.
+
+The pool holds API keys. An account login is a different credential: its session token reaches models a key cannot, and it is served from `OPENCODE_CONSOLE_TOKEN` with the org from `credentialOrg` until the login surface ships.
 
 ## 🛠 Troubleshooting
 

@@ -54,6 +54,17 @@ export interface CredentialPool {
   readonly current: () => Promise<string | undefined>;
   /** Mark one entry failed, so the next advance skips it. */
   readonly markFailed: (ref: string) => void;
+  /**
+   * Mark the entry in use failed.
+   *
+   * What a credential failure means: the key the gateway just refused is the one
+   * this pool handed out, and leaving it in rotation would hand it out again on
+   * the next lap. The caller knows a request failed; the pool is the only one
+   * that knows which entry was behind it.
+   *
+   * @returns the ref that was marked, or undefined when none was in use.
+   */
+  readonly markCurrentFailed: () => string | undefined;
   /** Put a failed entry back in rotation. */
   readonly restore: (ref: string) => void;
   /** The refs this pool rotates over, in order. */
@@ -173,6 +184,13 @@ export const createCredentialPool = (
   const reference = POOL_REFERENCE[plane];
   return {
     current: () => select(index),
+    markCurrentFailed: () => {
+      const ref = refs[index];
+      if (ref !== undefined) {
+        failed.add(ref);
+      }
+      return ref;
+    },
     markFailed: (ref: string) => {
       failed.add(ref);
     },
