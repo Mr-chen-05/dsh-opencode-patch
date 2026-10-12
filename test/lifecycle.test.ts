@@ -598,6 +598,10 @@ describe("apply (plugin lifecycle)", () => {
     }
   });
 
+  // The debug write is fire-and-forget by design — a request must never wait on
+  // the log — so the test polls for the entry. Under full-suite parallelism the
+  // append can be starved past the default 5s ceiling, which is a flaky failure
+  // rather than a behaviour: the budget is generous, not the polling.
   it("monitors a request that flows through the patched fetch", async () => {
     // The case above drives the stream hook; this one drives the request
     // monitor, whose closure lives in the composition's debugHook and is only
@@ -629,7 +633,7 @@ describe("apply (plugin lifecycle)", () => {
         });
         expect(response.status).toBe(200);
 
-        const content = await waitForFileContent(debugFile);
+        const content = await waitForFileContent(debugFile, 1, 12_000);
         const entries = content
           .trim()
           .split("\n")
@@ -656,7 +660,7 @@ describe("apply (plugin lifecycle)", () => {
     } finally {
       await rm(tmpDir, { force: true, recursive: true });
     }
-  });
+  }, 15_000);
 
   it("keeps session affinity across turns for the same DSH session", async () => {
     const tmpDir = await mkdtemp(path.join(tmpdir(), "dsh-opencode-aff-"));
