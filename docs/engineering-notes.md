@@ -37,6 +37,24 @@ A guard that refused to query the Go quota endpoint with a key starting `oc_sk_`
 - One frame, one list. The panel is the floating surface; rows inside it are plain text. A row that draws its own background is a box inside a box, and a field that repeats a number already on screen is not a second fact.
 - A row that disappears reads as a deleted feature. Absent data gets an explicit empty state, not omission.
 
+## The meter's open case, and everything already excluded
+
+One deployment reports an empty meter — the card renders "quota unavailable" — and the host it runs in is the only place the cause can be, because every link that can be checked from outside has been. Recorded here so the next reader starts at the end of this list rather than at the beginning of it.
+
+| Excluded | How |
+| :-- | :-- |
+| the read itself | the service, mounted with a real-shaped loader row and a real key, answered with real window figures |
+| the credential service | a cordis context does see a service provided on it: a probe resolved `Bearer go-key-from-scope` through it |
+| the install guard | `usageEnabled` is true and `plugin` is a core registry mixin, so the guard passes |
+| the client's inject list | `remote` is declared |
+| the contract | the descriptors, the parameter codec and the service's method list all match, and a client query carrying provider, model and sessionId parses cleanly |
+| the profile | `config: { usageEnabled: true }` is at the level the schema reads |
+| the endpoint | it answers with both keys, measured |
+
+What is left is the runtime handshake between the host and the card, and the console is where it will say so: `readGoUsage` reports which of its paths returned nothing, and the remote mount reports when it throws. Both were silent until recently, which is why the meter's empty state was indistinguishable from every other reason a meter can be empty.
+
+**The host's own diagnostics do not reach a log file.** `ctx.logger.info` from the installers appears in no file under the DSH home, measured — so the client's console is not one channel among several, it is the only one a reader has.
+
 ## Rules that came out of real failures
 
 - Start from the host's built-ins. The UI kit ships the components _and_ one CSS module each, the fastest inventory of the host's design language available. A hand-rolled look-alike is one whose CSS module was never opened, and it is smaller, wrong and unthemed next to the built-in.
