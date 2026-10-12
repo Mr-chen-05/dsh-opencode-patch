@@ -196,6 +196,8 @@ No try/catch is needed: the store's `read` is documented to answer `undefined` w
 
 **And the second attempt got one step further, which narrows the test precisely.** With the edit applied and a test that mirrors the stream test, `vp check` passed and 16 of 17 tests passed — the new one failed on `expected undefined to be 'Bearer st_from_login'`, meaning the captured headers were EMPTY: the request never reached the patched `fetch` at all, so the stream had already failed before the key mattered.
 
+**And one hypothesis is ruled out for the next attempt.** `registerGoogleBridge` destructures `const { ctx, host, llm, specs } = inputs` and then reads `inputs.pool` directly, so `inputs.loginToken` reaches `resolveApiKey` the same way the pool does — the field is not dropped, and the edit needs no change on that account. The failure is in the test's route to `fetch`, not in the wiring.
+
 The existing stream test gets past that point by setting `process.env. BRIDGE_STREAM_KEY` before it registers. A test for this branch needs the same: give the route a resolvable key by some other means so the stream reaches the request, and let the assertion be about which of the sources supplied it. That is the only piece still missing, and it is one line in a test that already exists.
 
 So the test is the stream test with two changes: register with an empty `apiKeyRef` and a `loginToken` returning a sentinel, then assert the request's `Authorization` header carries the sentinel. The interception boilerplate is already written there.
