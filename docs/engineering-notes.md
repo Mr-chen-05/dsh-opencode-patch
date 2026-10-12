@@ -96,6 +96,10 @@ So the fix belongs here rather than in anyone's profile: the routes for the othe
 
 `catalog-data.ts` carries `provider_npm` only for models that override the default, so absence is meaningful for the 83 it ships and meaningless for anything else. A hand-listed model needs its protocol from somewhere: the catalog, a route that declares it, or a rule that reads it off the id.
 
+**And the other half of I1: it is still OFFERED.** `models-discovery.ts` filters a route's listing with `isServableModel`, which asks the catalog for the model's SDK and treats a missing answer as servable — correctly, because absence means the completions default. For a model the catalog has never heard of, absence means the same thing by accident, so a hand-listed model is offered on a route that cannot serve it. The routing fix above moves it when it is chosen; this is the half that would stop it being offered at all, and the two belong together: I1 says a model that cannot work is not offered, and today that clause holds only for models the catalog describes.
+
+The check needs the plane, which it already has, and the family, which the id names — the same two facts the routing fix uses. What it must not do is read "no catalog entry" as "servable" without also asking whether any route on that plane speaks the protocol the id implies.
+
 ## Rules that came out of real failures
 
 - Start from the host's built-ins. The UI kit ships the components _and_ one CSS module each, the fastest inventory of the host's design language available. A hand-rolled look-alike is one whose CSS module was never opened, and it is smaller, wrong and unthemed next to the built-in.
