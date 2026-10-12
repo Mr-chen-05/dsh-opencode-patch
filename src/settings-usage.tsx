@@ -64,16 +64,34 @@ const isReadFunction = (
 export const readGoUsage = async (
   scope: unknown
 ): Promise<GoUsage | undefined> => {
+  // Every path out of here is silent, and the meter's empty state is the same
+  // for all of them — so each one says which it was. Without this, "no remote",
+  // "no service" and "an answer this does not recognise" are one symptom, and
+  // finding the cause means reading the host's code instead of the console.
   if (!isRecord(scope) || !isRecord(scope.remote)) {
+    console.warn(
+      "[dsh-opencode-patch] usage read: the settings scope exposes no remote"
+    );
     return undefined;
   }
   const service = scope.remote.opencodeGoUsage;
   if (!isRecord(service) || !isReadFunction(service.read)) {
+    console.warn(
+      "[dsh-opencode-patch] usage read: no opencodeGoUsage service on the remote",
+      Object.keys(scope.remote)
+    );
     return undefined;
   }
   const result: unknown = await service.read({ provider: "opencode-go" });
   const value = isRecord(result) && "value" in result ? result.value : result;
-  return isGoUsage(value) ? value : undefined;
+  if (!isGoUsage(value)) {
+    console.warn(
+      "[dsh-opencode-patch] usage read: the answer is not a usage shape",
+      result
+    );
+    return undefined;
+  }
+  return value;
 };
 
 /** The status word: which of the three states this reading is in. */
