@@ -8,6 +8,7 @@
 
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { readFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -703,6 +704,61 @@ describe("enrichModelsResponse: a model neither source describes", () => {
  * and passes, and the model disappears from the picker because the servability
  * check treats "unknown" as "unservable".
  */
+/**
+ * The README's routing table, asserted against the catalog it describes.
+ *
+ * A count written into prose does not regenerate with the data it counts, and
+ * this file's history is the evidence: the table said 28 models named no SDK and
+ * had no row for mistral at all, a regeneration after it was written. Nothing
+ * failed, because nothing was checking - and a user reading the table would have
+ * been told the wrong thing about the catalog they were choosing from.
+ *
+ * So the table is parsed and compared. When the catalog is regenerated with
+ * different counts, this goes red and says which numbers to update, instead of
+ * the prose drifting quietly out of date.
+ */
+describe("catalog · the README's routing table", () => {
+  const readme = () =>
+    readFile(new URL("../README.md", import.meta.url), "utf8");
+
+  /** `| \`@ai-sdk/x\` | 12 | ... |` and `| _(absent)_ | 12 | ... |`, in order. */
+  const documentedCounts = (text: string): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const line of text.split("\n")) {
+      const match = /^\|\s*(?:`([^`]+)`|_\(absent\)_)\s*\|\s*(\d+)\s*\|/u.exec(
+        line
+      );
+      if (match !== null) {
+        counts.set(match[1] ?? "(absent)", Number(match[2]));
+      }
+    }
+    return counts;
+  };
+
+  it("matches the catalog it counts", async () => {
+    const measured = new Map<string, number>();
+    for (const model of Object.values(OPENCODE_ZEN_CATALOG)) {
+      const sdk = model.provider_npm ?? "(absent)";
+      measured.set(sdk, (measured.get(sdk) ?? 0) + 1);
+    }
+
+    // The table has to describe every SDK the catalog names - a row that is
+    // missing is the failure the mistral row was.
+    expect(documentedCounts(await readme())).toEqual(measured);
+  });
+
+  it("states the same total it lists", async () => {
+    const text = await readme();
+    const total = /Counts are the \*\*(\d+)\*\*/u.exec(text);
+    expect(total, "the README no longer states a total").not.toBeNull();
+    expect(Number(total?.[1])).toBe(Object.keys(OPENCODE_ZEN_CATALOG).length);
+    // And the rows add up to it, so the table cannot disagree with its own
+    // sentence the way it did before this test existed.
+    const sum = [...documentedCounts(text).values()].reduce((a, b) => a + b, 0);
+    expect(sum).toBe(Number(total?.[1]));
+  });
+});
+
 describe("catalog · SDK coverage", () => {
   it("classifies every provider SDK the catalog names", () => {
     const named = new Set<string>();
