@@ -26,7 +26,7 @@
  * @module test/go-discovery.test
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_USAGE_BASE_URL,
@@ -1165,5 +1165,64 @@ describe("gaps characterised while pinning the policy", () => {
       await resolveGoApiKey(declared.context, undefined, "configured")
     ).toBe("sk-declared");
     expect(declared.asked).toEqual(["DSH_TEST_GO_KEY", DEFAULT_USAGE_KEY_ENV]);
+  });
+});
+
+describe("go-discovery: the key resolution chain, end to end", () => {
+  /** The row shape a deployment's LLM plugin carries, with both routes named. */
+  const llmRow = {
+    options: {
+      config: {
+        providers: {
+          "opencode-go": { apiKeyEnv: "OPENCODE_GO_API_KEY" },
+          opencode: { apiKeyEnv: "OPENCODE_API_KEY" },
+        },
+      },
+      name: "@deepseek-ai/dsh-llm-pi-ai",
+    },
+  };
+
+  it("finds the Go route's reference and resolves it from the environment", async () => {
+    // The chain a silent meter would hide: the loader's rows name the route, the
+    // route names the reference, and the reference has to resolve. Each link is
+    // asserted, because "no data" says nothing about which one broke.
+    const ctx = { get: vi.fn(), loader: { entries: () => [llmRow] } };
+    const discovered = discoverGoConfig(ctx);
+    expect(effectiveGoKeyRef(discovered)).toBe("OPENCODE_GO_API_KEY");
+
+    process.env.OPENCODE_GO_API_KEY = "go-key-from-env";
+    try {
+      await expect(resolveGoApiKey(ctx)).resolves.toBe("go-key-from-env");
+    } finally {
+      process.env.OPENCODE_GO_API_KEY = "";
+    }
+  });
+
+  it("resolves through the credential service when the environment has nothing", async () => {
+    // The deployment's actual case: the key lives in the credential store, not
+    // the environment. This is the link that fails silently when the service is
+    // not reachable from the plugin's context — the environment fallback then
+    // answers undefined and the meter has nothing to render.
+    const asked: string[] = [];
+    const ctx = {
+      get: (name: string) =>
+        name === "credentials"
+          ? {
+              resolve: (ref: string) => {
+                asked.push(ref);
+                return Promise.resolve({ value: "go-key-from-store" });
+              },
+            }
+          : undefined,
+      loader: { entries: () => [llmRow] },
+    };
+    await expect(resolveGoApiKey(ctx)).resolves.toBe("go-key-from-store");
+    expect(asked).toContain("OPENCODE_GO_API_KEY");
+  });
+
+  it("answers nothing rather than throwing when the loader is unreachable", () => {
+    // A composition whose context cannot see the loader has no routes to read,
+    // and the resolution says so instead of failing a request over it.
+    expect(discoverGoConfig({ get: vi.fn() })).toEqual({});
   });
 });
