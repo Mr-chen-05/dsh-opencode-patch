@@ -161,6 +161,13 @@ which is the user's rule stated as code — everything they declared explicitly 
 
 **Two files, one new input.** `warmOrg` lives in `lifecycle.ts` and reads the grant per plane; `resolveApiKey` lives in `google-bridge.ts` and resolves a route's key. The bridge already takes an `inputs` object (the pool is one of them), so the token arrives the same way: `lifecycle.ts` passes a `loginToken(plane)` alongside `pool`, and the bridge calls it only where a reference was not named. That keeps the read in the module that already knows how to make it, and keeps the bridge from learning about the credential store.
 
+**Attempted once and reverted, and the two obstacles are worth writing down** so the next attempt is a single pass rather than a lint loop:
+
+1. `responses-provider.ts` does not import `createTokenStore`, and its import block is ordered, so the new import has to go in the right place rather than appended.
+2. The reader's `catch` cannot be `return undefined` (the lint calls it useless) and cannot be a bare `return` either (a useless return at the end of a function) — so the branch needs to return a value the function already has, or the reader needs a different shape. `undefined` is the right ANSWER here; the obstacle is how the lint config wants it expressed.
+
+Everything else is in place: the bridge's `resolveApiKey` already has the exact branch to extend (it returns `resolveGatewayKey` for a named reference), and the plane is derivable from the route id the bridge already receives.
+
 ## Status
 
 Built, in the order this file sets out:
