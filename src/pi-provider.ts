@@ -155,24 +155,3 @@ export const piModelFor = (
   name: spec.name,
   provider: plane,
 });
-
-/**
- * The headers every gateway request carries.
- *
- * The vendor asks clients to identify themselves and to send a stable session
- * id per conversation (`x-opencode-session`); the project attribution is what
- * groups usage in their Console.
- *
- * @param sessionId - the derived session id, when one is known.
- * @param userAgent - the CLI-shaped User-Agent this plugin claims to be.
- * @returns the headers to merge under any the caller already set.
- */
-export const gatewayHeaders = (
-  sessionId: string | undefined,
-  userAgent: string
-): Record<string, string> => ({
-  "user-agent": userAgent,
-  "x-opencode-client": "cli",
-  "x-opencode-project": "global",
-  ...(sessionId === undefined ? {} : { "x-opencode-session": sessionId }),
-});

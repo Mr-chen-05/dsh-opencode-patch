@@ -8,10 +8,29 @@ import { describe, expect, it } from "vitest";
 import type { CatalogModelSpec } from "../src/catalog-data.ts";
 import {
   BASE_FOR_PROTOCOL,
-  gatewayHeaders,
   piModelFor,
   protocolFor,
 } from "../src/pi-provider.ts";
+
+/**
+ * The headers this test feeds the model.
+ *
+ * A fixture, and it lives here because that is what it is. It was exported from
+ * `pi-provider.ts` and called only from this file, and it had drifted: it hardcodes
+ * `x-opencode-client` and `x-opencode-project` where `fetch-patch.ts`, which
+ * actually sends those headers, reads both from config. A fixture that disagrees
+ * with the thing it stands in for is worse than no fixture, and production should
+ * not carry one.
+ */
+const gatewayHeaders = (
+  sessionId: string | undefined,
+  userAgent: string
+): Record<string, string> => ({
+  "user-agent": userAgent,
+  "x-opencode-client": "cli",
+  "x-opencode-project": "global",
+  ...(sessionId === undefined ? {} : { "x-opencode-session": sessionId }),
+});
 
 /** A catalogued model, shaped exactly as `catalog-data.ts` ships them. */
 const spec = (id: string, providerNpm?: string): CatalogModelSpec => ({
