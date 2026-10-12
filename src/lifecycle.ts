@@ -18,6 +18,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { appendFileSync } from "node:fs";
 
 import {
   type PluginConfig,
@@ -30,10 +31,9 @@ import {
   readCredentialsWriter,
   readEntryOptions,
 } from "./cordis-context.ts";
-import { recordDebug } from "./debug.ts";
 import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
-import { isFetchFunction, isFunctionLike, isRecord } from "./guards.ts";
+import { isFetchFunction } from "./guards.ts";
 import { LEGACY_NAME, LEGACY_PKG, name } from "./identity.ts";
 import {
   type CatalogModelSpec,
@@ -130,6 +130,11 @@ const installFetchPatch = (
     return false;
   }
 
+  // Rotation is driven by the credential failures this interceptor is the only
+  // place to see — including the ones from routes the WRAPPER serves and from
+  // the Go plane, neither of which passes through a route of ours. The pool
+  // itself lives with the provider mount, so this asks it for a rotator and
+  // reports what it saw.
   /**
    * The org each plane's credential belongs to, read once and kept.
    *
@@ -160,11 +165,6 @@ const installFetchPatch = (
   const readAccountOrg = (plane: string): string | undefined =>
     orgByPlane.get(plane);
 
-  // Rotation is driven by the credential failures this interceptor is the only
-  // place to see — including the ones from routes the WRAPPER serves and from
-  // the Go plane, neither of which passes through a route of ours. The pool
-  // itself lives with the provider mount, so this asks it for a rotator and
-  // reports what it saw.
   const rotateAfterFailure = async (
     plane: string,
     status: number
@@ -184,11 +184,6 @@ const installFetchPatch = (
     // login for the plane the request is bound for, and a plane whose credential
     // is a plain key has none.
     resolveOrg: (plane) => readAccountOrg(plane) ?? config.credentialOrg,
-    // One JSONL line per request this interceptor touched, when the deployment
-    // asked for debugging. It is the only way to see a request that was patched
-    // wrongly: the gateway's answer for a malformed session id reads exactly
-    // like the answer for a bad credential.
-    ...debugHook(config, ctx),
   });
 
   // Warm the org cache before the first request can need it. Best-effort and
@@ -316,97 +311,31 @@ const installModelDiscovery = (
  * @param ctx - the Cordis host context.
  * @param rawConfig - the row config, if any.
  */
-const withCredentials = (
-  base: CordisContext,
-  service: unknown
-): CordisContext => {
-  if (service === undefined) {
-    return base;
-  }
-  return Object.create(base, {
-    get: {
-      value: (serviceName: string): unknown =>
-        serviceName === "credentials" ? service : base.get?.(serviceName),
-    },
-  }) as CordisContext;
-};
-
-/**
- * The request-monitoring hook, when the deployment asked for it.
- *
- * `debug` turns it on and `debugFile` says where the JSONL goes; with either
- * missing there is nowhere to write and nothing to record.
- *
- * @param config - the resolved plugin configuration.
- * @param ctx - the host context, for reporting a write failure.
- * @returns the hook, or nothing when debugging is off.
- */
-const debugHook = (
-  config: ResolvedPluginConfig,
-  ctx: CordisContext
-): { debug?: (entry: Record<string, unknown>) => void } => {
-  const file = config.debugFile;
-  if (!config.debug || file === undefined) {
-    return {};
-  }
-  return {
-    debug: (entry: Record<string, unknown>) => {
-      void recordDebug(ctx, file, entry);
-    },
-  };
-};
-
 export const apply = (
   ctx: CordisContext,
   rawConfig: PluginConfig = {}
 ): void => {
-  /**
-   * The host context, with the credential service made reachable.
-   *
-   * The plugin declares `inject = ["llm"]` and reads credentials optionally, and
-   * an optional service is NOT reachable by reading it off the context: cordis
-   * hands a plugin only what it declared, so `ctx.get("credentials")` answers
-   * undefined and every credential lookup silently degrades to the environment.
-   * The wrapper does the same thing for its own optional services —
-   * `ctx.inject(["settings"], child => …)` — and this is that pattern for the one
-   * service this plugin needs but cannot require.
-   *
-   * The override goes on a prototype-preserving copy rather than a spread: a cordis
-   * context carries its behaviour on the prototype, and copying own properties
-   * would drop every method the rest of this module calls.
-   *
-   * @param ctx - the host context.
-   * @param service - the captured credential service, when one was mounted.
-   * @returns a context that answers `get("credentials")` with it.
-   */
-
+  // TEMPORARY: the host terminal has shown none of this plugin's output, so a
+  // file is the one channel that can be read back — and it answers whether the
+  // host half runs at all. Remove once the meter renders.
+  try {
+    appendFileSync(
+      "/tmp/dsh-opencode-patch.log",
+      `[dsh-opencode-patch] apply() ran; providers=[${[...resolveConfig(rawConfig).providers].join(",")}]\n`
+    );
+  } catch {
+    // A missing /tmp write must not stop the plugin.
+  }
   const config = resolveConfig(rawConfig);
   const als = new AsyncLocalStorage<ActiveTurnState>();
 
-  // The credential service is optional, so it is captured rather than declared.
-  // Until this exists the plugin read it off the context, where cordis answers
-  // undefined for anything not in `inject` — which is why the Go meter showed
-  // no data while its endpoint answered 200 for the same key.
-  let credentialService: unknown;
-  try {
-    ctx.inject?.(["credentials"], (scope: unknown) => {
-      credentialService =
-        isRecord(scope) && isFunctionLike(scope.get)
-          ? Reflect.apply(scope.get, scope, ["credentials"])
-          : undefined;
-    });
-  } catch {
-    // A context without `inject` (a test double) simply has no optional service.
-  }
-  const host = withCredentials(ctx, credentialService);
+  logRenameNotice(ctx);
+  installUsageService(ctx, config);
 
-  logRenameNotice(host);
-  installUsageService(host, config);
-
-  if (!installFetchPatch(host, config, als)) {
+  if (!installFetchPatch(ctx, config, als)) {
     return;
   }
 
-  installStreamHook(host, config, als);
-  installModelDiscovery(host, config);
+  installStreamHook(ctx, config, als);
+  installModelDiscovery(ctx, config);
 };

@@ -7,7 +7,6 @@
  * per line, newline-terminated) is verified rather than assumed.
  */
 
-import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +14,31 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { recordDebug } from "../src/debug.ts";
+
+// The write path catches whatever appendFile throws, and one of its branches
+// only exists for a rejection that is not an Error — which a real filesystem
+// never produces. The sentinel path rejects with a plain string so that
+// branch is exercised; every other path delegates to the real appendFile,
+// so the tests below keep writing real temporary files.
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    appendFile: async (file: unknown, data: unknown, options?: unknown) => {
+      if (file === "throw-a-string") {
+        // The fixture rejects with a non-Error on purpose: the branch under test
+        // exists only for a third-party rejection that is not an Error.
+        // oxlint-disable-next-line eslint/no-throw-literal, typescript/only-throw-error
+        throw "string failure";
+      }
+      return actual.appendFile(
+        file as string,
+        data as string,
+        options as BufferEncoding
+      );
+    },
+  };
+});
 
 let dir: string;
 
@@ -74,15 +98,16 @@ describe("recordDebug", () => {
   });
 
   it("serializes a non-Error throw as a string message", async () => {
-    // A path whose parent is a file (not a directory) fails with ENOTDIR.
-    const file = join(dir, "plain.txt");
-    await recordDebug({}, file, { ok: true });
+    // The branch a real filesystem never takes: appendFile rejecting with
+    // something that is not an Error. The message still has to reach the log
+    // as text, so the fallback String(...) is what the warn carries.
     const warn = vi.fn<(...args: unknown[]) => void>();
-    await recordDebug({ logger: { warn } }, join(file, "child.jsonl"), {
-      a: 1,
-    });
+    await expect(
+      recordDebug({ logger: { warn } }, "throw-a-string", { a: 1 })
+    ).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledOnce();
-    const [, detail] = warn.mock.calls[0] ?? [];
-    assert.ok(typeof detail === "string" && detail.length > 0);
+    const [message, detail] = warn.mock.calls[0] ?? [];
+    expect(String(message)).toContain("debugFile write failed");
+    expect(detail).toBe("string failure");
   });
 });
