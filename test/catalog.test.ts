@@ -206,9 +206,11 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     for (const [npm, ids] of buckets) {
       const protocol = PROTOCOL_FOR_SDK[npm];
       if (protocol === undefined) {
-        // `@ai-sdk/google` is the deliberate exception: `isServableSdk` keeps it
-        // out of every picker, so it is carried only to be excluded on purpose
-        // rather than being absent by accident.
+        // `@ai-sdk/mistral` is the deliberate exception, and it is the only one:
+        // `isServableSdk` keeps it out of every picker, so it is carried only to
+        // be excluded on purpose rather than being absent by accident.
+        // `@ai-sdk/google` used to be here too; it now maps to a protocol the
+        // bridge serves, so it takes the branch below.
         expect(isServableSdk(npm)).toBe(false);
         expect(ids.length).toBeGreaterThan(0);
         continue;

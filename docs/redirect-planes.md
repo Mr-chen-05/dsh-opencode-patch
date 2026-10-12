@@ -73,7 +73,7 @@ These are the rules a correct implementation satisfies. Each one has a test in �
 
 ## 6. Refactor (done)
 
-The gap was structural, not a missing branch: **the plane is not part of a route's definition.** `responses-provider.ts` holds one `DEFAULT_BASE_URL` for every route it mounts, and `responses-routes.ts` keys its table by protocol alone, so a Go model cannot be described at all.
+The gap was structural, not a missing branch: **the plane was not part of a route's definition.** `responses-provider.ts` held one base URL for every route it mounted, and `responses-routes.ts` keyed its table by protocol alone, so a Go model could not be described at all. The fix was to make the plane a key rather than a constant — `ROUTE_FOR_PLANE_PROTOCOL` now carries a base URL per plane, and the mount reads the catalog and the credential from the same one.
 
 1. Key the route table by (plane, protocol). `ROUTE_FOR_PLANE_PROTOCOL[plane][protocol] → route`, replacing `ROUTE_FOR_PROTOCOL`. The Zen rows keep their current ids; the Go rows are new.
 2. Give every route its plane. A route descriptor carries `{ id, plane, protocol }`, and the mount reads the base URL, catalog and credential **from the plane** rather than from a module constant.
