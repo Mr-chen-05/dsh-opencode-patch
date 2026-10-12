@@ -78,7 +78,12 @@ const GO_BASE =
   process.env.OPENCODE_GO_BASE_URL ?? "https://opencode.ai/zen/go/v1";
 
 /** Generous: these cross the public internet from CI. */
-const TIMEOUT_MS = 30_000;
+// Deliberately SHORTER than the suite's `testTimeout` (30s), because the two
+// racing at the same value is a coin toss: whichever timer fires first wins, and
+// when the suite's wins the case FAILS instead of reaching the catch that
+// returns status 0 and skips. Measured in CI, where it did exactly that — the
+// gateway held the connection open and two Go-plane probes went red for it.
+const TIMEOUT_MS = 20_000;
 
 /**
  * Wall-clock allowance for a fan-out case.
