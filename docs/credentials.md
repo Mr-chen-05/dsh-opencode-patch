@@ -192,6 +192,10 @@ No try/catch is needed: the store's `read` is documented to answer `undefined` w
 
 **And the test it needs** mirrors the one at `test/google-bridge.test.ts` that streams through the real adapter with `BRIDGE_STREAM_KEY` set: register the bridge with `apiKeyRef: ""` and a `loginToken` that returns a sentinel, intercept the request, and assert the `Authorization` header carries the sentinel. That is the whole of what is left.
 
+**The one thing the first test attempt got wrong, measured.** `auth.apiKey.resolve` is not on the adapter instance. It is built in a closure and handed to the adapter's CONSTRUCTOR (`Reflect.construct(adapter, [{ auth: { apiKey: { name, resolve } } }])`), so reaching it means going through `adapter.stream(...)` — which is what the existing stream test already does. It is also SYNCHRONOUS: it returns `{ auth: { apiKey }, source }` rather than a promise, and the comment above it says so, because pi awaits the value.
+
+So the test is the stream test with two changes: register with an empty `apiKeyRef` and a `loginToken` returning a sentinel, then assert the request's `Authorization` header carries the sentinel. The interception boilerplate is already written there.
+
 1. `responses-provider.ts` does not import `createTokenStore`, and its import block is ordered, so the new import has to go in the right place rather than appended.
 2. The reader's `catch` cannot be `return undefined` (the lint calls it useless) and cannot be a bare `return` either (a useless return at the end of a function) — so the branch needs to return a value the function already has, or the reader needs a different shape. `undefined` is the right ANSWER here; the obstacle is how the lint config wants it expressed.
 
