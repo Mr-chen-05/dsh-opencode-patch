@@ -135,14 +135,14 @@ Those endpoints authenticate in **two ways**, because they speak three wire shap
 
 The gateway serves four protocol families, and **OpenAI alone is two of them**: Chat Completions and Responses are different wire formats, not two names for one thing. A model that needs Responses does not work on the completions endpoint, and the gateway does not fall back — it answers `500`.
 
-DSH can speak three of the four families, so the patch routes those three and **deliberately does not offer the fourth** (Google Generative AI). See the table below.
+DSH speaks three of the four families itself. The fourth — Google Generative AI — is served by **this patch's own adapter**, registered on the host's `llm` service under the route `opencode-google`, so all four are routed. See the table below.
 
 ### 1. OpenCode Zen (`provider: opencode`) — pay-as-you-go & free tier
 
 - **Anthropic Messages** (`https://opencode.ai/zen/v1/messages`): `claude-sonnet-4-5`, `claude-opus-4-7`, `claude-haiku-4-5`, `qwen3.8-flash`
 - **OpenAI Responses** (`https://opencode.ai/zen/v1/responses`): `gpt-5.4`, `gpt-5.2`, `gpt-5.1-codex-max`, `muse-spark-1.3`, `space-bunny-free`, and the free-tier `muse-spark-1.3-contributor-free`
 - **OpenAI Chat Completions** (`https://opencode.ai/zen/v1/chat/completions`): `deepseek-v4.1-flash`, `kimi-k2.5`, `kimi-k3`, `minimax-m2.5`, `glm-5.2`, plus free-tier `nemotron-3-ultra-free`, `ling-3.0-flash-fin-free`, `mimo-v2.6-flash-free`
-- **Google Generative AI** (`https://opencode.ai/zen/v1/models/*:streamGenerateContent`): `gemini-3.8-flash`, `gemini-3.1-pro`, `gemini-3.5-flash-lite`
+- **Google Generative AI** (`https://opencode.ai/zen/v1/models/*:streamGenerateContent`), served by this patch's adapter as `opencode-google`: `gemini-3.8-flash`, `gemini-3.1-pro`, `gemini-3.5-flash-lite`
 
 ### 2. OpenCode Go (`provider: opencode-go`) — subscription quota
 
@@ -160,14 +160,14 @@ Zen's provider-level SDK is `@ai-sdk/openai-compatible`. models.dev names a **di
 | _(absent)_ | 28 | OpenAI Chat Completions | the route you configured |
 | `@ai-sdk/openai` | 30 | OpenAI Responses | `opencode-responses` |
 | `@ai-sdk/anthropic` | 18 | Anthropic Messages | `opencode-anthropic` |
-| `@ai-sdk/google` | 7 | _(no such protocol in DSH)_ | **not offered** |
+| `@ai-sdk/google` | 7 | Google Generative AI | `opencode-google` |
 
 Counts are the **83** active `opencode` models in `models.dev` as of 2026-10-09 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 83 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
 
 The patch **keeps those two routes out of both the model picker and _Settings → Models_**. Three properties hold today, and one does not yet:
 
 - **You keep choosing.** The picker shows exactly the models you listed, and each one is matched to the right protocol automatically. OpenCode serves models on three shapes — OpenAI Chat Completions (the default), OpenAI Responses, and Anthropic Messages — and a model that needs one of the other two is dispatched to the route that speaks it. No second route to declare by hand.
-- **You are never offered a model that cannot work.** The 8 `@ai-sdk/google` models are dropped from the discovery list _and_ from what the `opencode` route reports, because DSH implements no such protocol and selecting one could only fail — with nothing in the row to say why.
+- **You are never offered a model that cannot work.** Every one of the four families is reachable, so no model is dropped for want of a protocol: the `@ai-sdk/google` models are served through the patch's own adapter, and the three DSH already speaks are dispatched to the route that speaks them.
 - **One credential.** Every routed model authenticates with the `opencode` key you already configured, resolved through the credentials service and never re-asked for.
 
 **The route, if you would rather declare it yourself:** `opencode-responses` — and `opencode-anthropic`, once you use an Anthropic-plane model — can live in your profile's `llm-pi-ai` `providers` block, listing the models it serves. Declaring it is a choice, not a requirement:
