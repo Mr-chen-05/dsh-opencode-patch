@@ -255,3 +255,11 @@ Built, and the account plane it serves:
 The page hands it the remote by reading `ctx.remote` rather than declaring `remote.opencodeLogin` as an inject key, because a declared key is a HARD dependency: it would hold the whole plugin waiting for a service a host may not mount.
 
 What a login is FOR is measured, not assumed: the account's session token, on `/inference/openai/v1` with its org, serves a paid model — `deepseek-v4.1-flash` answers `200` — while the free tier refuses it. So the account plane is a working credential for real traffic, and the free tier is the part that is not granted rather than the part that is broken.
+
+## Reading the installation's own credential store needs no dependency
+
+The opt-in reader was parked on a dependency question: OpenCode 2.0 keeps its credentials in a database rather than a JSON file, so reading it needs SQLite, and adding a driver to a plugin this small is a decision rather than a detail.
+
+That decision is now measured rather than open. `node:sqlite` is a built-in on the Node this host runs (26.x), exporting `DatabaseSync`, `StatementSync` and `backup`, so the reader can open `~/.local/share/opencode/opencode.db` with no new dependency at all. The constraint it inherits is the bundle rule: `node:sqlite` is a host-only import, so the reader lives on the host side and the client never reaches it — which is what `scripts/check.ts` enforces rather than what anyone has to remember.
+
+**It stays opt-in and off by default.** A declared DSH credential is always the first answer, and reading another tool's store is something a user turns on, not something that happens to them.
