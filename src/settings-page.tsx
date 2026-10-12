@@ -420,7 +420,20 @@ export const apply = (ctx: ClientContext): void => {
       };
     };
 
+  // The meter registers exactly once, whichever way it is reached. Two ways are
+  // deliberate: the scoped inject calls this when the host's remote face appears,
+  // and a ten-second fallback calls it anyway so the read can report its own
+  // reason. Both firing is the normal case, not the exception — and registering
+  // the same slot id twice THROWS, which took the meter out entirely:
+  //   list slot "conversation.input.right" already has an entry with id
+  //   "dsh-opencode-patch-usage" ... (registered by registerMeter)
+  // Measured in a browser, after a restart, as the whole of the reported symptom.
+  let registered = false;
   const registerMeter = (meterScope: ClientContext): void => {
+    if (registered) {
+      return;
+    }
+    registered = true;
     // `conversation.input.right` renders in the composer bar's trailing controls,
     // immediately BEFORE `conversation.input.model` — so it is the seat beside
     // the model selector. `conversation.input.left` is the far end of the leading
