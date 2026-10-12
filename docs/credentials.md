@@ -159,6 +159,8 @@ So the reported `401 Invalid API key` on a route with no reference is not this f
 
 which is the user's rule stated as code — everything they declared explicitly outranks anything the plugin found on its own — and it is the same `orElse` shape 2.0 uses. `warmOrg` already reads the grant per plane and keeps the org; the same read yields the access token, so this is a return value that is currently discarded rather than a new lookup.
 
+**Two files, one new input.** `warmOrg` lives in `lifecycle.ts` and reads the grant per plane; `resolveApiKey` lives in `google-bridge.ts` and resolves a route's key. The bridge already takes an `inputs` object (the pool is one of them), so the token arrives the same way: `lifecycle.ts` passes a `loginToken(plane)` alongside `pool`, and the bridge calls it only where a reference was not named. That keeps the read in the module that already knows how to make it, and keeps the bridge from learning about the credential store.
+
 ## Status
 
 Built, in the order this file sets out:
