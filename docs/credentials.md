@@ -144,6 +144,11 @@ Two more details worth copying. Secrets are `Redacted`, so they are never string
 
 So the shape to copy is two-layered, and both layers already exist here in some form: a source list (literal, config, installation, captured request) and an order that puts everything the user declared ahead of everything inferred. Reading a file is one entry in the first list, and the switch that turns it on belongs to the user, not to this plugin's default.
 
+**The last link, and the one still missing.** `resolveGatewayKey` already does the right thing for a route that names a reference: it asks the credential service, then the environment, and when neither answers it raises a NAMED error — `MISSING_CREDENTIAL`, with the reference and the route in the message. That is the shape the rest of this file should have, and two gaps sit either side of it.
+
+- **A route with no reference returns `undefined` silently.** Correct for a local service that needs no key, wrong for a gateway route that does — and the two are indistinguishable at that point. The answer is the URL: a request bound for a claimed gateway host with no key resolved should raise rather than go out and earn a `401` that reads like a bad credential.
+- **A login's token is not usable as a route's credential.** `warmOrg` reads the stored grant for the plane's ORG and nothing else, so a deployment that has signed in still needs `apiKeyEnv` on every route. Wiring the grant's access token into the same resolution is what would make a login sufficient on its own, which is the point of having one.
+
 ## Status
 
 Built, in the order this file sets out:
