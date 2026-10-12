@@ -47,7 +47,7 @@ A route is a name the host can dispatch to, carrying exactly one plane's base UR
 | **`opencode-go-responses`** | Go    | `openai-responses`      | Go       |
 | **`opencode-go-anthropic`** | Go    | `anthropic-messages`    | Go       |
 
-The last two do not exist yet. Their absence is why 13 offered Go models cannot work.
+The last two exist, and they are what closed the gap this section was written around: 13 Go models that name a non-completions SDK were offered with nowhere to go, and each now has a route on its own plane.
 
 ## 4. Invariants
 
@@ -55,11 +55,11 @@ These are the rules a correct implementation satisfies. Each one has a test in Â
 
 |  | Invariant | What it requires |
 | :-- | :-- | :-- |
-| I1 | Every offered model is routable | If a model appears in the picker, a route exists that serves it on the shape its SDK names. A model that cannot work is not offered. This is the plugin's headline promise, and the Go gap broke it. |
+| I1 | Every offered model is routable | If a model appears in the picker, a route exists that serves it on the shape its SDK names. A model that cannot work is not offered. This is the plugin's headline promise; the Go gap broke it once, and the Go routes closed it. |
 | I2 | A route carries one plane | Its base URL, its catalog and its credential all come from the same plane. Mixing them resolves to "model not found" against the route's own endpoint, the failure `responses-provider.ts` documents and works around by passing the Zen catalog explicitly. |
 | I3 | The route is chosen from (plane, SDK) | Never from the SDK alone. `@ai-sdk/mistral` shares the completions _path_ but not its protocol, and the same SDK appears on both planes. |
 | I4 | No SDK means the plane's base route | A model naming no SDK stays where it is, on `openai-completions`. |
-| I5 | An SDK with no protocol is not offered | `@ai-sdk/google` is the only such SDK, and it is a decision recorded in `UNSERVED_SDKS`, not a gap. Both look identical at runtime. |
+| I5 | An SDK with no protocol is not offered â€” unless this plugin serves it | `@ai-sdk/mistral` is the only SDK left in `UNSERVED_SDKS`, and its absence is a decision rather than a gap. `@ai-sdk/google` used to be there too; the bridge took it out by serving the protocol through the plugin's own adapter, which is why the set and the bridge's route must be read together. |
 
 ## 5. Guards
 
