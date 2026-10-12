@@ -56,7 +56,7 @@
 
 - 🔑 Deterministic `ses_<12hex><14base62>` session hashing with KV-cache affinity across turns, subagents and forks
 - 🌐 Gateway origin restoration — `User-Agent`, `x-opencode-client`, `x-opencode-project`, parent-session lineage
-- 🧰 Free-tier `read` + `bash` tool-schema fallback so Zen free models stop failing with `403 FreeTierError`
+- 🧰 Free-tier `read` + `bash` tool-schema fallback, so a free-tier body carries the tool definitions its endpoint requires — one cause of a `403` removed, and not the whole of it: the gateway's gate is not in the request, measured
 - 📇 models.dev-backed catalog with offline shims and background SWR refresh — names, context windows, prices
 - ⭕ Live dual-mode composer meter — Go quota ring (5-hour / weekly / monthly) or Zen pay-as-you-go pill, plus session spend and model rate
 - 🕵️ Strict credential isolation — Zen keys (`oc_sk_…`) never query the Go quota endpoint
@@ -115,7 +115,7 @@ Done — the **OpenCode Patch** card appears under _Settings → Plugins_, and t
 
 | Without the patch | With `dsh-opencode-patch` |
 | :-- | :-- |
-| Zen free models fail with `403 FreeTierError` | **Gateway origin headers & tool fallbacks** restored automatically |
+| Zen free models fail with `403 FreeTierError` | **Gateway origin headers & tool fallbacks** restored automatically — which removes one cause of it, and the tier itself is the gateway's to grant |
 | Only one API shape can be served per route — the rest answer `500` once the basics work | **Per-model routing** — each model dispatched to the endpoint its own SDK names, read from the catalog |
 | Session IDs rejected with `400 MissingSessionID` | **Deterministic `ses_…` session hashing** and affinity across turns |
 | Subagents lose conversation context | **Parent session tracking** (`x-opencode-parent-session-id`, `x-parent-session-id`) |
