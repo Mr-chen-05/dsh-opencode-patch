@@ -171,8 +171,12 @@ export const OpencodeCard: React.FC<CardProps> = (props: CardProps) => {
         <div
           style={{
             borderBottom: "0.5px solid var(--dsw-alias-border-l2)",
-            marginBottom: 12,
-            paddingBottom: 12,
+            // Room to breathe: these blocks are three different things - who is
+            // signed in, what the quota is, and the form - and 12px made them
+            // read as one crowded column, with the hairline doing all the
+            // separating.
+            marginBottom: 20,
+            paddingBottom: 16,
           }}
         >
           <LoginSection getLocale={props.getLocale} login={props.login} t={t} />
@@ -182,8 +186,12 @@ export const OpencodeCard: React.FC<CardProps> = (props: CardProps) => {
         <div
           style={{
             borderBottom: "0.5px solid var(--dsw-alias-border-l2)",
-            marginBottom: 12,
-            paddingBottom: 12,
+            // Room to breathe: these blocks are three different things - who is
+            // signed in, what the quota is, and the form - and 12px made them
+            // read as one crowded column, with the hairline doing all the
+            // separating.
+            marginBottom: 20,
+            paddingBottom: 16,
           }}
         >
           <UsageSummary
