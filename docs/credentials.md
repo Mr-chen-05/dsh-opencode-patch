@@ -163,6 +163,35 @@ which is the user's rule stated as code — everything they declared explicitly 
 
 **Attempted once and reverted, and the two obstacles are worth writing down** so the next attempt is a single pass rather than a lint loop:
 
+**The edit itself is settled — 34 lines across two files, verified green before it was reverted.** What stopped it was the TEST, not the code: `vp check` passed, all 765 tests passed, and the coverage ratchet then failed on the two new lines. So the next attempt starts from this, not from the analysis:
+
+    google-bridge.ts
+      GoogleBridgeInputs gains:
+        readonly loginToken?: (plane: string) => Promise<string | undefined>;
+      resolveApiKey's tail becomes:
+        const named = resolved.apiKeyEnv;
+        if (typeof named === "string" && named.length > 0) {
+          return resolveGatewayKey(ctx, named, String(route));
+        }
+        return inputs.loginToken?.(
+          String(route).startsWith("opencode-go") ? "opencode-go" : "opencode"
+        );
+
+    responses-provider.ts
+      imports: createTokenStore from "./token-store.ts", name from "./identity.ts"
+      beside the existing `pool: poolFor("opencode")`:
+        loginToken: async (plane) => {
+          const store = createTokenStore({
+            credentials: readCredentialsWriter(ctx), plane, scope: name,
+          });
+          const login = await store?.read();
+          return login?.accessToken;
+        },
+
+No try/catch is needed: the store's `read` is documented to answer `undefined` when nothing is stored and does not throw, which is also what removed both obstacles above.
+
+**And the test it needs** mirrors the one at `test/google-bridge.test.ts` that streams through the real adapter with `BRIDGE_STREAM_KEY` set: register the bridge with `apiKeyRef: ""` and a `loginToken` that returns a sentinel, intercept the request, and assert the `Authorization` header carries the sentinel. That is the whole of what is left.
+
 1. `responses-provider.ts` does not import `createTokenStore`, and its import block is ordered, so the new import has to go in the right place rather than appended.
 2. The reader's `catch` cannot be `return undefined` (the lint calls it useless) and cannot be a bare `return` either (a useless return at the end of a function) — so the branch needs to return a value the function already has, or the reader needs a different shape. `undefined` is the right ANSWER here; the obstacle is how the lint config wants it expressed.
 
