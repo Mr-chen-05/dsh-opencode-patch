@@ -198,6 +198,10 @@ No try/catch is needed: the store's `read` is documented to answer `undefined` w
 
 **And one hypothesis is ruled out for the next attempt.** `registerGoogleBridge` destructures `const { ctx, host, llm, specs } = inputs` and then reads `inputs.pool` directly, so `inputs.loginToken` reaches `resolveApiKey` the same way the pool does — the field is not dropped, and the edit needs no change on that account. The failure is in the test's route to `fetch`, not in the wiring.
 
+**And one gap the wiring opens, which the next pass should close with it.** The grants are keyed per plane, and both sides derive the plane with the same rule — `opencode-go` for a Go route, `opencode` otherwise. But the sign-in card defaults to `opencode`, so a user who signs in once has a grant the Go routes never ask for, and those routes fall through to `undefined` exactly as before.
+
+Measured earlier in this file: the account token is not plane-specific. The same token serves `/inference/openai/v1` with its org, and the same key answers on both planes. So one sign-in should serve both, and the reader should try the plane it was asked for and then the other one before answering `undefined` — three lines in `loginTokenReader`, plus the case that pins it.
+
 The existing stream test gets past that point by setting `process.env. BRIDGE_STREAM_KEY` before it registers. A test for this branch needs the same: give the route a resolvable key by some other means so the stream reaches the request, and let the assertion be about which of the sources supplied it. That is the only piece still missing, and it is one line in a test that already exists.
 
 So the test is the stream test with two changes: register with an empty `apiKeyRef` and a `loginToken` returning a sentinel, then assert the request's `Authorization` header carries the sentinel. The interception boilerplate is already written there.
