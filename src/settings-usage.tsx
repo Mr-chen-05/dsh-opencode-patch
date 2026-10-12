@@ -78,7 +78,7 @@ export const readGoUsage = async (
   if (!isRecord(service) || !isReadFunction(service.read)) {
     console.warn(
       "[dsh-opencode-patch] usage read: no opencodeGoUsage service on the remote",
-      Object.keys(scope.remote)
+      Object.keys(isRecord(scope.remote) ? scope.remote : {})
     );
     return undefined;
   }
