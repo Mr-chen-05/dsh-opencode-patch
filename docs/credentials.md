@@ -200,6 +200,10 @@ No try/catch is needed: the store's `read` is documented to answer `undefined` w
 
 **And one gap the wiring opens, which the next pass should close with it.** The grants are keyed per plane, and both sides derive the plane with the same rule — `opencode-go` for a Go route, `opencode` otherwise. But the sign-in card defaults to `opencode`, so a user who signs in once has a grant the Go routes never ask for, and those routes fall through to `undefined` exactly as before.
 
+**And a second one, in the same shape: the org cache is warmed once, at startup.** `lifecycle.ts` reads the stored grant for both planes before the first request can need it, and `orgByPlane` is then consulted per request. But a LOGIN happens after that — the user signs in from the card, minutes or hours into the process — so the cache still holds whatever was true at startup, and the requests that follow carry no `x-opencode-org-id` even though the grant now has one.
+
+Both gaps are the same mistake: a value that can change while the process runs, read once and kept. The token reader was the first; this is the second, and the fix is the same shape — read it where it is needed, or refresh it when the thing that feeds it changes. The login completing is exactly that event, and it already knows which plane it wrote.
+
 Measured earlier in this file: the account token is not plane-specific. The same token serves `/inference/openai/v1` with its org, and the same key answers on both planes. So one sign-in should serve both, and the reader should try the plane it was asked for and then the other one before answering `undefined` — three lines in `loginTokenReader`, plus the case that pins it.
 
 The existing stream test gets past that point by setting `process.env. BRIDGE_STREAM_KEY` before it registers. A test for this branch needs the same: give the route a resolvable key by some other means so the stream reaches the request, and let the assertion be about which of the sources supplied it. That is the only piece still missing, and it is one line in a test that already exists.
