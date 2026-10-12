@@ -122,6 +122,15 @@ So the shape is one object per provider, `type: "api"` with a `key`, or `type: "
 
 So a reader that only understood `auth.json` would cover the two shapes that file happens to hold and miss `External` entirely - and it would be reading a format the CLI has already moved on from. The opt-in, when it is built, has to read what 2.0 reads: the database, all three kinds, and `integrationID` rather than a provider name.
 
+**And 2.0 already solves the priority problem this file is about.** Its auth model (`packages/ai/src/route/auth.ts`) is a small algebra, and the part that matters here is `orElse`:
+
+    Credential { load, orElse(that), bearer(), header(name) }
+    Secret     = string | Redacted | Config.Config<string>
+
+A credential is LAZY (`load` is an effect that can fail), it can be combined with another as a fallback (`orElse`), and one of the things it can be built from is **config** — which is the user's own declaration. So "the user's key first, the installation's only if they asked" is not a rule to invent: it is the shape the vendor already uses, and `orElse` is where the order lives.
+
+Two more details worth copying. Secrets are `Redacted`, so they are never stringified by accident. And a missing one raises a named `MissingCredentialError` rather than resolving to nothing — which is the difference between the failure this plugin spent a long time chasing and one that says what it is.
+
 ## Status
 
 Built, in the order this file sets out:
