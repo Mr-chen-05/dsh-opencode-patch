@@ -55,3 +55,15 @@ updates:
           - typescript
           - vitest
           - "@vitest/*"
+    ignore:
+      # pi-ai is not ours to bump. The bridge loads pi from the wrapper's copy, so
+      # our pin has to satisfy the range the wrapper declares - `^0.87.1`, which on
+      # a 0.x version means 0.87.x and nothing else. A second pi beside the
+      # wrapper's is the failure this prevents: two module instances drift apart
+      # the moment either side moves, and `test/google-bridge.test.ts` asserts the
+      # pin satisfies the range, so a bump here would land red rather than break
+      # something quietly. A dependabot PR proposing 1.1.0 is exactly that.
+      - dependency-name: "@earendil-works/pi-ai"
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
