@@ -104,9 +104,13 @@ Built, in the order this file sets out:
 
 - **The switch, and its default.** `credentialPool` carries `enabled`, `zen` and `go`. The defaults are `false` with empty lists, `createCredentialPool` answers `undefined` for that, and every caller then resolves exactly what it resolved before the pool existed. Listing credentials without turning the switch on changes nothing, which is the contract.
 
-- **The device-flow client.** `src/console-auth.ts`: one client serves both logins, written against the measured responses. `start` asks for a code, `poll` reads the Console's own error field rather than its status, and `awaitAuthorization` waits at the endpoint's interval — doubling it after a `slow_down`, which is what that error asks for. The verification URI is resolved against the Console, because the endpoint answers a relative path and opening that verbatim opens nothing. `refresh` returns the pair together, because the Console rotates the refresh token with every access token and the caller must write both halves at once. Verified against the live Console: this module's own client obtained a code, read the interval, and reported two pending polls.
+- **The device-flow client.** `src/console-auth.ts`: one client serves both logins, written against the measured responses. `start` asks for a code, `poll` reads the Console's own error field rather than its status, and `awaitAuthorization` waits at the endpoint's interval — doubling it after a `slow_down`, which is what that error asks for. The verification URI is resolved against the Console, because the endpoint answers a relative path and opening that verbatim opens nothing. `refresh` returns the pair together, because the Console rotates the refresh token with every access token and the caller must write both halves at once. It also reads what the login must know before it stores anything: `GET /api/user` for the account and `GET /api/orgs` for its organizations, both with the session token as a bearer credential, which is the same pair the client itself reads. Verified against the live Console: this module's own client obtained a code, read the interval, and reported two pending polls.
 
 - **A login in use.** `src/login-session.ts`: the store and the client are joined. A token inside the window is refreshed before it is handed out, so the call it authenticates is the one that succeeds; concurrent callers share one refresh, because a refresh rotates the refresh token and two of them would present one the server has already replaced. Nothing is invented: no login, no refresh token, and a refusal each report a failure rather than a credential that looks present and is not.
+
+- **The flow that keeps what it learned.** `src/login-flow.ts`: ask for a code, wait for the approval, read the account and the orgs with the token just obtained, then write ONE grant — the pair, the account, the email, the orgs and the active org. If the owner cannot be read the login FAILS and stores nothing, because a token stored without its org authenticates and cannot reach the free tier: it looks like success and behaves like the wall this file exists to remove. The first org is activated, matching the client.
+
+- **The org on the request.** `fetch-patch.ts` sends `x-opencode-org-id` from a per-plane resolver — asked per request, because a login can arrive while the process runs — and invents no header when a plane's credential is a plain key, which is every key deployment. `credentialOrg` is the explicit fallback for a token that came from elsewhere.
 
 Not built yet:
 
@@ -116,6 +120,8 @@ Not built yet:
 
 - **The settings card.** The pool's section is configuration-only, and says why: a list of credential references is not something to type into a settings form. The card that would paste a key into the store belongs with the login surface, since both are "put a credential here" and neither is a row of knobs.
 
-- **v1's account and organization context.** `/api/user` and `/api/orgs` are measured only as unreachable here: they need a token this account does not hold. The org-switching half of v1 is therefore unbuilt and unmeasurable until one does.
+- **v1's organization SWITCHING.** What is missing is the surface for choosing among several orgs: the login activates the first, matching the client, and a deployment with more than one changes it by writing the record.
+
+  Both reads it would need are implemented and measured. `GET /api/user` answers `{"id":"acc_…","email":"…","name":null,"role":"user"}` and `GET /api/orgs` answers `[{"id":"wrk_…","name":"Default","avatarUrl":null}]`, against the account this machine is signed into — so the two fields each read requires, an id and an email, an id and a name, are present, and the org id is the same one the captured request carried.
 
 The first OAuth grant is the one piece a test cannot finish: the approval step is a human in a browser. Everything around it can, and has.
