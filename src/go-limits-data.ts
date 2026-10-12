@@ -33,8 +33,8 @@ export const GO_MODEL_LIMITS: Readonly<Record<string, ModelAllowance>> = {
     name: "DeepSeek V4 Pro (Off-Peak)",
   },
   "deepseek-v4.1-flash": {
-    go: 60,
-    goPlus: 120,
+    go: 80,
+    goPlus: 160,
     name: "DeepSeek V4.1 Flash (Off-Peak)",
   },
   "glm-5.2": {
