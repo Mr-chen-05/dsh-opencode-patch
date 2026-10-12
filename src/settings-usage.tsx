@@ -249,7 +249,11 @@ export const UsageSummary: React.FC<UsageSummaryProps> = ({
         if (live) {
           setUsage(next);
         }
-      } catch {
+      } catch (error) {
+        // The meter's empty state is the same for every cause, so the one place
+        // that knows the read failed says which it was. Without this, a failing
+        // read and a service that was never mounted look identical.
+        console.warn("[dsh-opencode-patch] usage read failed", error);
         if (live) {
           setUsage(undefined);
         }

@@ -254,8 +254,16 @@ export const apply = (ctx: ClientContext): void => {
     const mount = async (): Promise<void> => {
       try {
         dispose = await ctx.remote?.$mount?.(usageRemote);
-      } catch {
-        // Unrendered meter, as before.
+      } catch (error) {
+        // Report it rather than swallow it. The meter renders nothing when this
+        // mount fails, and "renders nothing" is indistinguishable from every
+        // other reason a meter can be empty - so the one place that KNOWS the
+        // mount threw says so, in the console the reader of a broken meter will
+        // already have open.
+        console.warn(
+          "[dsh-opencode-patch] usage remote did not mount; the meter will render nothing",
+          error
+        );
       }
     };
     void mount();
