@@ -104,6 +104,40 @@ describe("apply (plugin lifecycle)", () => {
     expect(() => apply(bare)).not.toThrow();
   });
 
+  it("survives a composition with neither mount path, and reports it", () => {
+    // The fallback's whole job is to not give up: `ctx.provide` reaches the same
+    // lookup the client uses, so a composition with one but not the other still
+    // publishes both services. A real cordis context is what the service
+    // constructors need, so this asserts the reachable half - the path is taken,
+    // and a context with neither mount point is a report rather than a throw.
+    const warned: string[] = [];
+    const logger = { warn: (msg: string) => warned.push(msg) };
+    const withProvide = {
+      effect: () => {},
+      llm: {},
+      logger,
+      on: () => {},
+      provide: () => {},
+    } as unknown as CordisContext;
+    expect(() => apply(withProvide, { usageEnabled: true })).not.toThrow();
+
+    // Neither `plugin` nor `provide`: the installer says so instead of throwing,
+    // which is what keeps one service's absence from taking the rest of `apply`
+    // down with it.
+    expect(() =>
+      apply(
+        {
+          effect: () => {},
+          llm: {},
+          logger,
+          on: () => {},
+        } as unknown as CordisContext,
+        { usageEnabled: true }
+      )
+    ).not.toThrow();
+    expect(warned.join(" ")).toContain("neither ctx.plugin nor ctx.provide");
+  });
+
   it("registers no model discovery when enrichModels is off", () => {
     const registered: string[] = [];
     const ctx = {

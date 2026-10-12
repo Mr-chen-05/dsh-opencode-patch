@@ -87,6 +87,45 @@ const logRenameNotice = (ctx: CordisContext): void => {
  * Runs before the fetch patch so a composition without `globalThis.fetch`
  * still gets a working meter.
  */
+/**
+ * Publish a service through `ctx.provide`, when `ctx.plugin` is not available.
+ *
+ * The fallback exists because a service the client cannot reach has no way to say
+ * so from the host: the installers report through `ctx.logger`, and a host that
+ * writes no log file turns every one of those into a silence. `provide` reaches
+ * the same lookup under the same name, which is the half that matters.
+ *
+ * @param ctx - the host context.
+ * @param name - the service name the client looks for.
+ * @param Service - the service class.
+ * @param options - its constructor options.
+ */
+const mountByProvide = (
+  ctx: CordisContext,
+  serviceName: string,
+  Service: new (ctx: never, options: never) => unknown,
+  options: unknown
+): void => {
+  const { provide } = ctx as {
+    provide?: (key: string, value: unknown) => void;
+  };
+  if (typeof provide !== "function") {
+    ctx.logger?.warn?.(
+      `[dsh-opencode-patch] ${serviceName} did not mount: this composition has neither ctx.plugin nor ctx.provide`
+    );
+    return;
+  }
+  try {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the constructors take cordis `Context`, whose types ship only from the Harness installation.
+    provide.call(ctx, serviceName, new Service(ctx as never, options as never));
+  } catch (error) {
+    ctx.logger?.warn?.(
+      `[dsh-opencode-patch] ${serviceName} did not mount`,
+      error
+    );
+  }
+};
+
 const installUsageService = (
   ctx: CordisContext,
   config: ResolvedPluginConfig
@@ -99,10 +138,24 @@ const installUsageService = (
     config.usageEnabled,
     typeof ctx.plugin
   );
-  if (!config.usageEnabled || typeof ctx.plugin !== "function") {
+  if (!config.usageEnabled) {
     ctx.logger?.info?.(
       "[dsh-opencode-patch] usage service NOT registered; the meter will render nothing"
     );
+    return;
+  }
+  const usageOptions = {
+    baseURL: () => resolveGoBaseURL(ctx, config.usageBaseURL),
+    keySource: config.keySource,
+  };
+  if (typeof ctx.plugin !== "function") {
+    // `ctx.plugin` is the documented way and the one that gets cordis's own
+    // bookkeeping. A composition without it is not one to give up on, though:
+    // `ctx.provide` publishes the same service under the same name, which is what
+    // the client looks for - and a meter that cannot mount is otherwise a
+    // silence with no way to tell it from a meter whose service answered
+    // nothing. The pool rotator took this route for the same reason.
+    mountByProvide(ctx, "opencodeGoUsage", GoUsageService, usageOptions);
     return;
   }
   // A throw here is not local: `apply` runs its installers in order, so an
@@ -111,10 +164,7 @@ const installUsageService = (
   // meter that cannot mount is a meter that says so rather than one that also
   // takes the rest of the plugin with it.
   try {
-    ctx.plugin(GoUsageService, {
-      baseURL: () => resolveGoBaseURL(ctx, config.usageBaseURL),
-      keySource: config.keySource,
-    });
+    ctx.plugin(GoUsageService, usageOptions);
   } catch (error) {
     ctx.logger?.warn?.(
       "[dsh-opencode-patch] the usage service did not mount; the meter will render nothing",
@@ -348,9 +398,7 @@ const installModelDiscovery = (
  */
 const installLoginService = (ctx: CordisContext): void => {
   if (typeof ctx.plugin !== "function") {
-    ctx.logger?.info?.(
-      "[dsh-opencode-patch] login service NOT registered; no composition to mount it on"
-    );
+    mountByProvide(ctx, "opencodeLogin", LoginService, {});
     return;
   }
   try {
