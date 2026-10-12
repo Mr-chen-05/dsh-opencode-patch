@@ -31,6 +31,7 @@ import {
   readCredentialsWriter,
   readEntryOptions,
 } from "./cordis-context.ts";
+import { recordDebug } from "./debug.ts";
 import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
 import { isFetchFunction } from "./guards.ts";
@@ -184,6 +185,17 @@ const installFetchPatch = (
     // login for the plane the request is bound for, and a plane whose credential
     // is a plain key has none.
     resolveOrg: (plane) => readAccountOrg(plane) ?? config.credentialOrg,
+    // One JSONL line per request the interceptor touched, when the deployment
+    // asked for debugging. It is the only way to see a request that was patched
+    // wrongly: the gateway's answer for a malformed session id reads exactly
+    // like its answer for a bad credential.
+    ...(config.debug && config.debugFile !== undefined
+      ? {
+          debug: (entry: Record<string, unknown>) => {
+            void recordDebug(ctx, config.debugFile ?? "", entry);
+          },
+        }
+      : {}),
   });
 
   // Warm the org cache before the first request can need it. Best-effort and
