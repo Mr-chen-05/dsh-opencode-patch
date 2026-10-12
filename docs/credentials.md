@@ -153,6 +153,12 @@ So the reported `401 Invalid API key` on a route with no reference is not this f
 
 **The gap that is real is the other one.** A login's token is not usable as a route's credential: `warmOrg` reads the stored grant for the plane's ORG and nothing else, so a deployment that has signed in still needs `apiKeyEnv` on every route. Wiring the grant's access token into the same resolution is what would make a login sufficient on its own, which is the point of having one — and it is the half of the core model that is still missing.
 
+**Where that wiring goes, and in what order.** The bridge already assembles the resolution for every route it serves (`resolveApiKey` in `google-bridge.ts`): the pool first when one is enabled, then `resolveGatewayKey` for the route's own reference. The login's token belongs at the END of that chain, never the start:
+
+    pool (when enabled)  →  the route's named reference  →  the stored login
+
+which is the user's rule stated as code — everything they declared explicitly outranks anything the plugin found on its own — and it is the same `orElse` shape 2.0 uses. `warmOrg` already reads the grant per plane and keeps the org; the same read yields the access token, so this is a return value that is currently discarded rather than a new lookup.
+
 ## Status
 
 Built, in the order this file sets out:
