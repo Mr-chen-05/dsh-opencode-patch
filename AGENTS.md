@@ -41,7 +41,7 @@ A file's name does not decide whether it is public — its content does. Inciden
 Host bundle (`lib/index.mjs`), a thin `apply` barrel over small modules:
 
 - `src/index.ts` · `src/identity.ts` · `src/lifecycle.ts` — the public barrel, the identity constants, and the `apply()` composition (one installer per side effect, in load-bearing order).
-- `src/config.ts` · `src/config-values.ts` · `src/guards.ts` — the schema and its defaults; dependency-free readers and type guards. `config-values.ts` and `guards.ts` are the **only** host modules the client bundle may import.
+- `src/config.ts` · `src/config-values.ts` · `src/guards.ts` — the schema and its defaults; dependency-free readers and type guards. The client bundle may import these, and it does — along with the contract and presentation modules (`usage-contract.ts`, `login-contract.ts`, `settings-copy.ts`, `settings-fields.ts`, `usage-ui.ts`, `go-limits.ts`). The rule is not a list of names: **the client may import a module that reaches nothing host-only** — no cordis context, no credential seam, no node built-in — and the bundle gate is what enforces it, by failing the build rather than by anyone remembering. An earlier version of this line named two files as the only ones allowed, which the tree had already outgrown.
 - `src/session.ts` · `src/turn-store.ts` — the `ses_<12hex><14base62>` derivation and the `AsyncLocalStorage` turn store.
 - `src/stream-hook.ts` · `src/fetch-patch.ts` · `src/tool-fallback.ts` — the `llm/stream` hook, the fetch interceptor, and the free-tier `read`/`bash` fallback.
 - `src/key-capture.ts` · `src/go-discovery.ts` · `src/usage.ts` · `src/usage-contract.ts` — credential extraction, quota discovery, the usage service, and the shared shape.
