@@ -26,6 +26,7 @@ import {
   toGoBaseURL,
 } from "./go-discovery.ts";
 import { GO_MODEL_LIMITS } from "./go-limits-data.ts";
+import { allowanceFor, type ModelAllowance } from "./go-limits.ts";
 import { isRecord } from "./guards.ts";
 import { OPENCODE_PATCH_USER_AGENT } from "./identity.ts";
 import {
@@ -229,7 +230,10 @@ const attachAllowance = (
   if (model.length === 0) {
     return undefined;
   }
-  const row = GO_MODEL_LIMITS[model] ?? GO_MODEL_LIMITS[model.toLowerCase()];
+  // Through the tested lookup rather than a second copy of it: `allowanceFor`
+  // normalizes the same way and is what `go-limits.test.ts` covers, and the two
+  // were the same expression written twice with only one of them under test.
+  const row = allowanceFor(GO_MODEL_LIMITS_BY_ID, model);
   if (row === undefined) {
     return undefined;
   }
@@ -239,6 +243,16 @@ const attachAllowance = (
 /** Normalize a base URL to the Go `/usage` endpoint, without a trailing slash. */
 const usageEndpointBase = (rawBaseURL: string): string =>
   toGoBaseURL(rawBaseURL).replace(/\/$/, "");
+
+/**
+ * The generated limits as the Map `allowanceFor` reads.
+ *
+ * Built once: the generated file is a record, the lookup takes a Map, and
+ * converting per call would be the same lookup written a third way.
+ */
+const GO_MODEL_LIMITS_BY_ID: ReadonlyMap<string, ModelAllowance> = new Map(
+  Object.entries(GO_MODEL_LIMITS)
+);
 
 export class GoUsageService extends TypertRemoteService {
   private identity?: { baseURL: string; key: string; source: string };
