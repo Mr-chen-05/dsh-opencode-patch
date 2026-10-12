@@ -80,6 +80,23 @@ The literal `public` is worth recording because the source suggests it: a provid
 
 So the free tier's gate is the **session token**, and the org id alone does not open it.
 
+## What the free tier's gate is not
+
+The error says the free tier "can only be used from within OpenCode", and enough has been excluded to take that sentence seriously.
+
+| Excluded | How |
+| :-- | :-- |
+| mTLS | a plain request reaches the gateway and gets a JSON answer, so no client certificate is demanded |
+| the credential | `/inference/openai/v1` answers `403 FreeTierError` where `/zen/v1` answers `401 Invalid API key` — the same token is AUTHENTICATED on the new path and refused on the old one |
+| the org | sent, and it is the active org the client itself uses |
+| the endpoint | the new path, which is the one the client uses |
+| the visible headers | every header captured from the client's own request was replicated, including its session and request ids |
+| the client library | Node's fetch and Python's urllib answer identically |
+
+What is left is something about the client that is not in the HTTP request: a TLS or HTTP/2 fingerprint, or a header the client sends only to the real host — the capture that produced the header list was taken against a local server, which is the one place a host-specific header would not appear.
+
+So the honest statement, and the one the plugin is built to, is that the free tier is asked for and not granted. Nothing in this plugin promises it: the paid models work with a key, the account credential is stored with its owner, and whether the gateway ever grants the rest is the vendor's decision to make.
+
 ## Where the session token comes from
 
 `packages/opencode/src/account/account.ts` and `packages/opencode/src/config/config.ts` describe the flow, and it is a device flow this plugin already implements:
