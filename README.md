@@ -237,7 +237,7 @@ Hovering the trigger explains its own number; clicking it opens the panel. The s
 
 ### Settings card — _Settings → Plugins → OpenCode Patch_
 
-Eight controls in three sections — the decisions a user actually makes. Everything renders from the platform's own primitives (`Switch`, `Tag`, `Button`, host tokens), and every knob carries a hint plus a reset-to-default affordance.
+Seven controls in three sections — the decisions a user actually makes. Everything renders from the platform's own primitives (`Switch`, `Tag`, `Button`, host tokens), and every knob carries a hint plus a reset-to-default affordance.
 
 | Section | Control | Default | What it does |
 | :-- | :-- | :-: | :-- |
@@ -247,10 +247,11 @@ Eight controls in three sections — the decisions a user actually makes. Everyt
 | **Models & Free Tier** | Enrich Models from Models.dev | `on` | Merges canonical specs, display names, prices and active free models into listings **and** native DSH discovery |
 | **Models & Free Tier** | Inject Core Tools | `on` | Adds the `read` + `bash` schemas free-tier `/responses` bodies require |
 | **Quota Meter** | Enable Composer Usage Meter | `on` | Mounts the live meter in the composer dock — the Go quota ring, or the Zen session spend |
-| **Quota Meter** | Show Session Spend & Model Rate | `on` | Adds the session's accumulated cost and the active model's per-million-token rate |
 | **Quota Meter** | Credential Source | `auto` | Which key wins when several are known: **Automatic** · **Live request first** · **Declared key first** |
 
 Override-style knobs (literal strings, markers, route lists) are deliberately **config-only** so a default fits every documented setup — see [Configuration Reference](#-configuration-reference).
+
+The composer panel also shows the **session's accumulated cost and the active model's per-million-token rate**, and there is no switch for it: it is part of the panel rather than an option, so it is on whenever the panel is.
 
 The card also carries a **live Go usage summary** above the controls — the same reading the composer meter shows, in the layout the vendor's own console uses: one row per window, with what is **left** held out on the right.
 
