@@ -14,7 +14,13 @@
  * A hand-typed table would therefore be stale within a release — and a stale
  * dollar figure is worse than none, because it looks authoritative. So the table
  * is generated from `https://opencode.ai/docs/go.md` (the page's own markdown
- * source, served as `text/plain`) and CI fails when it drifts. Same arrangement,
+ * source, served as `text/plain`) and CI fails when it drifts.
+ *
+ * **That URL is gone.** Measured 2026-10-12: it answers 404, the docs live under
+ * `/v2/docs/console/go/` now, and the new page serves HTML - the allowance figures
+ * are in a table on it, so nothing is lost, but this reader parses markdown and
+ * needs an HTML path before the check can say anything again. The failure names
+ * the new URL so the next person does not have to find it twice. Same arrangement,
  * and the same reasoning, as `regenerate-catalog-shim.ts` against models.dev.
  *
  * ## Why this script resolves ids against the catalog
@@ -52,6 +58,9 @@ const shouldWrite = argv.includes("--write");
 const fromIndex = argv.indexOf("--from");
 const fromPath = fromIndex === -1 ? undefined : argv[fromIndex + 1];
 
+/** Where the docs moved to, named in the failure so it is actionable. */
+const GO_LIMITS_DOC_MOVED_TO = "https://opencode.ai/v2/docs/console/go/";
+
 const readDoc = async (): Promise<string> => {
   if (fromPath !== undefined) {
     return readFileSync(fromPath, "utf8");
@@ -60,7 +69,14 @@ const readDoc = async (): Promise<string> => {
     signal: AbortSignal.timeout(GO_LIMITS_DOC_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new Error(`go.md answered ${response.status} ${response.statusText}`);
+    // A moved source is not drift, and it should not read like it. Measured: the
+    // vendor's docs moved under `/v2/docs/console/`, the old URL answers 404, and
+    // the new page serves HTML rather than the markdown this parses - so the
+    // numbers are still public (they are in a table on that page) but the reader
+    // below needs an HTML path before this check can say anything about them.
+    throw new Error(
+      `go.md answered ${response.status} ${response.statusText} — the docs moved to ${GO_LIMITS_DOC_MOVED_TO}, which serves HTML; this script parses markdown`
+    );
   }
   return response.text();
 };
