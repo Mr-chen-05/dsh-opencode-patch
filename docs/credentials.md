@@ -105,13 +105,22 @@ That file is where the key is. Measured, keys and types only:
 
 So the shape is one object per provider, `type: "api"` with a `key`, or `type: "oauth"` with an access/refresh pair — the same two shapes the credential seam already stores, which is why this is a reader rather than a new concept.
 
-**What it would take**, in the order it matters:
+**It is OPT-IN, and off by default.** That file is not an interface the vendor publishes; its shape can change with any CLI release, and a plugin that read it unasked would be one whose credential behaviour depends on another program's private state. So the rule is the opposite of convenient-by-default:
 
-1. A reader for that file, treating it as the lowest-priority source so an explicit `apiKeyEnv`, the credential store and a captured request all still win.
-2. A grant written from it, so a route resolves the key with no config at all — the `opencode` entry's `key` for Zen, and the Go key when the installation has one.
-3. The org and the session token for the account plane, which live in the CLI's database rather than this file and are already read by the login flow.
+- **A key the user defined in their own DSH config is always first.** Until they choose otherwise, nothing here is consulted at all, and the resolution order is exactly what it was before this file was considered.
+- **Reading the OpenCode installation is a choice the user makes**, exposed where they make their other choices rather than buried in config, and the file is consulted only after that choice is made.
+- **When it is on, it is still last** — after `apiKeyEnv`, after the credential store, after a key captured from a live request — because everything the user said explicitly outranks anything inferred from another program's files.
 
-Until then, a deployment has to name `apiKeyEnv` in its route config, which is the one thing this plugin exists to avoid.
+**And `auth.json` is the LEGACY shape, which is the larger point.** Read from OpenCode 2.0.27's own source (`packages/core`): credentials there are rows in a database, migrated in by `import_legacy_credentials`, and the value is a union of **three** kinds, not the two `auth.json` carries:
+
+    Credential.Key       an API key
+    Credential.OAuth     an access/refresh pair
+    Credential.External  a credential that lives OUTSIDE - the CLI's own store
+                         holds it, and there is nothing here to read
+
+    Credential.Info      { id, integrationID, label, value }
+
+So a reader that only understood `auth.json` would cover the two shapes that file happens to hold and miss `External` entirely - and it would be reading a format the CLI has already moved on from. The opt-in, when it is built, has to read what 2.0 reads: the database, all three kinds, and `integrationID` rather than a provider name.
 
 ## Status
 
