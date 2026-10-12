@@ -77,6 +77,14 @@ export const loginCalls = (
 ): LoginRemoteCalls | undefined => {
   const remote = ctx.remote?.opencodeLogin;
   if (remote === undefined) {
+    // The row renders nothing when this is absent, which is the same silence the
+    // meter had. Say so, and say what the remote DOES expose - the list that
+    // distinguishes "the host mounted no login service" from "this bundle is not
+    // the one that knows about it".
+    console.warn(
+      "[dsh-opencode-patch] login row: no opencodeLogin service on the remote",
+      Object.keys(ctx.remote ?? {})
+    );
     return undefined;
   }
   return {
