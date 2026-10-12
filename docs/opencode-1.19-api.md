@@ -101,6 +101,10 @@ That is the boundary of what is measurable from outside. The gate is either a fi
 
 So the honest statement, and the one the plugin is built to, is that the free tier is asked for and not granted. Nothing in this plugin promises it: the paid models work with a key, the account credential is stored with its owner, and whether the gateway ever grants the rest is the vendor's decision to make.
 
+**A login is not pointless, though, and this is what it is for.** The same account token, on `/inference/openai/v1` with its org, serves a paid model that speaks the completions shape: `deepseek-v4.1-flash` answers `200` with a real completion. The models that answer `400 ModelProtocolUnsupported` there — `grok-4.7`, `claude-sonnet-5-5` — are refused by the protocol gate rather than by the credential, because they need `/responses` and `/messages`. So the account plane is a working credential for real traffic, and the free tier is the part that is not granted rather than the part that is broken.
+
+That is what makes the login surface worth building, and it is why the routing is by credential rather than by endpoint: one gateway serves both kinds, and what each can reach is the whole difference.
+
 ## Where the session token comes from
 
 `packages/opencode/src/account/account.ts` and `packages/opencode/src/config/config.ts` describe the flow, and it is a device flow this plugin already implements:
