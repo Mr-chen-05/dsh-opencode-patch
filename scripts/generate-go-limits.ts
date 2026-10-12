@@ -20,7 +20,21 @@
  * `/v2/docs/console/go/` now, and the new page serves HTML - the allowance figures
  * are in a table on it, so nothing is lost, but this reader parses markdown and
  * needs an HTML path before the check can say anything again. The failure names
- * the new URL so the next person does not have to find it twice. Same arrangement,
+ * the new URL so the next person does not have to find it twice.
+ *
+ * **What the new page looks like, measured, so the HTML path is a small job.**
+ * `/v2/llms.txt` indexes it and there is no `.md` beside it. The page carries a
+ * plan table (`Plan | Price | Included usage`) and a per-model one whose columns
+ * are `Model | input | output | cached | - | allowance`, where the allowance is
+ * the LAST cell and a plan with no figure carries `-`:
+ *
+ *     GLM-5.3-Flash | $0.15 | $0.50 | $0.03 | - | $60
+ *     GLM-5.3       | $1.40 | $4.40 | $0.26 | - | $15
+ *
+ * Stripping tags from `<tr>`/`<td>` is enough; no parser is needed. The shapes
+ * differ from this table's, though: the doc states an allowance per MODEL, while
+ * `go-limits-data.ts` carries `go`/`goPlus` per plan - so the HTML path has to
+ * decide which of the two the shipped table means before it can compare. Same arrangement,
  * and the same reasoning, as `regenerate-catalog-shim.ts` against models.dev.
  *
  * ## Why this script resolves ids against the catalog
