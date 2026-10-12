@@ -47,6 +47,7 @@ import {
   decorateModelDiscovery,
   hideResponsesRoute,
 } from "./models-discovery.ts";
+import { orgFor, setOrg } from "./org-cache.ts";
 import { registerResponsesProvider } from "./responses-provider.ts";
 import { isServableSdk } from "./responses-routes.ts";
 import { createStreamHook } from "./stream-hook.ts";
@@ -209,7 +210,9 @@ const installFetchPatch = (
    * is stale; `undefined` is a real answer, because a plane whose credential is
    * a plain key has no org and must not carry a header for one.
    */
-  const orgByPlane = new Map<string, string | undefined>();
+  // The cache is shared with the login service, which writes it when a login
+  // completes: a grant can appear long after startup, and a value read once would
+  // miss it.
   const warmOrg = async (plane: string): Promise<void> => {
     try {
       const store = createTokenStore({
@@ -218,17 +221,14 @@ const installFetchPatch = (
         scope: name,
       });
       const login = await store?.read();
-      orgByPlane.set(plane, login?.orgId);
+      setOrg(plane, login?.orgId);
     } catch {
       // A store that cannot be read leaves the plane without an org rather than
       // failing a request: a key deployment is exactly this case, and it is the
       // default.
-      orgByPlane.set(plane, undefined);
+      setOrg(plane, undefined);
     }
   };
-  const readAccountOrg = (plane: string): string | undefined =>
-    orgByPlane.get(plane);
-
   const rotateAfterFailure = async (
     plane: string,
     status: number
@@ -247,7 +247,7 @@ const installFetchPatch = (
     // The org is part of the credential, not a setting: it comes from the stored
     // login for the plane the request is bound for, and a plane whose credential
     // is a plain key has none.
-    resolveOrg: (plane) => readAccountOrg(plane) ?? config.credentialOrg,
+    resolveOrg: (plane) => orgFor(plane) ?? config.credentialOrg,
     // One JSONL line per request the interceptor touched, when the deployment
     // asked for debugging. It is the only way to see a request that was patched
     // wrongly: the gateway's answer for a malformed session id reads exactly

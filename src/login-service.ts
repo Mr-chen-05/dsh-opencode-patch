@@ -38,6 +38,7 @@ import type {
   LoginState,
 } from "./login-contract.ts";
 import { beginLogin, type LoginAttempt } from "./login-flow.ts";
+import { setOrg } from "./org-cache.ts";
 import { createTokenStore, type TokenStore } from "./token-store.ts";
 
 /**
@@ -179,6 +180,8 @@ export class LoginService extends TypertRemoteService {
     if (login === undefined) {
       return { orgs: [], plane, signedIn: false };
     }
+    // A login that has just completed is the event the org cache was waiting for.
+    setOrg(plane, login.orgId);
     return {
       ...(login.owner?.email === undefined ? {} : { email: login.owner.email }),
       ...(login.orgId === undefined ? {} : { orgId: login.orgId }),
