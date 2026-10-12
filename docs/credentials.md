@@ -116,14 +116,8 @@ Built, in the order this file sets out:
 
 Not built yet:
 
-- **The surface that starts a flow.** The client starts a login, the store keeps it, the session refreshes it; what is missing is the surface a human uses. A device flow is a code, a URL and a wait, so it belongs in the host's settings card over a Typert remote — the same path `usage.ts` takes for the meter, where the host holds the credential and the client only renders.
+- **The login remote.** `src/login-contract.ts` is the three calls a settings card makes — `begin` answers the code and the URL to open, `poll` asks whether the human has approved, `state` answers what is stored — with codecs both sides read, so a card cannot disagree with the host about what an answer means. A credential never crosses: the parser is a whitelist, and a test sends a state carrying both tokens to assert they are dropped.
 
-  It is deliberately NOT written yet. The remote contract and its codec are testable offline and are the mechanical half; the half that matters — a human seeing a code, opening a URL, and the card returning to "signed in" — is only provable in a browser with a real account, and a card written to satisfy the type checker alone would be a claim nothing checks. The pieces below it are built and tested, so the card is assembly, not discovery.
+  `src/login-service.ts` is the host half, mounted by `apply` beside the meter's service. It holds one attempt at a time, because a device flow is a code a human is holding; a refusal ends it and a wait does not; and `state` re-reads the stored grant per call, so a card sees a login appear the moment the flow completes — including one the CLI completed.
 
-- **The settings card.** The pool's section is configuration-only, and says why: a list of credential references is not something to type into a settings form. The card that would paste a key into the store belongs with the login surface, since both are "put a credential here" and neither is a row of knobs.
-
-- **v1's organization SWITCHING.** What is missing is the surface for choosing among several orgs: the login activates the first, matching the client, and a deployment with more than one changes it by writing the record.
-
-  Both reads it would need are implemented and measured. `GET /api/user` answers `{"id":"acc_…","email":"…","name":null,"role":"user"}` and `GET /api/orgs` answers `[{"id":"wrk_…","name":"Default","avatarUrl":null}]`, against the account this machine is signed into — so the two fields each read requires, an id and an email, an id and a name, are present, and the org id is the same one the captured request carried.
-
-The first OAuth grant is the one piece a test cannot finish: the approval step is a human in a browser. Everything around it can, and has.
+  **What is not built is the card that calls them** — the client component and the two lines that hand it the remote. That is deliberately left to a round with room to finish it: the first attempt reached a lint cascade with the host half already green, and a half-wired component breaks the coverage ratchet rather than shipping. The host side is complete and tested, and the verification steps are written down: reload, open the plugin's settings card, expect a sign-in row, click it, expect a code and a URL, approve in a browser, and expect the row to become signed in with the account's email.
