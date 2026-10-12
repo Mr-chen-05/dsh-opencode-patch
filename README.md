@@ -422,7 +422,7 @@ Three things are worth knowing about how it behaves:
 - **A rotation is visible to every route, including the ones the wrapper serves**, because it writes on every rotation rather than once at startup, and the wrapper resolves the reference per operation.
 - **An exhausted pool falls through.** Entries that do not resolve are skipped, an entry the gateway refuses is marked failed, and when nothing is left the plugin resolves what the route declared instead of failing the request.
 
-The pool holds API keys. An account login is a different credential: its session token reaches models a key cannot, and it is served from `OPENCODE_CONSOLE_TOKEN` with the org from `credentialOrg` until the login surface ships.
+The pool holds API keys. An account login is a different credential — a session token with an org beside it — and the plugin reads it from `OPENCODE_CONSOLE_TOKEN` with the org from `credentialOrg`. What that credential reaches beyond a key is **not yet established**: measured with a real account and every header the official client sends, a free-tier model still answers `403 FreeTierError`, so the login surface is not built and rotation is what this section is for.
 
 ## 🛠 Troubleshooting
 
