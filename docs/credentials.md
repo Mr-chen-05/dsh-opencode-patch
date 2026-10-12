@@ -131,6 +131,19 @@ A credential is LAZY (`load` is an effect that can fail), it can be combined wit
 
 Two more details worth copying. Secrets are `Redacted`, so they are never stringified by accident. And a missing one raises a named `MissingCredentialError` rather than resolving to nothing — which is the difference between the failure this plugin spent a long time chasing and one that says what it is.
 
+**The modes, enumerated from the source** (`packages/ai/src/route/auth.ts`), because "several auth modes" is the reason a reader for one file cannot be enough:
+
+    value(secret)        a literal
+    config(name)         read from configuration, and FAILS by name when unset
+    optional(secret)     absent is allowed, and still reported as missing
+    effect(load)         anything lazy that yields a secret
+    none / headers / remove / custom / passthrough    header operations
+    bearer / apiKey / header(name)                    how a secret is applied
+
+`config(name)` is the one that matters for this plugin's model: a credential may come from the user's own configuration, and the vendor's own reader treats that as one source among several rather than as an afterthought. Which source wins is not encoded in the sources at all — it is `orElse`, applied by whoever assembles them.
+
+So the shape to copy is two-layered, and both layers already exist here in some form: a source list (literal, config, installation, captured request) and an order that puts everything the user declared ahead of everything inferred. Reading a file is one entry in the first list, and the switch that turns it on belongs to the user, not to this plugin's default.
+
 ## Status
 
 Built, in the order this file sets out:
