@@ -46,6 +46,7 @@ Host bundle (`lib/index.mjs`), a thin `apply` barrel over small modules:
 - `src/stream-hook.ts` · `src/fetch-patch.ts` · `src/tool-fallback.ts` — the `llm/stream` hook, the fetch interceptor, and the free-tier `read`/`bash` fallback.
 - `src/key-capture.ts` · `src/go-discovery.ts` · `src/usage.ts` · `src/usage-contract.ts` — credential extraction, quota discovery, the usage service, and the shared shape.
 - `src/catalog-data.ts` · `src/models-catalog.ts` · `src/models-discovery.ts` — the generated static shim, the `models.dev` parser with SWR refresh, and discovery decoration. `catalog-data.ts` is **generated**; never hand-edit it.
+- `src/go-limits-data.ts` — the Go plan allowances, per model and per tier, **generated** from the vendor's own page by `scripts/generate-go-limits.ts`; never hand-edit it, and regenerate with `pnpm run limits:shim -- --write`. The scheduled freshness job is what notices when the page moves, which it did: the docs went under `/v2/docs/console/` and serve HTML now, so the generator reads a table off that page rather than the markdown it used to.
 - `src/responses-routes.ts` · `src/responses-provider.ts` — the protocol table and the in-process mount of the host's `llm-pi-ai`.
 - `src/session-cost.ts` · `src/cordis-context.ts` · `src/debug.ts` — per-turn accounting, the typed host interfaces, and stream debug logging.
 - `src/pi-provider.ts` — the per-protocol base URLs, the pi model object, and the gateway headers. Every value here is measured; see `docs/redirect-planes.md`.
