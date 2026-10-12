@@ -92,6 +92,27 @@ Run against the real `dsh-credentials-local` provider on a temporary document, s
 
 The third row is the one that matters most: the objection that a pool would overwrite the deployment's key is not merely avoided by this design, it is enforced by the implementation.
 
+## The credential the user already has, and this plugin does not read
+
+**The core model is that a user never writes a credential into a DSH profile.** The plugin detects the key from the OpenCode installation and injects it, so a route needs no `apiKeyEnv` and a deployment needs no editing. Today it does not: every key source here is an environment variable name or the DSH credential store, and the one mention of the CLI's own file says it is deliberately **not** read.
+
+That file is where the key is. Measured, keys and types only:
+
+    ~/.local/share/opencode/auth.json
+      opencode: { type: "api", key: <51 chars, oc_sk_…> }     ← the Zen key
+      xai | openai: { type: "oauth", refresh, access, expires, accountId? }
+      cf-coding | google | cloudflare-* | nvidia: { type: "api", key, metadata? }
+
+So the shape is one object per provider, `type: "api"` with a `key`, or `type: "oauth"` with an access/refresh pair — the same two shapes the credential seam already stores, which is why this is a reader rather than a new concept.
+
+**What it would take**, in the order it matters:
+
+1. A reader for that file, treating it as the lowest-priority source so an explicit `apiKeyEnv`, the credential store and a captured request all still win.
+2. A grant written from it, so a route resolves the key with no config at all — the `opencode` entry's `key` for Zen, and the Go key when the installation has one.
+3. The org and the session token for the account plane, which live in the CLI's database rather than this file and are already read by the login flow.
+
+Until then, a deployment has to name `apiKeyEnv` in its route config, which is the one thing this plugin exists to avoid.
+
 ## Status
 
 Built, in the order this file sets out:
