@@ -22,7 +22,7 @@ A pool holds **API keys**, and that is a measured constraint rather than a first
 
 A pool of two or more keys is what rotation means here: a deployment past a rate limit or a per-key spend cap names the keys it holds, and the plugin serves the next one.
 
-## An OAuth token is not a credential the gateway serves (measured)
+## An OAuth token is not an API key on the Zen model endpoint (measured)
 
 The login flows produce an access token. Whether that token can authenticate a MODEL call is a separate question, and the gateway answers it plainly. Three requests to `/chat/completions` on the Zen base, differing only in the credential:
 
@@ -32,7 +32,7 @@ The login flows produce an access token. Whether that token can authenticate a M
 | `Bearer not-a-real-token-abc123` | `401 AuthError: Invalid API key.` |
 | `Bearer <a JWT-shaped string>`   | `401 AuthError: Invalid API key.` |
 
-The last two are indistinguishable. The Bearer slot on a model endpoint reads an API key and nothing else, so an OAuth access token presented there is an invalid API key — which is a different credential from the one a login produces.
+The last two are indistinguishable. The Bearer slot on that endpoint reads an API key and nothing else, so a token presented there is an invalid API key. **This is about `/chat/completions` on the Zen base and nothing wider** — measured later, the account's own token does authenticate on `/inference/openai/v1`, which is a different endpoint with a different credential slot. Read the two together: an API-key slot refuses a login token, and the account plane accepts it.
 
 So the pool's entries are API keys, and a login is not one of them. What a login IS good for is the Console's own API — the per-account catalog at `/api/config`, the account and organization context at `/api/user` and `/api/orgs` — and a deployment that wants a login's models needs the Console to exchange it for a key, which is the vendor's flow, not this plugin's.
 
