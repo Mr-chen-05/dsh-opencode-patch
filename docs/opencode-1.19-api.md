@@ -95,6 +95,10 @@ The error says the free tier "can only be used from within OpenCode", and enough
 
 What is left is something about the client that is not in the HTTP request: a TLS or HTTP/2 fingerprint, or a header the client sends only to the real host — the capture that produced the header list was taken against a local server, which is the one place a host-specific header would not appear.
 
+**Testing that last hypothesis from here is not possible, and the attempt is worth recording so nobody repeats it.** The plan was to read the client's TLS ClientHello and compare it with a plain client's: run a local listener, point the client at it with `HTTPS_PROXY`, and read the first bytes of the handshake. The client ignores `HTTPS_PROXY` — it answered a free-tier request normally while the listener received nothing — so the handshake cannot be observed without intercepting DNS or installing a trusted certificate, and both change the machine the client runs on rather than the question being asked.
+
+That is the boundary of what is measurable from outside. The gate is either a fingerprint or a host-specific header; telling them apart needs the vendor's side of the connection.
+
 So the honest statement, and the one the plugin is built to, is that the free tier is asked for and not granted. Nothing in this plugin promises it: the paid models work with a key, the account credential is stored with its owner, and whether the gateway ever grants the rest is the vendor's decision to make.
 
 ## Where the session token comes from
