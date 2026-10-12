@@ -38,6 +38,7 @@
  */
 
 import { DEFAULT_USAGE_KEY_ENV, type ResolvedPluginConfig } from "./config.ts";
+import { ConsoleAuthClient } from "./console-auth.ts";
 import {
   type CordisContext,
   readCredentialsResolver,
@@ -51,6 +52,7 @@ import {
 import { registerGoogleBridge } from "./google-bridge.ts";
 import { isFunctionLike, isRecord } from "./guards.ts";
 import { name } from "./identity.ts";
+import { createLoginSession } from "./login-session.ts";
 import {
   type CatalogModelSpec,
   getLiveGoCatalog,
@@ -768,8 +770,17 @@ const storedTokenFor = async (
     plane,
     scope: name,
   });
-  const login = await store?.read();
-  return login?.accessToken;
+  // Through the session, not the store: `token()` refreshes first when the stored
+  // token is inside the window, so a caller never handles an expired one. Reading
+  // the store directly - which this did - hands out whatever is on disk until it
+  // expires and then fails, and the module that does the refresh was already
+  // written and tested.
+  const session = createLoginSession({
+    client: new ConsoleAuthClient({}),
+    store,
+  });
+  const result = await session?.token();
+  return result?.kind === "ok" ? result.token.accessToken : undefined;
 };
 
 /**
