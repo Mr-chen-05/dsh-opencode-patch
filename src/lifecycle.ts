@@ -36,6 +36,7 @@ import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
 import { isFetchFunction } from "./guards.ts";
 import { LEGACY_NAME, LEGACY_PKG, name } from "./identity.ts";
+import { LoginService } from "./login-service.ts";
 import {
   type CatalogModelSpec,
   getLiveGoCatalog,
@@ -323,6 +324,26 @@ const installModelDiscovery = (
  * @param ctx - the Cordis host context.
  * @param rawConfig - the row config, if any.
  */
+/**
+ * Mount the login service, so a settings card has something to call.
+ *
+ * Unlike the meter's service this has no switch: a login is an action the user
+ * takes, not a behaviour the plugin runs, and mounting a remote that answers
+ * "nothing is stored" until they take it is the whole of its default state. What
+ * it needs is a composition with `plugin`, the same one the meter needs.
+ *
+ * @param ctx - the host context.
+ */
+const installLoginService = (ctx: CordisContext): void => {
+  if (typeof ctx.plugin !== "function") {
+    ctx.logger?.info?.(
+      "[dsh-opencode-patch] login service NOT registered; no composition to mount it on"
+    );
+    return;
+  }
+  ctx.plugin(LoginService, {});
+};
+
 export const apply = (
   ctx: CordisContext,
   rawConfig: PluginConfig = {}
@@ -343,6 +364,7 @@ export const apply = (
 
   logRenameNotice(ctx);
   installUsageService(ctx, config);
+  installLoginService(ctx);
 
   if (!installFetchPatch(ctx, config, als)) {
     return;

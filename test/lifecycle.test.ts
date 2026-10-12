@@ -77,6 +77,33 @@ describe("apply (plugin lifecycle)", () => {
     expect(mounted).toContain("GoUsageService");
   });
 
+  it("registers the login service, which has no switch to be off", () => {
+    // A login is an action the user takes, not a behaviour the plugin runs, so
+    // there is no setting that could turn its remote off: the service answers
+    // "nothing is stored" until someone signs in, and that IS its default state.
+    const mounted: string[] = [];
+    const ctx = {
+      effect: () => {},
+      llm: {},
+      on: () => {},
+      plugin: (component: unknown) => {
+        mounted.push((component as { name?: string })?.name ?? "");
+      },
+    } as unknown as CordisContext;
+
+    apply(ctx);
+    expect(mounted).toContain("LoginService");
+
+    // And a composition with no `plugin` gets no service rather than an error:
+    // the same guard the meter's installer has, for the same reason.
+    const bare = {
+      effect: () => {},
+      llm: {},
+      on: () => {},
+    } as unknown as CordisContext;
+    expect(() => apply(bare)).not.toThrow();
+  });
+
   it("registers no model discovery when enrichModels is off", () => {
     const registered: string[] = [];
     const ctx = {
