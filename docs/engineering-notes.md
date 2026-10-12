@@ -62,6 +62,20 @@ The most expensive confusion in this plugin's history was not a bug. A running h
 
 Documented in three places now, which helps a reader who thinks to look. The next step is to make it say so instead: have the host report an identity for the build it loaded, and have the settings card compare it with the build the client is running. A mismatch is then a line in the console naming both, and a host too old to answer at all is the same signal with the other half missing — which is the state that cost the most time here.
 
+## A missing session reads as a bad credential, measured
+
+The Go plane answers a request with **no** session header `400 MissingSessionID`, and every layer above reports that as an invalid API key. Measured against the live gateway with this deployment's own key:
+
+| Sent | Answer |
+| :-- | :-- |
+| `Bearer <go key>` with `x-opencode-session: ses_<12hex><14base62>` | `200` |
+| the same key with `x-opencode-session: ses_dsh_default` | `200` — the gateway accepts that shape on this path |
+| the same key with **no** session header at all | `400 MissingSessionID` |
+
+So the header is the difference, the key is not, and a client that omits it looks exactly like a client with a bad credential. On `/zen/v1` the same malformed value earns a real `401 Invalid API key`, which is why the plugin replaces one wherever it finds it — but "replace it" only helps the requests the interceptor claims.
+
+**The two claims are independent, and that is deliberate.** A URL containing a configured gateway substring is claimed with or without an active turn, which is what keeps session affinity for background calls; a turn routed to a configured provider is claimed too. A request that matches neither goes out untouched, and if it is a Go request it earns the `400` above. When a deployment reports "invalid API key" on a route whose key answers `200` from a shell, this is the first thing to check, and `debug`/`debugFile` records what the interceptor saw and sent — presence only, never the credential — so the answer is a line in that file rather than a guess.
+
 ## Rules that came out of real failures
 
 - Start from the host's built-ins. The UI kit ships the components _and_ one CSS module each, the fastest inventory of the host's design language available. A hand-rolled look-alike is one whose CSS module was never opened, and it is smaller, wrong and unthemed next to the built-in.
