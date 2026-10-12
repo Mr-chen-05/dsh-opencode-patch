@@ -247,7 +247,12 @@ const installFetchPatch = (
     // The org is part of the credential, not a setting: it comes from the stored
     // login for the plane the request is bound for, and a plane whose credential
     // is a plain key has none.
-    resolveOrg: (plane) => orgFor(plane) ?? config.credentialOrg,
+    //
+    // The configured value wins, because it is the one thing here the user said
+    // out loud. A login's org is inferred from a grant; `credentialOrg` is a
+    // declaration, and the rule this whole file is arranged around is that a
+    // declaration outranks an inference.
+    resolveOrg: (plane) => config.credentialOrg ?? orgFor(plane),
     // One JSONL line per request the interceptor touched, when the deployment
     // asked for debugging. It is the only way to see a request that was patched
     // wrongly: the gateway's answer for a malformed session id reads exactly
