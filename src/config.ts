@@ -307,7 +307,7 @@ export const Config = z.object({
     .default(CONFIG_DEFAULTS.keySource)
     .volatile()
     .description(
-      "Which credential source wins when several resolve: auto (composition, then a key captured from a live request), request (live request first), or configured (declared key first). An unrecognised value falls back to auto."
+      "Which credential source wins when several resolve. auto: a literal key declared in another entry, then a key captured from a live request, then the declared reference, then a captured key for the other plane. request: a captured key first, then a literal one, then the declared reference. configured: a literal key, then the declared reference, then captured ones. An unrecognised value falls back to auto."
     ),
   injectOriginHeaders: z
     .boolean()
