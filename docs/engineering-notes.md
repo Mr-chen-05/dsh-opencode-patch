@@ -76,6 +76,22 @@ So the header is the difference, the key is not, and a client that omits it look
 
 **The two claims are independent, and that is deliberate.** A URL containing a configured gateway substring is claimed with or without an active turn, which is what keeps session affinity for background calls; a turn routed to a configured provider is claimed too. A request that matches neither goes out untouched, and if it is a Go request it earns the `400` above. When a deployment reports "invalid API key" on a route whose key answers `200` from a shell, this is the first thing to check, and `debug`/`debugFile` records what the interceptor saw and sent — presence only, never the credential — so the answer is a line in that file rather than a guess.
 
+## A model on the wrong protocol route, measured end to end
+
+The report was `400 ModelProtocolUnsupported` from a session, and it is reproducible from a shell against the same gateway with the same key:
+
+| Model                 | Endpoint                      | Answer |
+| :-------------------- | :---------------------------- | :----- |
+| `deepseek-v4.1-flash` | `/zen/go/v1/chat/completions` | `200`  |
+| `gemini-3.8-flash`    | `/zen/go/v1/chat/completions` | `400`  |
+| `claude-sonnet-4-6`   | `/zen/go/v1/chat/completions` | `400`  |
+
+All three were listed on the same route, which declares `api: openai-completions`. The last two do not speak that protocol, so choosing either one cannot work — and the routing this plugin exists to do is what would have moved them to a route that does.
+
+**It cannot, because those routes are not registered.** Measured against a real deployment's config: `opencode-responses` is present, `opencode-anthropic` and `opencode-google` are not. The plugin registers model discovery for `opencode` and `opencode-go` only, so the two routes the extra protocols need are the deployment's to write — which is the thing the core model says a user should never have to do.
+
+So the fix belongs here rather than in anyone's profile: the routes for the other protocols have to come from the plugin, the way the completions route already does. Until they do, a model that names an SDK other than completions is offered on a route that cannot serve it, and the answer is the `400` above.
+
 ## Rules that came out of real failures
 
 - Start from the host's built-ins. The UI kit ships the components _and_ one CSS module each, the fastest inventory of the host's design language available. A hand-rolled look-alike is one whose CSS module was never opened, and it is smaller, wrong and unthemed next to the built-in.
