@@ -781,3 +781,85 @@ describe("GoUsageService gateway failures", () => {
     expect(usage.monthly.status).toBe("ok");
   });
 });
+
+describe("usage service: the read that a silent meter depends on", () => {
+  /**
+   * The whole path a working composition takes: the loader's rows name the Go
+   * route, the route names the credential reference, the service resolves it and
+   * reads the endpoint.
+   *
+   * It exists because "the meter shows nothing" is not evidence about which link
+   * broke, and this asserts the links the SERVICE owns. A probe of the same path
+   * against a real-shaped row and a real key answered with real window figures,
+   * so a silent meter is a wiring question rather than a service one - and this
+   * keeps that true.
+   */
+  const goRow = {
+    options: {
+      config: {
+        providers: { "opencode-go": { apiKeyEnv: "OPENCODE_GO_API_KEY" } },
+      },
+      name: "@deepseek-ai/dsh-llm-pi-ai",
+    },
+  };
+
+  it("resolves its key and reads the endpoint", async () => {
+    const real = globalThis.fetch;
+    const asked: string[] = [];
+    globalThis.fetch = (async (
+      input: unknown,
+      init?: { headers?: unknown }
+    ) => {
+      const headers = new Headers(init?.headers as HeadersInit | undefined);
+      asked.push(`${String(input)} ${headers.get("authorization") ?? ""}`);
+      return Response.json({
+        usage: {
+          monthly: {
+            percent: 44,
+            resetsAt: "2026-11-01T00:00:00.000Z",
+            status: "ok",
+          },
+          rolling: {
+            percent: 0,
+            resetsAt: "2026-10-12T07:20:40.000Z",
+            status: "ok",
+          },
+          weekly: {
+            percent: 0,
+            resetsAt: "2026-10-19T00:00:00.000Z",
+            status: "ok",
+          },
+        },
+      });
+    }) as typeof globalThis.fetch;
+
+    try {
+      const ctx = createMockContext() as Record<string, unknown>;
+      ctx.loader = { entries: () => [goRow] };
+      ctx.get = (name: string) =>
+        name === "credentials"
+          ? {
+              resolve: (ref: string) =>
+                Promise.resolve(
+                  ref === "OPENCODE_GO_API_KEY"
+                    ? { value: "go-key" }
+                    : undefined
+                ),
+            }
+          : undefined;
+
+      const service = new GoUsageService(ctx, { keySource: "auto" });
+      const usage = await service.read({ provider: "opencode-go" });
+
+      // The endpoint was asked with the Go key, and the figures came back.
+      expect(asked).toHaveLength(1);
+      expect(asked[0]).toContain("/zen/go/v1/usage");
+      expect(asked[0]).toContain("Bearer go-key");
+      expect(usage.weekly.percent).toBe(0);
+      expect(usage.monthly.percent).toBe(44);
+      expect(usage.quotaUnavailable ?? false).toBe(false);
+    } finally {
+      globalThis.fetch = real;
+    }
+  });
+});
