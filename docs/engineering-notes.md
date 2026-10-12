@@ -56,6 +56,12 @@ What is left is the handshake's client side — the settings context holding a `
 
 **The host's own diagnostics do not reach a log file.** `ctx.logger.info` from the installers appears in no file under the DSH home, measured — so the client's console is not one channel among several, it is the only one a reader has.
 
+## Next: let a stale deployment say so
+
+The most expensive confusion in this plugin's history was not a bug. A running host was seven and a half hours and eleven commits behind its own build, and every symptom in that window was read as a code fault — because the host bundle is read once at process start, the package is installed through a `link:`, and a browser reload refreshes the client bundle while the host keeps the file it started with. The client's fixes appeared to do nothing and the host's diagnostics appeared never to run, which is exactly what both of those look like when the code is not there.
+
+Documented in three places now, which helps a reader who thinks to look. The next step is to make it say so instead: have the host report an identity for the build it loaded, and have the settings card compare it with the build the client is running. A mismatch is then a line in the console naming both, and a host too old to answer at all is the same signal with the other half missing — which is the state that cost the most time here.
+
 ## Rules that came out of real failures
 
 - Start from the host's built-ins. The UI kit ships the components _and_ one CSS module each, the fastest inventory of the host's design language available. A hand-rolled look-alike is one whose CSS module was never opened, and it is smaller, wrong and unthemed next to the built-in.
