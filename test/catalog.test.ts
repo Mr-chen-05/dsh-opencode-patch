@@ -747,6 +747,37 @@ describe("catalog · the README's routing table", () => {
     expect(documentedCounts(await readme())).toEqual(measured);
   });
 
+  it("holds the protocol doc's table to the same catalog", async () => {
+    // The same class of claim in a second document: "27 of 83" is a count
+    // written into prose, and it drifts exactly the way the README's did. The
+    // numbers are parsed rather than trusted, and the total has to match too.
+    const text = await readFile(
+      new URL("../docs/protocol-routing-and-merge.md", import.meta.url),
+      "utf8"
+    );
+    const pairs = [...text.matchAll(/(\d+) of (\d+)/gu)].map((m) => [
+      Number(m[1] ?? 0),
+      Number(m[2] ?? 0),
+    ]);
+    const total = Object.keys(OPENCODE_ZEN_CATALOG).length;
+    const measured = new Map<string, number>();
+    for (const model of Object.values(OPENCODE_ZEN_CATALOG)) {
+      const sdk = model.provider_npm ?? "(absent)";
+      measured.set(sdk, (measured.get(sdk) ?? 0) + 1);
+    }
+
+    expect(pairs.length).toBeGreaterThan(0);
+    for (const [count, of] of pairs) {
+      expect(of, "a row states a total the catalog does not have").toBe(total);
+      expect(
+        [...measured.values()],
+        `${count} of ${of} matches no SDK count`
+      ).toContain(count);
+    }
+    // And the rows add up, so the table cannot disagree with itself.
+    expect(pairs.reduce((sum, pair) => sum + (pair[0] ?? 0), 0)).toBe(total);
+  });
+
   it("states the same total it lists", async () => {
     const text = await readme();
     const total = /Counts are the \*\*(\d+)\*\*/u.exec(text);

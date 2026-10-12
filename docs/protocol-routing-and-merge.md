@@ -8,16 +8,21 @@ OpenCode serves its models on **four different API shapes**, and which one a mod
 
 | API shape | Wire endpoint | Which models | Signal in the catalog |
 | :-- | :-- | :-- | :-- |
-| OpenAI **Chat Completions** | `POST /zen/v1/chat/completions` | **the default**: 53 of 116 | the model names **no** SDK |
-| OpenAI **Responses** | `POST /zen/v1/responses` | 32 of 116 | `@ai-sdk/openai` |
-| Anthropic **Messages** | `POST /zen/v1/messages` | 23 of 116 | `@ai-sdk/anthropic` |
-| Mistral **Conversations** | `POST /zen/v1/chat/completions` | `mistral-large-4` and whatever follows it | `@ai-sdk/mistral` |
+| OpenAI **Chat Completions** | `POST /zen/v1/chat/completions` | **the default**: 27 of 83 | the model names **no** SDK |
+| OpenAI **Responses** | `POST /zen/v1/responses` | 30 of 83 | `@ai-sdk/openai` |
+| Anthropic **Messages** | `POST /zen/v1/messages` | 18 of 83 | `@ai-sdk/anthropic` |
+| Google **Generative AI** | `POST /zen/v1/models/<id>:streamGenerateContent` | 7 of 83 | `@ai-sdk/google` |
+| Mistral **Conversations** | `POST /zen/v1/chat/completions` | 1 of 83 | `@ai-sdk/mistral` |
 
-**"OpenAI" is two of the three.** Chat Completions and Responses are different wire formats, and a model that needs Responses does not work on the completions endpoint. The default is not "OpenAI" either. It is whatever api the route itself was registered with, and a model that names no SDK speaks it.
+Counts are the shipped catalog. They are asserted against this table by `catalog.test.ts`, because a count written into prose does not regenerate with the data it counts.
+
+**"OpenAI" is two of the four served shapes.** Chat Completions and Responses are different wire formats, and a model that needs Responses does not work on the completions endpoint. The default is not "OpenAI" either. It is whatever api the route itself was registered with, and a model that names no SDK speaks it.
 
 DSH picks a transport from the provider row's protocol. If that protocol is not the one the model is served on, the gateway does not fall back. It answers `500`. So the plugin's job is to send each model to the endpoint its own SDK names, without asking the user to configure anything.
 
-One SDK is deliberately **not** served: 8 models name `@ai-sdk/google`, and no protocol exists for it, in `llm-pi-ai` or here, so there is no route to dispatch them to, and they keep failing on the completions route rather than being sent somewhere invented. Every other SDK the catalog names is either mapped to a protocol or is a gap the catalog test refuses to let pass.
+**One SDK is deliberately not served, and it is Mistral.** Its models post to the completions path while speaking a different body, so path alone would route them wrongly, and the dialect the gateway answers with has not been measured — an earlier probe could not observe the request it produces. They stay unoffered rather than being sent somewhere invented, and `UNSERVED_SDKS` records the decision.
+
+`@ai-sdk/google` used to be in that position, and is not any more: pi implements `google-generative-ai`, the plugin serves it through its own adapter on the route `opencode-google`, and the live suite probes that path on every run. The two mechanisms that serve the four shapes are described below.
 
 **Mistral shares the completions PATH but not its protocol.** `@ai-sdk/mistral` posts to `/chat/completions`, the same URL the completions models use, while speaking a different body and reading different responses. Path alone would therefore route it wrongly, which is why the route is chosen from the SDK and the protocol, and why the e2e probe has to send a real request before any of it counts as supported.
 
