@@ -29,7 +29,12 @@ import {
   type CatalogModelSpec,
   type CatalogProvider,
 } from "./models-catalog.ts";
-import { isInternalRoute, isServableSdk } from "./responses-routes.ts";
+import {
+  internalRouteFor,
+  isInternalRoute,
+  isServableSdk,
+  protocolFromModelId,
+} from "./responses-routes.ts";
 
 export interface DiscoveryCandidate {
   contextWindow?: number;
@@ -208,9 +213,31 @@ const withoutRoute = (value: unknown, key: "id" | "provider"): unknown =>
  * lookup filters a Zen listing by a Go fact. Same seam as the redirect's — see
  * `findModelSpecOn`.
  */
-const isServableModel = (id: unknown, route: string): boolean =>
-  typeof id !== "string" ||
-  isServableSdk(findModelSpecOn(catalogPlaneForRoute(route), id)?.provider_npm);
+/**
+ * Whether a model may be offered on a route.
+ *
+ * Exported for its own test: it is the one place I1's second clause lives, and the
+ * interesting case is a model no catalog describes.
+ */
+export const isServableModel = (id: unknown, route: string): boolean => {
+  if (typeof id !== "string") {
+    return true;
+  }
+  const sdk = findModelSpecOn(catalogPlaneForRoute(route), id)?.provider_npm;
+  if (sdk !== undefined) {
+    return isServableSdk(sdk);
+  }
+  // A model the catalog does not describe: `undefined` is the completions default,
+  // which is right for a model that omits its SDK and wrong for one nobody has
+  // described. So the id is asked, and a family whose protocol this plane has no
+  // route for is not offered - I1's second clause, which until now held only for
+  // models the catalog carries. `internalRouteFor` answers exactly this: a route
+  // when one exists, and `undefined` when the model stays where it is.
+  return (
+    protocolFromModelId(id) === undefined ||
+    internalRouteFor(route, id) !== undefined
+  );
+};
 
 /**
  * Keep the internal routes out of every listing a user sees.

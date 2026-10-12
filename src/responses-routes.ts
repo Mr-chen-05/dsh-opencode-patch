@@ -232,11 +232,31 @@ export const internalRouteFor = (
   // whose protocol the vendor fixes by name. Measured against the live gateway:
   // gemini-3.8-flash and claude-sonnet-4-6 both answer 400 on the completions
   // endpoint and 200 on their own.
+  const byId = protocolFromModelId(model);
+  return byId === undefined ? undefined : plane.routes[byId];
+};
+
+/**
+ * The protocol a model id names, for models no catalog describes.
+ *
+ * Only the two families whose protocol the vendor fixes by name: a `gemini-*`
+ * model is served on the Generative AI path and a `claude-*` one on Messages, and
+ * neither is ever served as a chat completion. Measured against the live gateway:
+ * both answer 400 on the completions endpoint and 200 on their own.
+ *
+ * Shared by the router and the listing filter on purpose - one rule, so a model
+ * cannot be routed somewhere the listing said it could not go, or the other way
+ * round.
+ *
+ * @param model - the model id.
+ * @returns the protocol, or undefined when the id names no family with a fixed one.
+ */
+export const protocolFromModelId = (model: string): string | undefined => {
   if (model.startsWith("gemini-")) {
-    return plane.routes["google-generative-ai"];
+    return "google-generative-ai";
   }
   if (model.startsWith("claude-")) {
-    return plane.routes["anthropic-messages"];
+    return "anthropic-messages";
   }
   return undefined;
 };

@@ -22,6 +22,7 @@ import {
   type CordisContext,
   type CatalogModelSpec,
 } from "../src/index.ts";
+import { isServableModel } from "../src/models-discovery.ts";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -346,5 +347,30 @@ describe("models-discovery: the unfiltered registry keeps its receiver", () => {
     expect(isRouteRegistered("opencode")).toBe(true);
     expect(isRouteRegistered("opencode-responses")).toBe(false);
     stop?.();
+  });
+});
+
+describe("models-discovery: I1's second clause, for a model no catalog describes", () => {
+  it("offers a hand-listed model only where a route can serve it", () => {
+    // `undefined` is the completions default, which is right for a model that
+    // omits its SDK and wrong for one nobody has described. So the id is asked:
+    // a family whose protocol this plane has no route for is not offered.
+    // Measured: gemini-3.8-flash answers 400 on the Go plane's completions
+    // endpoint, and that plane carries no google route.
+    expect(isServableModel("gemini-3.8-flash", "opencode-go")).toBe(false);
+    // The same model on the plane that DOES carry the route stays offered.
+    expect(isServableModel("gemini-3.1-pro", "opencode")).toBe(true);
+    // And a family the rule does not name is left alone, because a missing
+    // catalog entry is not evidence of anything for it.
+    expect(isServableModel("deepseek-v4.1-flash", "opencode-go")).toBe(true);
+    expect(isServableModel("some-unknown-model", "opencode-go")).toBe(true);
+  });
+
+  it("keeps the catalog's own answer when there is one", () => {
+    // A model the catalog describes is answered by its SDK, and the id rule is
+    // never consulted - so this cannot change what already worked.
+    expect(isServableModel("muse-spark-1.3-contributor-free", "opencode")).toBe(
+      true
+    );
   });
 });
