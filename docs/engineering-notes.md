@@ -40,7 +40,7 @@ A guard that refused to query the Go quota endpoint with a key starting `oc_sk_`
 ## Rules that came out of real failures
 
 - Start from the host's built-ins. The UI kit ships the components _and_ one CSS module each, the fastest inventory of the host's design language available. A hand-rolled look-alike is one whose CSS module was never opened, and it is smaller, wrong and unthemed next to the built-in.
-- Declare cross-plugin services with `ctx.inject`. Reading them off the root context fails silently, because every access in that path is optional.
+- Declare cross-plugin services with `ctx.inject`, and know which failure each access has. Measured against cordis: `ctx.get(name)` reads the scope's store and does NOT consult `inject`, so an undeclared service answers `undefined` silently; only PROPERTY access (`ctx.name`) throws `cannot get property "name" without inject`. An optional service is therefore best captured through `ctx.inject([name], scope => …)` — a real child scope that can see it — rather than read off the root context, where the answer is `undefined` and the reason is invisible.
 - A `Tooltip` clones its child. Wrap a DOM node, never a component: the clone's handlers land on something that ignores unknown props, and the tooltip never appears.
 - Opt into the theme instead of re-declaring it. A hand-set elevation stroke pins one theme's answer and silently breaks the other's, and it looks correct in whichever theme you test it in.
 - A countdown floors, and its word order belongs to the language. A reset line is a sentence: English wants the word first, Chinese wants it last, and one copy key cannot serve both shapes.

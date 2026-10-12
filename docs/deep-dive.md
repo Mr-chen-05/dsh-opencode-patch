@@ -94,6 +94,8 @@ async function classifyRisk(ctx, agent, exec, signal) {
 
 Because these calls omit `options.sessionId`, earlier plugin versions short-circuited the stream hook, leaving the turn store empty and sending review requests out unpatched (`TRANSPORT: Connection error`). The plugin now generates a deterministic fallback turn state whenever `sessionId` is omitted, so Auto Review streams receive full header injection and the free-tier tool schemas.
 
+**A pinned session header used to defeat that fallback, and the shape is the reason.** The resolver kept any existing `x-opencode-session` that started with `ses_`, and a deployment that pinned `ses_dsh_default` starts with `ses_` and is not a session id: the gateway answers it `401 Invalid API key`, which reads exactly like a bad credential. A request inside a tracked turn never touched that path — it uses the id derived from the turn — so the main session worked while every Auto Review pass failed, on the same model. The resolver now checks the format (`ses_` + 12 hex + 14 base62) in both places a value can arrive from outside, an existing header and the configured env var, and replaces one the gateway would reject.
+
 ### 5. OpenCode API tiers: V1 vs V2, Zen vs Go
 
 ```
