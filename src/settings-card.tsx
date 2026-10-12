@@ -19,6 +19,7 @@ import { SettingsBooleanField } from "./settings-boolean-field.tsx";
 import { SettingsChoiceField } from "./settings-choice-field.tsx";
 import type { Translate } from "./settings-copy.ts";
 import { CARD_FIELDS, type CardFieldSpec } from "./settings-fields.ts";
+import { LoginSection, type LoginRemoteCalls } from "./settings-login.tsx";
 import { UsageSummary } from "./settings-usage.tsx";
 import type { GoUsage } from "./usage-contract.ts";
 
@@ -63,6 +64,8 @@ export interface CardProps {
   getLocale?: () => string | undefined;
   /** The Host's quota read; absent when the usage service is not registered. */
   readUsage?: () => Promise<GoUsage | undefined>;
+  /** The Host's sign-in remote; absent when no login service is mounted. */
+  login?: LoginRemoteCalls;
   edit: (field: string, text: string) => void;
   resetField: (field: string) => void;
   save: () => void;
@@ -164,6 +167,17 @@ export const OpencodeCard: React.FC<CardProps> = (props: CardProps) => {
         card: this is a settings page, so it borrows the page's own row language
         (flat, hairline separator) rather than the composer popover's material.
       */}
+      {props.login !== undefined && (
+        <div
+          style={{
+            borderBottom: "0.5px solid var(--dsw-alias-border-l2)",
+            marginBottom: 12,
+            paddingBottom: 12,
+          }}
+        >
+          <LoginSection getLocale={props.getLocale} login={props.login} t={t} />
+        </div>
+      )}
       {props.readUsage !== undefined && (
         <div
           style={{

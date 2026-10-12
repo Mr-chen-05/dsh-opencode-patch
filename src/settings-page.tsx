@@ -16,9 +16,15 @@ import {
 
 import { DEFAULT_PROVIDERS, readStringList } from "./config-values.ts";
 import { isRecord } from "./guards.ts";
+import {
+  parseLoginChallenge,
+  parseLoginPoll,
+  parseLoginState,
+} from "./login-contract.ts";
 import { OpencodeCard } from "./settings-card.tsx";
 import { en, zh } from "./settings-copy.ts";
 import { SPECS } from "./settings-fields.ts";
+import type { LoginRemoteCalls } from "./settings-login.tsx";
 import { readGoUsage } from "./settings-usage.tsx";
 import { usageRemote } from "./usage-contract.ts";
 import { UsagePill } from "./usage-pill.tsx";
@@ -56,6 +62,44 @@ export const SCOPED_PKG = "@viztor/dsh-opencode-patch";
  * The official client plugins declare it the same way
  * (ui-model-selection/src/client/index.ts:107).
  */
+/**
+ * The sign-in remote's three calls, or nothing when the host mounted none.
+ *
+ * The namespace is read off `ctx.remote` rather than declared as an inject key:
+ * declaring `remote.opencodeLogin` would make it a HARD dependency and hold the
+ * whole plugin until a host that mounts no login service answered.
+ *
+ * @param ctx - the settings context.
+ * @returns the calls, or undefined when there is no login remote.
+ */
+export const loginCalls = (
+  ctx: ClientContext
+): LoginRemoteCalls | undefined => {
+  const remote = ctx.remote?.opencodeLogin;
+  if (remote === undefined) {
+    return undefined;
+  }
+  return {
+    begin: async () =>
+      parseLoginChallenge(await unwrapRemote(remote.begin?.())),
+    poll: async () => parseLoginPoll(await unwrapRemote(remote.poll?.())),
+    read: async () => parseLoginState(await unwrapRemote(remote.state?.())),
+  };
+};
+
+/** The value a Remote result carries, or a thrown failure. */
+export const unwrapRemote = async (result: unknown): Promise<unknown> => {
+  const resolved: unknown = await result;
+  if (isRecord(resolved) && resolved.ok === true) {
+    return resolved.value;
+  }
+  throw new Error(
+    isRecord(resolved) && typeof resolved.error === "string"
+      ? resolved.error
+      : "the login remote did not answer"
+  );
+};
+
 export const inject = [
   "slots",
   "locale",
@@ -114,6 +158,13 @@ export interface ClientContext {
         provider?: string;
         sessionId?: string;
       }) => Promise<unknown>;
+    };
+    // Structural view of the login remote; each answers a Remote result, whose
+    // `value` the caller unwraps.
+    opencodeLogin?: {
+      begin: (query?: { plane?: string }) => Promise<unknown>;
+      poll: () => Promise<unknown>;
+      state: (query?: { plane?: string }) => Promise<unknown>;
     };
   };
   slots?: {
@@ -456,6 +507,9 @@ export const apply = (ctx: ClientContext): void => {
                 getLocale: () => ctx.locale?.getLocale?.()?.active,
                 hooks: { opencodeCard: store },
                 readUsage: () => readGoUsage(ctx),
+                // The sign-in remote, when the host mounted one. Same shape as
+                // the meter's: the card calls, the host holds the credential.
+                login: loginCalls(ctx),
                 ...model.actions(),
               }),
               key: alias.key,

@@ -476,7 +476,7 @@ if (releaseYml.includes("scripts/publish-scoped.ts")) {
  * under the line, which means the next honest edit trips a guard whose only
  * job is to notice a dependency.
  */
-const CLIENT_BUDGET = 96 * 1024;
+const CLIENT_BUDGET = 112 * 1024;
 const clientPath = join(ROOT, "lib/client.js");
 if (existsSync(clientPath)) {
   const clientStat = statSync(clientPath);
