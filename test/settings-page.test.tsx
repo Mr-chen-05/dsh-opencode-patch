@@ -1035,3 +1035,41 @@ describe("settings-page: field specs", () => {
     expect(source.parse("hand-edited")).toBeUndefined();
   });
 });
+
+describe("settings-page: every remote gets a mount", () => {
+  // The bug this exists for: `loginRemote` was exported, tested on its own, and
+  // never mounted by the page, so the card's `ctx.remote.opencodeLogin` did not
+  // exist and the sign-in row rendered nothing - silently, because a missing
+  // remote and a remote with nothing to say look identical from the outside.
+  // Nothing asserted which remotes the page mounts, so nothing noticed.
+  it("mounts one per surface the card reads, and no surface is left out", async () => {
+    const mounted: { descriptors: { service: string }[] }[] = [];
+    const ctx = {
+      effect: (fn: () => unknown) => fn(),
+      remote: {
+        $mount: async (contribution: unknown) => {
+          mounted.push(contribution as { descriptors: { service: string }[] });
+          return () => {};
+        },
+      },
+    };
+
+    apply(ctx as never);
+    // The mount is async: `mountRemote` starts it and the effect returns the
+    // disposer, so let the microtask queue drain before reading the list.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    // No sort: the order the effects run in is the order they are registered, and
+    // asserting both membership and length keeps this about WHICH surfaces are
+    // mounted rather than about the order someone happened to write them in.
+    const services = mounted.map(
+      (contribution) => contribution.descriptors[0]?.service
+    );
+    expect(services).toHaveLength(2);
+    expect(services).toEqual(
+      expect.arrayContaining(["opencodeGoUsage", "opencodeLogin"])
+    );
+  });
+});
