@@ -50,8 +50,9 @@ One deployment reports an empty meter — the card renders "quota unavailable" �
 | the contract | the descriptors, the parameter codec and the service's method list all match, and a client query carrying provider, model and sessionId parses cleanly |
 | the profile | `config: { usageEnabled: true }` is at the level the schema reads |
 | the endpoint | it answers with both keys, measured |
+| the host's mount | `ctx.plugin(GoUsageService, …)` succeeds on a real cordis context and `ctx.get('opencodeGoUsage')` resolves — the service registers under the name the client looks for, so the host's half is sound |
 
-What is left is the runtime handshake between the host and the card, and the console is where it will say so: `readGoUsage` reports which of its paths returned nothing, and the remote mount reports when it throws. Both were silent until recently, which is why the meter's empty state was indistinguishable from every other reason a meter can be empty.
+What is left is the handshake's client side — the settings context holding a `remote`, `$mount` accepting the contribution, and the face then appearing — and the console is where it will say so, because every branch of that stretch now reports: `readGoUsage` names which of its paths returned nothing, the mount names an absent remote or a throw, and the scoped wait names the service it is still waiting for after ten seconds.
 
 **The host's own diagnostics do not reach a log file.** `ctx.logger.info` from the installers appears in no file under the DSH home, measured — so the client's console is not one channel among several, it is the only one a reader has.
 
