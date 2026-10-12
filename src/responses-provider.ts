@@ -753,6 +753,26 @@ export const registerResponsesProvider = async (
 };
 
 /**
+ * The token a login stored for one plane, if any.
+ *
+ * @param ctx - the host context.
+ * @param plane - the plane to read.
+ * @returns the access token, or `undefined` when nothing is stored.
+ */
+const storedTokenFor = async (
+  ctx: unknown,
+  plane: string
+): Promise<string | undefined> => {
+  const store = createTokenStore({
+    credentials: readCredentialsWriter(ctx),
+    plane,
+    scope: name,
+  });
+  const login = await store?.read();
+  return login?.accessToken;
+};
+
+/**
  * A reader for the token a login stored, per plane.
  *
  * Named and exported because it is the one piece of the bridge's chain that is
@@ -766,11 +786,12 @@ export const registerResponsesProvider = async (
 export const loginTokenReader =
   (ctx: unknown) =>
   async (plane: string): Promise<string | undefined> => {
-    const store = createTokenStore({
-      credentials: readCredentialsWriter(ctx),
-      plane,
-      scope: name,
-    });
-    const login = await store?.read();
-    return login?.accessToken;
+    // A grant is keyed per plane, but the ACCOUNT behind it is not: the same
+    // token serves both, measured. So a sign-in on one plane answers for the
+    // other too, rather than leaving a Go route with nothing because the card
+    // happened to default to Zen.
+    const other = plane === "opencode-go" ? "opencode" : "opencode-go";
+    return (
+      (await storedTokenFor(ctx, plane)) ?? (await storedTokenFor(ctx, other))
+    );
   };
