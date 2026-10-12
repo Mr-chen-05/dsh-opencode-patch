@@ -20,6 +20,7 @@ import {
   parseLoginChallenge,
   parseLoginPoll,
   parseLoginState,
+  loginRemote,
 } from "./login-contract.ts";
 import { OpencodeCard } from "./settings-card.tsx";
 import { en, zh } from "./settings-copy.ts";
@@ -106,6 +107,45 @@ export const unwrapRemote = async (result: unknown): Promise<unknown> => {
       ? resolved.error
       : "the login remote did not answer"
   );
+};
+
+/**
+ * Mount one remote contribution, reporting why when it cannot.
+ *
+ * The two optional chains are the point: an absent `remote`, or a remote without
+ * `$mount`, evaluates to undefined WITHOUT throwing, so a catch around the call
+ * never runs and the surface simply renders nothing - indistinguishable from a
+ * surface whose service answered nothing.
+ *
+ * @param ctx - the settings context.
+ * @param contribution - the remote's descriptors.
+ * @param what - what will not render, named in the report.
+ * @returns the disposer the effect gives back.
+ */
+const mountRemote = (
+  ctx: ClientContext,
+  contribution: unknown,
+  what: string
+): (() => void) => {
+  let dispose: (() => void) | undefined;
+  const mount = async (): Promise<void> => {
+    if (ctx.remote === undefined || typeof ctx.remote.$mount !== "function") {
+      console.warn(
+        `[dsh-opencode-patch] ${what}: the settings context has no remote to mount on`,
+        Object.keys(ctx)
+      );
+      return;
+    }
+    try {
+      dispose = await ctx.remote.$mount(contribution);
+    } catch (error) {
+      console.warn(`[dsh-opencode-patch] ${what} did not mount`, error);
+    }
+  };
+  void mount();
+  return () => {
+    dispose?.();
+  };
 };
 
 export const inject = [
@@ -308,40 +348,19 @@ export const apply = (ctx: ClientContext): void => {
     return noopDisposer;
   }, "dsh-opencode-patch: dictionaries");
 
-  ctx.effect?.(() => {
-    let dispose: (() => void) | undefined;
-    const mount = async (): Promise<void> => {
-      // The two optional chains here are what made this silent: an absent
-      // `remote`, or a remote without `$mount`, evaluates to undefined WITHOUT
-      // throwing, so the catch below never ran and the meter simply never
-      // mounted. Say which of the two it is, because "no meter" is otherwise
-      // indistinguishable from a meter whose service answered nothing.
-      if (ctx.remote === undefined || typeof ctx.remote.$mount !== "function") {
-        console.warn(
-          "[dsh-opencode-patch] usage remote: the settings context has no remote to mount on",
-          Object.keys(ctx)
-        );
-        return;
-      }
-      try {
-        dispose = await ctx.remote.$mount(usageRemote);
-      } catch (error) {
-        // Report it rather than swallow it. The meter renders nothing when this
-        // mount fails, and "renders nothing" is indistinguishable from every
-        // other reason a meter can be empty - so the one place that KNOWS the
-        // mount threw says so, in the console the reader of a broken meter will
-        // already have open.
-        console.warn(
-          "[dsh-opencode-patch] usage remote did not mount; the meter will render nothing",
-          error
-        );
-      }
-    };
-    void mount();
-    return () => {
-      dispose?.();
-    };
-  }, "dsh-opencode-patch: usage remote");
+  // Both remotes mount the same way and fail the same way, so they share one
+  // effect: the optional chains that made an absent `remote` silent, the named
+  // report, and the disposer. The meter and the sign-in row were each written by
+  // hand once, which is how the second came to have no mount at all.
+  for (const [contribution, what] of [
+    [usageRemote, "usage remote; the meter will render nothing"],
+    [loginRemote, "login remote; the sign-in row will render nothing"],
+  ] as const) {
+    ctx.effect?.(
+      () => mountRemote(ctx, contribution, what),
+      `dsh-opencode-patch: ${what}`
+    );
+  }
 
   // Resolve the scope first so the meter can read its trigger markers at inject
   // time. The injector still registers without one: the meter only needs the
