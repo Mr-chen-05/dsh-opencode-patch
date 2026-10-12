@@ -778,6 +778,59 @@ describe("catalog · the README's routing table", () => {
     expect(pairs.reduce((sum, pair) => sum + (pair[0] ?? 0), 0)).toBe(total);
   });
 
+  it("holds the plane-by-plane table to both catalogs", async () => {
+    // The third document with counts, and the one whose table is per plane:
+    // every cell is a count, and every cell was stale when this was written.
+    const text = await readFile(
+      new URL("../docs/redirect-planes.md", import.meta.url),
+      "utf8"
+    );
+    const counted = (catalog: readonly { provider_npm?: string }[]) => {
+      const bySdk = new Map<string, number>();
+      for (const model of Object.values(catalog)) {
+        const sdk = model.provider_npm ?? "(none)";
+        bySdk.set(sdk, (bySdk.get(sdk) ?? 0) + 1);
+      }
+      return bySdk;
+    };
+    const zen = counted(OPENCODE_ZEN_CATALOG);
+    const go = counted(OPENCODE_GO_CATALOG);
+
+    const rows: { go: number; sdk: string; zen: number }[] = [];
+    for (const line of text.split("\n")) {
+      const cells = line.split("|").map((cell) => cell.trim());
+      // `| SDK | protocol | Zen | Go |` — five cells once split on the pipes.
+      if (cells.length !== 6 || cells[1] === "" || cells[1] === ":--") {
+        continue;
+      }
+      const sdk =
+        cells[1] === "_(none)_"
+          ? "(none)"
+          : /^`([^`]+)`$/u.exec(cells[1] ?? "")?.[1];
+      const zenCount = Number(cells[3]?.replaceAll("*", ""));
+      const rawGo = cells[4]?.replaceAll("*", "") ?? "";
+      const goCount = rawGo === "—" || rawGo === "-" ? 0 : Number(rawGo);
+      if (
+        sdk === undefined ||
+        !Number.isFinite(zenCount) ||
+        !Number.isFinite(goCount)
+      ) {
+        continue;
+      }
+      rows.push({ go: goCount, sdk, zen: zenCount });
+    }
+
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.zen, `${row.sdk} on Zen`).toBe(zen.get(row.sdk) ?? 0);
+      expect(row.go, `${row.sdk} on Go`).toBe(go.get(row.sdk) ?? 0);
+    }
+    // Every SDK either plane names has a row, so a new one cannot be missed.
+    expect(rows.map((row) => row.sdk).toSorted()).toEqual(
+      [...new Set([...zen.keys(), ...go.keys()])].toSorted()
+    );
+  });
+
   it("states the same total it lists", async () => {
     const text = await readme();
     const total = /Counts are the \*\*(\d+)\*\*/u.exec(text);
