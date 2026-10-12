@@ -240,11 +240,11 @@ Built, in the order this file sets out:
 
 - **The flow that keeps what it learned.** `src/login-flow.ts`: ask for a code, wait for the approval, read the account and the orgs with the token just obtained, then write ONE grant — the pair, the account, the email, the orgs and the active org. If the owner cannot be read the login FAILS and stores nothing: a token stored without its org is a credential whose owner has been forgotten, and the org is half of what the gateway asks for. It looks like success and is a credential nobody can complete.
 
-  **What a login buys is not yet the free tier, and the difference matters before anyone builds the surface for it.** The org is necessary and not sufficient: measured with this machine's own account — its session token, its active org, and every header captured from the real client — a free-tier model still answers `403 FreeTierError`, on both endpoints. The gate is not in the HTTP request, so it is either a client fingerprint or a signature sent only to the real host, and the error's own words may simply be true. A login is what the free tier is asked FOR; whether it is granted is a separate, unmeasured question. The first org is activated, matching the client.
+  **What a login buys is not the free tier, and the surface exists anyway.** The org is necessary and not sufficient: measured with this machine's own account — its session token, its active org, and every header captured from the real client — a free-tier model still answers `403 FreeTierError`, on both endpoints. The gate is not in the HTTP request, so it is either a client fingerprint or a signature sent only to the real host, and the error's own words may simply be true. A login is what the free tier is asked FOR; whether it is granted is a separate, unmeasured question. The first org is activated, matching the client.
 
 - **The org on the request.** `fetch-patch.ts` sends `x-opencode-org-id` from a per-plane resolver — asked per request, because a login can arrive while the process runs — and invents no header when a plane's credential is a plain key, which is every key deployment. `credentialOrg` is the explicit fallback for a token that came from elsewhere.
 
-Not built yet:
+Built, and the account plane it serves:
 
 - **The login remote.** `src/login-contract.ts` is the three calls a settings card makes — `begin` answers the code and the URL to open, `poll` asks whether the human has approved, `state` answers what is stored — with codecs both sides read, so a card cannot disagree with the host about what an answer means. A credential never crosses: the parser is a whitelist, and a test sends a state carrying both tokens to assert they are dropped.
 
