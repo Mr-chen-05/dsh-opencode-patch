@@ -194,6 +194,10 @@ No try/catch is needed: the store's `read` is documented to answer `undefined` w
 
 **The one thing the first test attempt got wrong, measured.** `auth.apiKey.resolve` is not on the adapter instance. It is built in a closure and handed to the adapter's CONSTRUCTOR (`Reflect.construct(adapter, [{ auth: { apiKey: { name, resolve } } }])`), so reaching it means going through `adapter.stream(...)` — which is what the existing stream test already does. It is also SYNCHRONOUS: it returns `{ auth: { apiKey }, source }` rather than a promise, and the comment above it says so, because pi awaits the value.
 
+**And the second attempt got one step further, which narrows the test precisely.** With the edit applied and a test that mirrors the stream test, `vp check` passed and 16 of 17 tests passed — the new one failed on `expected undefined to be 'Bearer st_from_login'`, meaning the captured headers were EMPTY: the request never reached the patched `fetch` at all, so the stream had already failed before the key mattered.
+
+The existing stream test gets past that point by setting `process.env. BRIDGE_STREAM_KEY` before it registers. A test for this branch needs the same: give the route a resolvable key by some other means so the stream reaches the request, and let the assertion be about which of the sources supplied it. That is the only piece still missing, and it is one line in a test that already exists.
+
 So the test is the stream test with two changes: register with an empty `apiKeyRef` and a `loginToken` returning a sentinel, then assert the request's `Authorization` header carries the sentinel. The interception boilerplate is already written there.
 
 1. `responses-provider.ts` does not import `createTokenStore`, and its import block is ordered, so the new import has to go in the right place rather than appended.
