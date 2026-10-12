@@ -50,6 +50,7 @@ import {
 } from "./credential-pool.ts";
 import { registerGoogleBridge } from "./google-bridge.ts";
 import { isFunctionLike, isRecord } from "./guards.ts";
+import { name } from "./identity.ts";
 import {
   type CatalogModelSpec,
   getLiveGoCatalog,
@@ -63,6 +64,7 @@ import {
   ROUTE_FOR_PLANE_PROTOCOL,
   SELF_MOUNTED_ROUTES,
 } from "./responses-routes.ts";
+import { createTokenStore } from "./token-store.ts";
 
 /** The host plugin whose `apply` this module mounts. */
 const PI_AI_PACKAGE = "@deepseek-ai/dsh-llm-pi-ai";
@@ -584,6 +586,8 @@ export const registerResponsesProvider = async (
     : registerGoogleBridge({
         apiKeyRef: inheritedCredentialRef(ctx),
         pool: poolFor("opencode"),
+        // The credential a login already stored, read the same way the org is.
+        loginToken: loginTokenReader(ctx),
         ctx,
         host: loadPiAi(ctx),
         // The bridge reads the RAW catalog, not the config-shaped profile:
@@ -747,3 +751,26 @@ export const registerResponsesProvider = async (
     return bridgeDispose;
   }
 };
+
+/**
+ * A reader for the token a login stored, per plane.
+ *
+ * Named and exported because it is the one piece of the bridge's chain that is
+ * built here rather than in the bridge: the store answers `undefined` when there is
+ * no login and does not throw, so this needs no guard, and a test can call it
+ * without standing up a whole provider.
+ *
+ * @param ctx - the host context.
+ * @returns a reader the bridge calls when a route named no reference.
+ */
+export const loginTokenReader =
+  (ctx: unknown) =>
+  async (plane: string): Promise<string | undefined> => {
+    const store = createTokenStore({
+      credentials: readCredentialsWriter(ctx),
+      plane,
+      scope: name,
+    });
+    const login = await store?.read();
+    return login?.accessToken;
+  };

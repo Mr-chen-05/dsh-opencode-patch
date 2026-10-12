@@ -39,6 +39,7 @@ import {
 } from "../src/index.ts";
 import type { CordisContext } from "../src/index.ts";
 import { baseForProtocol } from "../src/pi-provider.ts";
+import { loginTokenReader } from "../src/responses-provider.ts";
 
 const MUSE = "muse-spark-1.3-contributor-free";
 
@@ -1525,5 +1526,14 @@ describe("responses-provider: a loader that breaks its own contract", () => {
     const host = createHost();
     (host.ctx.loader as { entries: unknown }).entries = 42;
     await expect(registerResponsesProvider(host.ctx)).resolves.toBeUndefined();
+  });
+});
+
+describe("responses-provider · the login token a route falls back to", () => {
+  it("answers undefined when no credential service is reachable", async () => {
+    // The store answers undefined rather than throwing, which is why the bridge
+    // needs no guard around this: a deployment with no login simply falls through
+    // to the adapter's own ambient auth, exactly as it did before.
+    await expect(loginTokenReader({})("opencode")).resolves.toBeUndefined();
   });
 });

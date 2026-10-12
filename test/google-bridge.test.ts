@@ -561,3 +561,66 @@ describe("google-bridge · the pi copy it may load", () => {
     expect(semver.satisfies(ourVersion ?? "", required ?? "")).toBe(true);
   });
 });
+
+describe("google-bridge · the login's token, when a route names no reference", () => {
+  /** Run one stream and hand back the headers the bridge built. */
+  const capturedHeaders = async (
+    apiKeyRef: string,
+    loginToken?: (plane: string) => Promise<string | undefined>
+  ): Promise<Record<string, string>> => {
+    const { llm, registered } = recordingLlm();
+    registerGoogleBridge({
+      ...bridgeInputs(llm, apiKeyRef),
+      ...(loginToken === undefined ? {} : { loginToken }),
+    });
+    const adapter = registered[0]?.adapter as {
+      stream: (options: unknown) => AsyncIterable<unknown>;
+    };
+    const sent: Record<string, string>[] = [];
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (
+      _input: unknown,
+      init?: { headers?: unknown }
+    ) => {
+      const headers: Record<string, string> = {};
+      const candidate = init?.headers;
+      if (candidate instanceof Headers) {
+        for (const [key, value] of candidate.entries()) {
+          headers[key] = value;
+        }
+      } else if (typeof candidate === "object" && candidate !== null) {
+        Object.assign(headers, candidate as Record<string, string>);
+      }
+      sent.push(headers);
+      throw new Error("captured");
+    }) as typeof globalThis.fetch;
+    try {
+      for await (const _ of adapter.stream({
+        messages: [{ content: [{ text: "hi", type: "text" }], role: "user" }],
+        model: "gemini-3.8-flash",
+        provider: GOOGLE_INTERNAL_ROUTE,
+      })) {
+        // The capture refuses the call; nothing arrives.
+      }
+    } finally {
+      globalThis.fetch = real;
+    }
+    return sent[0] ?? {};
+  };
+
+  it("carries it, where the route named no reference", async () => {
+    // The chain is the pool, then the route's own reference, then the login - so a
+    // deployment that has signed in should not have to name `apiKeyEnv`. The
+    // Google path carries the request key in x-goog-api-key, not Authorization.
+    const headers = await capturedHeaders("", () =>
+      Promise.resolve("st_from_login")
+    );
+    expect(headers["x-goog-api-key"]).toBe("st_from_login");
+  });
+
+  it("answers undefined when there is no login either", async () => {
+    // Which is the adapter's cue to resolve ambient auth, exactly as before.
+    const headers = await capturedHeaders("");
+    expect(headers["x-goog-api-key"]).toBeUndefined();
+  });
+});

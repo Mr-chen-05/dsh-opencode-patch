@@ -304,6 +304,14 @@ export interface GoogleBridgeInputs {
    * existed.
    */
   readonly pool?: CredentialPool;
+  /**
+   * The stored login's token for a plane, when a route named no reference.
+   *
+   * Last in the chain on purpose: the pool, then the route's own reference, then
+   * this. Everything a user declared explicitly outranks anything the plugin found
+   * on its own, and it is what lets a signed-in deployment name no `apiKeyEnv`.
+   */
+  readonly loginToken?: (plane: string) => Promise<string | undefined>;
 }
 
 /**
@@ -365,9 +373,18 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
     if (pooled?.kind === "key") {
       return pooled.value;
     }
-    // An enabled pool that is exhausted falls through to the profile's own
-    // reference rather than failing the request.
-    return resolveGatewayKey(ctx, resolved.apiKeyEnv, String(route));
+    // A route that named a reference is answered by it, loudly if it resolves
+    // nothing: `undefined` would tell the adapter to find ambient auth instead.
+    const named = resolved.apiKeyEnv;
+    if (typeof named === "string" && named.length > 0) {
+      return resolveGatewayKey(ctx, named, String(route));
+    }
+    // No reference at all: the stored login, which is the credential the user
+    // already has. `undefined` when there is no login either, which is the
+    // adapter's cue to resolve ambient auth - exactly what happened before this.
+    return inputs.loginToken?.(
+      String(route).startsWith("opencode-go") ? "opencode-go" : "opencode"
+    );
   };
 
   const built: unknown = Reflect.construct(adapter, [
