@@ -209,11 +209,7 @@ export const internalRouteFor = (
   model: unknown,
   providerNpm?: unknown
 ): string | undefined => {
-  if (
-    typeof provider !== "string" ||
-    typeof model !== "string" ||
-    typeof providerNpm !== "string"
-  ) {
+  if (typeof provider !== "string" || typeof model !== "string") {
     return undefined;
   }
   // The plane comes from the route the caller selected, and it must BE a plane:
@@ -223,6 +219,24 @@ export const internalRouteFor = (
   if (plane === undefined) {
     return undefined;
   }
-  const protocol = PROTOCOL_FOR_SDK[providerNpm];
-  return protocol === undefined ? undefined : plane.routes[protocol];
+  const protocol =
+    typeof providerNpm === "string" ? PROTOCOL_FOR_SDK[providerNpm] : undefined;
+  if (protocol !== undefined) {
+    return plane.routes[protocol];
+  }
+  // A model the catalog carries names its SDK and that is always the answer.
+  // A model it has never heard of - listed by hand in a deployment's config -
+  // carries none, and `undefined` reads as the completions DEFAULT: right for a
+  // model that omits its SDK, wrong for one nobody has described, and the two are
+  // indistinguishable here. So the id is asked, and only for the two families
+  // whose protocol the vendor fixes by name. Measured against the live gateway:
+  // gemini-3.8-flash and claude-sonnet-4-6 both answer 400 on the completions
+  // endpoint and 200 on their own.
+  if (model.startsWith("gemini-")) {
+    return plane.routes["google-generative-ai"];
+  }
+  if (model.startsWith("claude-")) {
+    return plane.routes["anthropic-messages"];
+  }
+  return undefined;
 };

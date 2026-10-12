@@ -40,6 +40,27 @@ describe("responses-routes: the SDK mapping", () => {
     );
   });
 
+  it("routes a hand-listed model by the family its id names", () => {
+    // A model the catalog has never heard of carries no SDK, and `undefined`
+    // reads as the completions default - right for a model that omits its SDK,
+    // wrong for one nobody has described, and indistinguishable here. Measured
+    // against the live gateway: gemini-3.8-flash and claude-sonnet-4-6 both answer
+    // 400 on the completions endpoint and 200 on their own.
+    expect(internalRouteFor("opencode", "gemini-3.1-pro")).toBe(
+      GOOGLE_INTERNAL_ROUTE
+    );
+    expect(internalRouteFor("opencode", "claude-opus-4-7")).toBe(
+      ANTHROPIC_ROUTE
+    );
+    // A family the rule does not name keeps the route it was given: a wrong route
+    // is worse than the one the deployment asked for.
+    expect(internalRouteFor("opencode", "kimi-k2.5")).toBeUndefined();
+    // And a catalog SDK still wins, because it is the better answer.
+    expect(internalRouteFor("opencode", "claude-opus-4-7", RESPONSES_SDK)).toBe(
+      RESPONSES_ROUTE
+    );
+  });
+
   it("redirects a model that names the Anthropic SDK too", () => {
     // 23 of the 116 opencode models name @ai-sdk/anthropic, and llm-pi-ai
     // implements anthropic-messages — so the same mechanism covers them. A
