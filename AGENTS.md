@@ -82,6 +82,10 @@ node --experimental-strip-types scripts/check.ts   # bundle gate
 
 **And the process has to restart, not just the page.** The host bundle is read once at process start — a deployment installs this package through a `link:`, so there is nothing to reinstall and nothing to notice a newer file. A browser reload picks up `lib/client.js` and keeps running the `lib/index.mjs` the process started with, which makes a client-side fix look like it did nothing and a host-side diagnostic look like it never ran. Measured the hard way: a running host was two and a half hours and eleven commits behind its own build, and every "it still does not work" in between was answered by a file that was never loaded.
 
+## A known local-only failure in the bundle gate
+
+`scripts/check.ts` ends with a consumer install, and it can fail with `ETARGET: No matching version found for @aws-sdk/nested-clients@^3.997.48` on a machine where the registry has only `3.997.46` and `3.997.47`. The chain is ours only by accident: `@earendil-works/pi-ai` → `@aws-sdk/client-bedrock-runtime` → `@aws-sdk/credential-provider-node` → `nested-clients`, and the lockfile pins `3.997.46`, which exists. It is npm resolving a caret range to a version that has not been published, not anything this repository wrote — CI passes on the same commit. Re-run when the registry catches up; do not "fix" it by loosening the lockfile.
+
 ## Releasing
 
 Releases are cut by release-please from Conventional Commit subjects, and published to npm by `.github/workflows/release.yml` through OIDC trusted publishing (no stored token). **`CHANGELOG.md` is owned by release-please — never hand-edit it**; clarity comes from commit subjects and the `changelog-sections` mapping in the release-please workflow.
