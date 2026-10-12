@@ -262,6 +262,17 @@ Go usage                                           Healthy
 Monthly allowance  mimo-v2.6-pro · Go $60 · Plus $120         ⓘ
 ```
 
+Above both sits the **sign-in row** — the plugin's own OpenCode account, when you want one:
+
+```
+OpenCode account                                          Not signed in
+                                                            [ Sign in to OpenCode ]
+```
+
+Click it and the card shows a short code, a link to open, and that it is waiting. Approve in the browser and the row becomes the account's email. It is a device flow, so there is nothing to paste and no token ever reaches the page — the credential is written and read on the host, and the card only renders what it is told.
+
+**If you do not see this row after updating, the host process has not restarted.** The host bundle is read once at process start, so a browser reload keeps running the previous `lib/index.mjs`; stop and restart `dsh web`. The row is the quickest way to tell, because it is new in the same build as everything else.
+
 "Left" is a percentage, never a dollar figure: `/usage` publishes a percent per window and no balance at all, and the plan tier is not discoverable — so a dollar remainder would be a guess. The ⓘ states that. A quota that cannot be read says so and prints no numbers, rather than a row of zeroes that reads as a measurement.
 
 ### Composer dock meter
