@@ -4,10 +4,10 @@
  *
  * OpenCode Zen's provider-level SDK is `@ai-sdk/openai-compatible`; models.dev
  * names a DIFFERENT SDK per model only when that model needs one, so the
- * PRESENCE of `provider.npm` is the signal. Measured 2026-10-05 against
- * `https://models.dev/api.json`, across the 116 `opencode` models: 53 name
- * nothing (the default), **32 name `@ai-sdk/openai`**, **23 name
- * `@ai-sdk/anthropic`**, 8 name `@ai-sdk/google`.
+ * PRESENCE of `provider.npm` is the signal. Measured against the shipped
+ * catalog: of its 83 `opencode` models, 27 name nothing (the default), **30 name
+ * `@ai-sdk/openai`**, **18 name `@ai-sdk/anthropic`**, 7 name `@ai-sdk/google`
+ * and 1 names `@ai-sdk/mistral` — the only one this plugin does not serve.
  *
  * So the split is read from the vendor's metadata rather than kept as a list of
  * model ids we would have to notice changing. The hand-written list this

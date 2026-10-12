@@ -157,10 +157,11 @@ Zen's provider-level SDK is `@ai-sdk/openai-compatible`. models.dev names a **di
 
 | models.dev `provider.npm` | models | protocol | served from |
 | :-- | --: | :-- | :-- |
-| _(absent)_ | 28 | OpenAI Chat Completions | the route you configured |
+| _(absent)_ | 27 | OpenAI Chat Completions | the route you configured |
 | `@ai-sdk/openai` | 30 | OpenAI Responses | `opencode-responses` |
 | `@ai-sdk/anthropic` | 18 | Anthropic Messages | `opencode-anthropic` |
 | `@ai-sdk/google` | 7 | Google Generative AI | `opencode-google` |
+| `@ai-sdk/mistral` | 1 | _(a dialect this plugin does not serve)_ | **not offered** |
 
 Counts are the **83** active `opencode` models in `models.dev` as of 2026-10-09 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 83 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
 
