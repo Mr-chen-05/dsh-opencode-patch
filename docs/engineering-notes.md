@@ -296,3 +296,9 @@ The file is 190 lines and had only ever been grepped, which is how two findings 
 Sections 1 to 3 check out. The header matrix's version claim is the checkable one — `OPENCODE_CLI_VERSION` is `1.19.0` in `identity.ts`, and `pnpm run cli:version` confirms it is the published version with five copies agreeing — and the rest of the matrix is a decompilation whose values match what the patch sends.
 
 The remaining claim in section 1 that cannot be checked from here is the `User-Agent`'s purpose: that it prevents Cloudflare WAF Error 1010. It is not the cause of the free-tier refusal, which was measured exhaustively and is about the model rather than the request, and whether it defeats a WAF challenge is not something this repository can observe.
+
+## The duplicate-count sweep, broadened, comes back clean
+
+The narrow version caught the Chinese README's Google claim; the broadened one — every number followed by a counter word, in either language — returns only `85` and `41`, both stated twice on a single line and both correct in both languages. `41 catalog entries and 41 sign-in flows` is a measurement against the real harness, and the Chinese says the same thing.
+
+So the class has one member left standing rather than a pattern, which is the point at which a sweep stops being worth running. Three instances of "a fact written twice, updated once" were found and fixed; this is the check that says there is no fourth.
