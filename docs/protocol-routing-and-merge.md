@@ -37,7 +37,7 @@ Three steps, all data-driven:
    const PROTOCOL_FOR_SDK = {
      "@ai-sdk/openai": "openai-responses",
      "@ai-sdk/anthropic": "anthropic-messages",
-     "@ai-sdk/mistral": "mistral-conversations",
+     "@ai-sdk/google": "google-generative-ai",
    };
    ```
 
