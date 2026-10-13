@@ -288,3 +288,11 @@ Every script under `scripts/`, checked against whether a workflow runs it: `buil
 The first version of this check grepped the workflows for each script's **filename**, and reported three of them unwired. Workflows call npm script names, not files. That is the fourth time this session a sweep resolved a name in a context that could not show it — after the count sweep that missed Go, the identifier sweep that asked about exports, and the heading diff that stripped non-ASCII out of Chinese.
 
 Four instances in one session is no longer an accident of care. The rule that catches all four is written at the top of this file and has to be applied before the sweep is believed: **check that the thing being searched is the thing the claim is about.**
+
+## Reading deep-dive.md end to end: two findings and one clean check
+
+The file is 190 lines and had only ever been grepped, which is how two findings survived in it: the auto-review section kept the "on the same model" conclusion this work overturned, and section 5's neighbourhood exposed a code comment still describing a credential-prefix guard that was removed.
+
+Sections 1 to 3 check out. The header matrix's version claim is the checkable one — `OPENCODE_CLI_VERSION` is `1.19.0` in `identity.ts`, and `pnpm run cli:version` confirms it is the published version with five copies agreeing — and the rest of the matrix is a decompilation whose values match what the patch sends.
+
+The remaining claim in section 1 that cannot be checked from here is the `User-Agent`'s purpose: that it prevents Cloudflare WAF Error 1010. It is not the cause of the free-tier refusal, which was measured exhaustively and is about the model rather than the request, and whether it defeats a WAF challenge is not something this repository can observe.
