@@ -362,3 +362,9 @@ Not the source, the build. Every fix is present in the file the host loads and t
 - `lib/client.js` contains no `node:sqlite`, no `node:fs` and no `opencode-store` — the host-only module did not leak into the bundle, which is the rule the bundle gate exists to enforce and the reason it is checked rather than assumed.
 
 That is the last thing worth doing without the host: the code is correct, the data is current, the documents say what the code does, and the artifacts contain all of it. What none of it can show is whether the deployment behaves differently, because that needs the process that is running to be the process that has this code.
+
+## The handoff is current, which was worth checking rather than assuming
+
+The session opened with a request to hand this work to someone else, and the handoff was written into `credentials.md` before any of it was built. Everything since has been built by the same session, so the brief was checked rather than trusted: it has the two planes with the org distinction marked as got-wrong-twice, the two credential sources, the JSON-value fact discovered here, a Status section that says for each part whether it is a correction rather than a detail, and a closing list of what is no longer open that was updated as the answers landed.
+
+So the document that a next reader starts from describes what exists rather than what was intended. That is the last thing this session can verify without the host, and it is the one a handoff is for.
