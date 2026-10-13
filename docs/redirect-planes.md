@@ -115,7 +115,7 @@ Read the table as a chain of guarantees. Steps 1–3 are why the front end is on
 | Step 2 without step 6 | The row is offered on a shape nothing routes. A Go responses model sent to completions answers `500`, and the row that caused it looks exactly like a working one. This is the gap in §2. |
 | Step 6 without step 7 | The redirect names a route the host has never heard of, and the turn dies with "model not found" against an endpoint the user never chose. |
 | Step 7 without step 8 | A correct endpoint answers `403 FreeTierError` or `400 MissingSessionID`, which reads as an account problem rather than a missing header. |
-| Step 8 without step 10 | The meter prices a free turn as if it were paid, because the plane never reached the accumulator. |
+| Step 8 without step 10 | The meter prices a plan-included turn as if it were paid, because the plane never reached the accumulator. |
 | Step 10 without step 11 | The number is right and invisible, which is indistinguishable from not tracking it at all. |
 
 The whole design follows from one sentence: the user picks a _model_, and everything else (plane, protocol, endpoint, credential, headers) is derived from facts the vendor ships, so that no part of it can be configured into disagreement with another part.
