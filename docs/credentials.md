@@ -262,6 +262,13 @@ The opt-in reader was parked on a dependency question: OpenCode 2.0 keeps its cr
 
 That decision is now measured rather than open. `node:sqlite` is a built-in on the Node this host runs (26.x), exporting `DatabaseSync`, `StatementSync` and `backup`, so the reader can open `~/.local/share/opencode/opencode.db` with no new dependency at all. The constraint it inherits is the bundle rule: `node:sqlite` is a host-only import, so the reader lives on the host side and the client never reaches it — which is what `scripts/check.ts` enforces rather than what anyone has to remember.
 
+**And the path is not a constant, which is the part worth knowing before writing it.** Two files in `~/dev/opencode` decide it, and neither branches on the operating system:
+
+- `packages/util/src/global-roots.ts` resolves the directory as `$XDG_DATA_HOME || ~/.local/share`, then joins `opencode`. So macOS and Windows use the same XDG layout as Linux — no `~/Library/Application Support`, no `%APPDATA%` — and on Windows that means `%USERPROFILE%\.local\share\opencode`. `os.homedir()` is the only platform-dependent call.
+- `packages/cli/src/database-path.ts` resolves the filename as `$OPENCODE_DB`, else `opencode.db` when the channel is one of `latest | dev | beta | next | prod` or `$OPENCODE_DISABLE_CHANNEL_DB` is `1`/`true`, else `opencode-<channel>.db`. It also honours `:memory:` verbatim, which is not a path at all.
+
+So a reader that hardcodes `~/.local/share/opencode/opencode.db` is right on a stable channel and wrong on every other one, and wrong again when `$OPENCODE_DB` points elsewhere. It should ask the same two questions in the same order, and treat "no file at the resolved path" as the ordinary case rather than an error.
+
 The shape it would read, taken from the schema rather than guessed: `credential(id, integration_id, label, value, connector_id, method_id, active, time_created, time_updated)` and `account(id, email, url, access_token, refresh_token, token_expiry, time_created, time_updated)`. That is the same three kinds `~/dev/opencode`'s `Credential.Key | OAuth | External` describes — an API key lives in `credential.value` with its `integration_id` naming the provider, and a login lives in `account` with the token pair and its expiry. So the reader is two queries and a whitelist, and the login one is an alternative to the device flow rather than a second thing to invent.
 
 **It stays opt-in and off by default.** A declared DSH credential is always the first answer, and reading another tool's store is something a user turns on, not something that happens to them.
