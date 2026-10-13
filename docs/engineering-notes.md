@@ -218,3 +218,9 @@ Worth keeping separate because the conclusions differ: the first is fixed by not
 Two were missed while chasing the catalog's changes — Go's total and its no-SDK row — so the sweep was finished properly: every number stated in any document, compared against `catalog-data.ts`. The facts are Zen 85 with 28 no-SDK, 30 openai, 18 anthropic, 8 google and 1 mistral, and Go 32 with 20 no-SDK, and every live count in the docs says exactly that.
 
 Two numbers that look stale are not, and they are worth naming so the next sweep does not "fix" them: `0 of 31` appears once, inside this file, as a quotation of the mistake; and `16 of 17` is a recorded test result from the round that narrowed the header test, not a count of anything current.
+
+## The link sweep, done in the context the earlier one got wrong
+
+Every relative link in every markdown file, resolved from **the file's own directory** rather than from the repository root — which is the mistake this file already records, and the reason an earlier sweep reported every doc link as dead. Zero broken links.
+
+That is the point of writing a sweep's context down: the second attempt is only better than the first if it applies the correction, and a clean result from the wrong context is worth nothing at all.
