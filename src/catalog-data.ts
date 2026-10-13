@@ -870,6 +870,19 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     provider_npm: "@ai-sdk/google",
   },
   {
+    context_window: 262_144,
+    cost: {
+      cache_read: 0,
+      input: 0,
+      output: 0,
+    },
+    id: "cat-jam-free",
+    input_modalities: ["text"],
+    is_free: true,
+    max_output_tokens: 131_072,
+    name: "Cat Jam Free",
+  },
+  {
     context_window: 128_000,
     cost: {
       cache_read: 0.175,
