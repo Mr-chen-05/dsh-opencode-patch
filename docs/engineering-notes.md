@@ -368,3 +368,9 @@ That is the last thing worth doing without the host: the code is correct, the da
 The session opened with a request to hand this work to someone else, and the handoff was written into `credentials.md` before any of it was built. Everything since has been built by the same session, so the brief was checked rather than trusted: it has the two planes with the org distinction marked as got-wrong-twice, the two credential sources, the JSON-value fact discovered here, a Status section that says for each part whether it is a correction rather than a detail, and a closing list of what is no longer open that was updated as the answers landed.
 
 So the document that a next reader starts from describes what exists rather than what was intended. That is the last thing this session can verify without the host, and it is the one a handoff is for.
+
+## The coverage ratchet, checked against the code this session added
+
+Statements 95.31% against a floor of 95, branches 90.82 against 90, functions 93.57 against 93, lines 95.29 against 95. Each clears its floor and none clears it by much, which is the useful part: the bounded re-read, the login row's per-call resolution, the unservable-model report, the JSON credential extraction and the login reader were all added to files whose coverage is measured, and a path left untested would have pushed one of these under its floor and failed CI rather than passing quietly.
+
+That is the last of the four ways this session checked its own work: the suite asserts behaviour, the ratchet asserts that the new behaviour was reached, the bundle gate asserts the client did not gain a host dependency, and the artifact check asserts the built files contain all of it.
