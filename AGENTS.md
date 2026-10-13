@@ -77,11 +77,14 @@ vp test run            # unit suite
 vp test run --coverage # with the coverage ratchet (95/90/93/95)
 vp check               # format, lint, types
 vp fmt --write         # rewrite formatting
-vp pack                # build lib/ (host bundle + client bundle)
+pnpm run build         # build lib/ (host bundle + client bundle)
+# `vp pack` alone is NOT enough: it emits lib/client.cjs for a type:module
+# package, and the web client loader serves `${package}/client.js` and requires
+# the .js extension. `pnpm run build` is `vp pack` plus the rename that fixes it.
 node --experimental-strip-types scripts/check.ts   # bundle gate
 ```
 
-`lib/` is built output and is not committed; the host loads `lib/index.mjs`, so a source change is not deployed until `vp pack` runs.
+`lib/` is built output and is not committed; the host loads `lib/index.mjs`, so a source change is not deployed until `pnpm run build` runs — and, as above, not until the process restarts.
 
 **And the process has to restart, not just the page.** The host bundle is read once at process start — a deployment installs this package through a `link:`, so there is nothing to reinstall and nothing to notice a newer file. A browser reload picks up `lib/client.js` and keeps running the `lib/index.mjs` the process started with, which makes a client-side fix look like it did nothing and a host-side diagnostic look like it never ran. Measured the hard way: a running host was two and a half hours and eleven commits behind its own build, and every "it still does not work" in between was answered by a file that was never loaded.
 
