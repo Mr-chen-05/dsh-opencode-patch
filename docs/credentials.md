@@ -230,6 +230,8 @@ No try/catch is needed: the store's `read` is documented to answer `undefined` w
 
 The second is one new file and no plumbing, and it is the same answer as the token reader: the value is kept next to the thing that changes it.
 
+**Applied, and this is the note that asked for it.** That one new file is `src/org-cache.ts`, and `orgByPlane` above names the shape it replaced: the cache is no longer read once at startup but written by the login service when a login completes, so a grant that appears minutes later is what the next request reads. The paragraph is left as written because it is the reasoning that produced the module, not a description of the tree.
+
 Both gaps are the same mistake: a value that can change while the process runs, read once and kept. The token reader was the first; this is the second, and the fix is the same shape — read it where it is needed, or refresh it when the thing that feeds it changes. The login completing is exactly that event, and it already knows which plane it wrote.
 
 Measured earlier in this file: the account token is not plane-specific. The same token serves `/inference/openai/v1` with its org, and the same key answers on both planes. So one sign-in should serve both, and the reader should try the plane it was asked for and then the other one before answering `undefined` — three lines in `loginTokenReader`, plus the case that pins it.

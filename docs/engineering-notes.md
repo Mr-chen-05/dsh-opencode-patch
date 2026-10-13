@@ -224,3 +224,11 @@ Two numbers that look stale are not, and they are worth naming so the next sweep
 Every relative link in every markdown file, resolved from **the file's own directory** rather than from the repository root — which is the mistake this file already records, and the reason an earlier sweep reported every doc link as dead. Zero broken links.
 
 That is the point of writing a sweep's context down: the second attempt is only better than the first if it applies the correction, and a clean result from the wrong context is worth nothing at all.
+
+## The identifier sweep, and the two contexts it needed before it said anything
+
+Every backticked identifier in the documentation, checked against the code. **The first version was useless**: it asked whether each name is an _export_, and reported 70 of 98 as missing — because most of them are SQL columns, config fields, parameter names, test helpers and host API fields, none of which are exports and all of which are real. That is the wrong-context sweep again, this time written by someone who had just finished documenting it.
+
+The second version asked the right question — does the name appear anywhere in the tree — and the glob still missed `test/e2e/*.ts`, so the two helpers the e2e cases use came back as unknown a second time. With that fixed, 88 of 98 resolve and the rest are host fields, a GitHub error string and an OpenCode migration name.
+
+**The one real finding was a name from a design that had been replaced.** `orgByPlane` appears in `credentials.md` and nowhere in `src/`: it is what the org cache looked like before `src/org-cache.ts`, in a paragraph that reads as a proposal. The fix it proposed was applied and the paragraph never said so, which is the difference between a historical note and a live claim. It says so now.
