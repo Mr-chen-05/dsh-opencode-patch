@@ -110,3 +110,18 @@ The check needs the plane, which it already has, and the family, which the id na
 - A comment that describes intended behaviour is not evidence of it. Read the code the comment is attached to before trusting it; a doc comment had described the opposite of what the function did for several sessions.
 - Verify the artifact, not the command's output. A grep over a directory that does not exist is indistinguishable from a grep that found nothing, and a cached registry read makes a completed operation look pending. Assert that the input was actually read, and include a case whose answer you already know.
 - A test for a behaviour must perform that behaviour. Asserting a constant is not the same as exercising a switch, and a fixture that sits exactly on a floored boundary is a race, not a test.
+
+## The settings card and the composer meter read the same service differently
+
+Found while chasing a card that says "读不到配额" beside a composer that shows the figure correctly. Two reads of one service, in one page:
+
+|  | composer meter | settings card |
+| :-- | :-- | :-- |
+| call site | `settings-page.tsx:419` | `settings-page.tsx:576` |
+| scope | `meterScope` — the injected child scope | `ctx` — the page's own |
+| arguments | `{ provider, model, sessionId }` | `{ provider }` only |
+| helper | inline | `readGoUsage(ctx)` in `settings-usage.tsx` |
+
+Three differences and none of them is yet known to be the cause. `readGoUsage` warns on each of its failure paths, and the console at the time showed none of them, which rules out "no remote", "no service" and "unrecognised answer" for that reading — but that console was captured before a restart, so it is not evidence.
+
+**The shape is the finding**: one service, two reads, one of them passing a third of the arguments. That is the same shape as the meter and the sign-in row having separate mounts, and the fix is the same kind — make the two reads one read, rather than teaching the second one the arguments the first already had. Worth doing with the console in front of you, because which of the three differences matters is a measurement, not a reading.
