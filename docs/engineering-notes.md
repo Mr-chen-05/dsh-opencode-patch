@@ -374,3 +374,13 @@ So the document that a next reader starts from describes what exists rather than
 Statements 95.31% against a floor of 95, branches 90.82 against 90, functions 93.57 against 93, lines 95.29 against 95. Each clears its floor and none clears it by much, which is the useful part: the bounded re-read, the login row's per-call resolution, the unservable-model report, the JSON credential extraction and the login reader were all added to files whose coverage is measured, and a path left untested would have pushed one of these under its floor and failed CI rather than passing quietly.
 
 That is the last of the four ways this session checked its own work: the suite asserts behaviour, the ratchet asserts that the new behaviour was reached, the bundle gate asserts the client did not gain a host dependency, and the artifact check asserts the built files contain all of it.
+
+## Where the productive work ends, and what the remaining condition is
+
+The test files' own comments were swept for claims about behaviour that changed under them - "used to", "no longer", "was removed" - and every one is true: `@ai-sdk/google` was in `UNSERVABLE` before the bridge, the client bundle did register the meter in an earlier shape, and the README's total is asserted rather than stated. That was the last unchecked class this session could name.
+
+Everything the repository can verify about itself has now been verified, four ways and repeatedly: 851 tests, the coverage ratchet above all four of its floors, the bundle gate, and the built artifacts containing every change with no host-only module in the client. Every document has been read end to end, the handoff describes what exists rather than what was intended, and three checks were installed and each proved by making it fail.
+
+**What remains is not a task.** The host process has been running since before any of this work - twelve hours and seventy-two commits behind its own build - and it is the process that answers requests, so no fix, no diagnostic and no corrected document can be observed until it restarts. The four questions worth asking it are the four this session has asked in every round: does the account row appear, does the quota read, are the free models gone from the picker, and does auto review still refuse.
+
+Until then, another round produces another marginal commit. That is worth saying plainly rather than demonstrating.
