@@ -243,6 +243,51 @@ export interface UsageSummaryProps {
   t: Translate;
 }
 
+/**
+ * Read until an answer arrives, a bounded number of times.
+ *
+ * The remote is mounted by an asynchronous effect, so a surface that appears first
+ * reads against a remote that is not there yet and answers `undefined`. Reading once
+ * leaves it empty until the page is reloaded, which is exactly the difference a user
+ * sees between this card and the composer meter - the meter reads on every turn.
+ *
+ * Extracted from the component so the retry is a behaviour a test can perform rather
+ * than a branch inside a React effect.
+ *
+ * @param read - the read to attempt.
+ * @param attempts - how many times to try before giving up.
+ * @param sleep - the wait between attempts, called with the attempt number.
+ * @param live - asked before each attempt; `false` abandons the loop.
+ * @returns the first defined answer, or `undefined`.
+ */
+export const readUntilAnswered = async (
+  read: () => Promise<GoUsage | undefined>,
+  attempts = 5,
+  sleep: (attempt: number) => Promise<void> = (attempt) =>
+    new Promise((resolve) => {
+      setTimeout(resolve, 250 * (attempt + 1));
+    }),
+  live: () => boolean = () => true
+): Promise<GoUsage | undefined> => {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (!live()) {
+      return undefined;
+    }
+    // Sequential on purpose: each attempt waits for the previous answer, and the
+    // wait between them is the retry.
+    // oxlint-disable-next-line no-await-in-loop -- see above.
+    const next = await read();
+    if (next !== undefined) {
+      return next;
+    }
+    if (attempt < attempts - 1) {
+      // oxlint-disable-next-line no-await-in-loop -- the delay IS the retry.
+      await sleep(attempt);
+    }
+  }
+  return undefined;
+};
+
 /** The container: reads once when the card appears, then hands off to the view. */
 export const UsageSummary: React.FC<UsageSummaryProps> = ({
   getLocale,
@@ -262,21 +307,25 @@ export const UsageSummary: React.FC<UsageSummaryProps> = ({
     }
     let live = true;
     void (async () => {
+      // The remote is mounted by an asynchronous effect, so a card that appears
+      // first reads against a remote that is not there yet and answers
+      // `undefined` - and there is nothing to read again, because the effect's
+      // dependency is this closure, whose identity changes every render while its
+      // answer does not. The meter does not have the problem: it reads on every
+      // turn. So this reads until answered, which is the difference between a card
+      // that is briefly empty and one that is empty until the page is reloaded.
+      let next: GoUsage | undefined;
       try {
-        const next = await readUsage();
-        if (live) {
-          setUsage(next);
-        }
+        next = await readUntilAnswered(readUsage, 5, undefined, () => live);
       } catch (error) {
         // The meter's empty state is the same for every cause, so the one place
         // that knows the read failed says which it was. Without this, a failing
         // read and a service that was never mounted look identical.
         console.warn("[dsh-opencode-patch] usage read failed", error);
-        if (live) {
-          setUsage(undefined);
-        }
+        next = undefined;
       }
       if (live) {
+        setUsage(next);
         setSettled(true);
       }
     })();

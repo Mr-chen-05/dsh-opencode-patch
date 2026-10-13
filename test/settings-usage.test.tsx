@@ -1,4 +1,3 @@
-// @vitest-environment jsdom
 import { render, waitFor } from "@testing-library/react";
 /**
  * The settings page's Go usage summary.
@@ -12,10 +11,12 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 
 import { zh } from "../src/settings-copy.ts";
+// @vitest-environment jsdom
 import {
   readGoUsage,
   UsageSummary,
   UsageSummaryView,
+  readUntilAnswered,
 } from "../src/settings-usage.tsx";
 import type { GoUsage } from "../src/usage-contract.ts";
 import { findAllOf } from "./test-helpers.ts";
@@ -188,5 +189,58 @@ describe("settings: the summary container", () => {
         t("usageSummaryUnavailable")
       );
     });
+  });
+});
+
+describe("settings-usage: reading until the remote answers", () => {
+  const answered = { go: { limit: 60, percent: 10 }, model: "m" } as never;
+  const noSleep = () => Promise.resolve();
+
+  it("returns the first answer without retrying", async () => {
+    let calls = 0;
+    const read = () => {
+      calls += 1;
+      return Promise.resolve(answered);
+    };
+    expect(await readUntilAnswered(read, 5, noSleep)).toBe(answered);
+    expect(calls).toBe(1);
+  });
+
+  it("keeps asking while the answer is undefined", async () => {
+    // The remote is mounted asynchronously, so the first reads answer nothing.
+    // Reading once leaves the card empty until a reload - which is the bug this
+    // exists for, and the reason the composer meter is never empty.
+    let calls = 0;
+    const read = () => {
+      calls += 1;
+      return Promise.resolve(calls < 3 ? undefined : answered);
+    };
+    expect(await readUntilAnswered(read, 5, noSleep)).toBe(answered);
+    expect(calls).toBe(3);
+  });
+
+  it("gives up after the attempts rather than asking forever", async () => {
+    let calls = 0;
+    const read = async (): Promise<GoUsage | undefined> => {
+      calls += 1;
+      return undefined;
+    };
+    expect(await readUntilAnswered(read, 3, noSleep)).toBeUndefined();
+    expect(calls).toBe(3);
+  });
+
+  it("abandons the loop when the surface is gone", async () => {
+    // Unmounting must stop the retries, or a closed card keeps reading.
+    let calls = 0;
+    let alive = true;
+    const read = async (): Promise<GoUsage | undefined> => {
+      calls += 1;
+      alive = false;
+      return undefined;
+    };
+    expect(
+      await readUntilAnswered(read, 5, noSleep, () => alive)
+    ).toBeUndefined();
+    expect(calls).toBe(1);
   });
 });
