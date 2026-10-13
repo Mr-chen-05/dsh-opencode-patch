@@ -204,3 +204,11 @@ Checking whether `UNSERVED_SDKS` still records the mistral decision, I imported 
 That is the wrong-context sweep this file already names three times: a symbol resolved in a context that cannot show it, producing a confident finding that is entirely wrong. `UNSERVED_SDKS` is fine. The count beside it was not — `redirect-planes.md` said `0 of 32 on Go` was `0 of 31`, missed when the catalog gained `cat-jam-free` — and that one is fixed.
 
 The rule that would have caught it is already written above and was not applied: assert that the input was actually read, and include a case whose answer you know. Printing a `Set` is not reading it.
+
+## Auto review has two failure modes, and only one of them is about the model
+
+`403 free_tier_restricted` is the one this work chased: the audit call takes its route from `session.requestHeader()`, so a session selected on a Zen free-tier model fails before the patch's headers matter.
+
+`429 RATE_LIMIT: Upstream request failed: Endpoint is unavailable` is a second one, observed afterwards, and it is not about the model, the tier, or this plugin. The reviewer's own endpoint is rate-limited or down, and the tool call is refused before its body runs — which is what a refused tool call looks like from the outside, and why "auto-review failed" is not by itself evidence about the plugin.
+
+Worth keeping separate because the conclusions differ: the first is fixed by not selecting a free model, and the second has no fix here and no fix in the session — it is the reviewer's provider being unavailable, and it clears on its own.
