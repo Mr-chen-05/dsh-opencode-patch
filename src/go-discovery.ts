@@ -553,8 +553,12 @@ export interface RoutedKeyDetails {
 /**
  * Resolve the effective API key and account tier for a currently routed provider.
  *
- * Unlike {@link resolveGoApiKey} this never rejects a Zen key: the routed
- * provider *is* the tier, so a Zen route legitimately resolves a Zen key.
+ * The routed provider *is* the tier, so a Zen route legitimately resolves a
+ * Zen key — and so does {@link resolveGoApiKey}, which does not reject one
+ * either. An earlier guard there refused a key starting `oc_sk_` on the belief
+ * that the prefix meant "Zen, no Go entitlement"; the same prefix answers `200`
+ * with real windows, and the guard was removed. What separates the tiers is the
+ * observed request, never a string.
  *
  * @param ctx - plugin context
  * @param provider - routed provider name (e.g. "opencode-go", "opencode")
