@@ -323,6 +323,63 @@ describe("apply (plugin lifecycle)", () => {
     expect(ctx.llm?.listProviders?.()).toEqual(routes);
   });
 
+  it("says why a hand-named model cannot be served, once", () => {
+    // The hook is registered through `ctx.on`, not by replacing `llm.stream` - which
+    // is what a first attempt at this test assumed, and why it asserted against an
+    // empty list. The gateway answers a Zen free-tier id with a message that reads as
+    // though the model were broken; measurement says the cause is the model, and none
+    // of credentials, structure, headers or route. So the hook reports the truth, and
+    // reports it once, because it runs on every request.
+    let streamHandler:
+      | ((options: unknown, next: () => unknown) => unknown)
+      | undefined;
+    const warnings: unknown[][] = [];
+    const spy = vi
+      .spyOn(console, "warn")
+      .mockImplementation((...args: unknown[]) => {
+        warnings.push(args);
+      });
+    try {
+      const ctx = {
+        effect: (fn: () => unknown) => {
+          fn();
+        },
+        llm: {
+          listConfigurableProviders: () => [{ provider: "opencode" }],
+          listModels: async () => [{ id: "space-bunny-free" }],
+          listProviders: () => [{ id: "opencode" }],
+          stream: (options: unknown) => options,
+        },
+        on: (
+          _event: string,
+          handler: (options: unknown, next: () => unknown) => unknown
+        ) => {
+          streamHandler = handler;
+        },
+      };
+      apply(ctx as never);
+      if (typeof streamHandler !== "function") {
+        throw new TypeError("stream handler not registered");
+      }
+      const call = (): unknown =>
+        streamHandler?.(
+          { model: "space-bunny-free", provider: "opencode" },
+          () => {
+            // The hook's `next` is never reached for an unservable model.
+          }
+        );
+      call();
+      call();
+      const mine = warnings.filter((args) =>
+        String(args[0]).includes("cannot be served from here")
+      );
+      expect(mine).toHaveLength(1);
+      expect(String(mine[0]?.[0])).toContain("space-bunny-free");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("hands a responses-format model to the responses route", async () => {
     // The gateway serves muse on /responses and everything else on
     // /chat/completions, and llm-pi-ai carries one `api` per route. So the call
