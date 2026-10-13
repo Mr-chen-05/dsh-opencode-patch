@@ -146,3 +146,9 @@ readUsage: () => readGoUsage(ctx),   // called when the card asks
 The test that matters is the one the previous version failed: a remote mounted _after_ `loginCalls` has run, which is exactly the case the injector creates.
 
 Either way the tool for it now exists: `readUntilAnswered` in `settings-usage.tsx` is the pattern, and the row needs the same treatment the summary just got.
+
+## A diagnostic without a test, named rather than left
+
+The stream hook now reports a hand-named model it cannot serve, once per provider/model pair. It has **no test**. An attempt to add one against `lifecycle.test.ts`'s harness did not install the hook the way the test assumed, so the warning never fired and the assertion failed on an empty list; it was reverted rather than left half-working, and the coverage ratchet does not catch this because a diagnostic line is not a branch the ratchet weighs.
+
+That is recorded here rather than quietly dropped, because the rule this repository keeps — _a test for a behaviour must perform that behaviour_ — is exactly what this line breaks. The behaviour is worth having: the gateway's message for a free-tier id sends a reader looking at credentials, headers and routes, and none of them is the cause. The test is worth having too, and it needs whoever writes it to find how `apply` installs the hook before asserting anything about it.
