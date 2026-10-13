@@ -302,3 +302,9 @@ The remaining claim in section 1 that cannot be checked from here is the `User-A
 The narrow version caught the Chinese README's Google claim; the broadened one — every number followed by a counter word, in either language — returns only `85` and `41`, both stated twice on a single line and both correct in both languages. `41 catalog entries and 41 sign-in flows` is a measurement against the real harness, and the Chinese says the same thing.
 
 So the class has one member left standing rather than a pattern, which is the point at which a sweep stops being worth running. Three instances of "a fact written twice, updated once" were found and fixed; this is the check that says there is no fourth.
+
+## Why one document's counts never drifted, and the others' did
+
+`protocol-routing-and-merge.md` states five counts — 28, 30, 18, 8 and 1 of 85 — and every one is correct, which is not luck. The document says why in its own words: _"a count written into prose does not regenerate with the data it counts"_, and it names the test that holds them. `catalog.test.ts` asserts the table against the shipped catalog, so a count that drifts fails the suite rather than sitting in a file.
+
+That is the difference between the counts that were wrong this session and this one. The ones that drifted — Go 31, the Zen total in the plane table, the duplicated 12 and 13, the Chinese README's Google line — were all prose that nothing checked. The fix in each case was to correct it; the fix that would have prevented all of them is the one this document already applies, and it is worth copying rather than rediscovering: put the number where a test can reach it.
