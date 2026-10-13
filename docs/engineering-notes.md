@@ -152,3 +152,19 @@ Either way the tool for it now exists: `readUntilAnswered` in `settings-usage.ts
 The stream hook reports a hand-named model it cannot serve, once per provider/model pair. It has a test now, and the reason the first attempt at one failed is worth keeping: **the hook is registered through `ctx.on(event, handler)`, not by replacing `llm.stream`.** The first test looked for the handler on `llm.stream` after `apply`, found nothing, called nothing, and asserted against an empty warning list.
 
 That is the same shape as the rest of this file — a claim about the tree that the tree did not say — applied to a test rather than to a document. Find how a thing is installed before asserting anything about it.
+
+## A network failure read as a data answer — the class, and where it stops
+
+Two instances, both fixed, and two paths checked that get it right. Worth recording as a class because the symptom is identical every time: something that could not be observed is reported as though it had been, and the conclusion drawn from it is the opposite of what the evidence supports.
+
+**Fixed:**
+
+- The catalog-freshness job reports `is src/catalog-data.ts still current?` with exit 1 when its fetch times out. It cannot tell "could not reach models.dev" from "models.dev changed", and it says the second when it means the first. It went red three times in one day and only the third was real.
+- The e2e protocol-routing case asserted `toBe(400)` directly on a probe whose status 0 means "the gateway did not answer". A busy gateway was therefore read as the gateway serving a model on the wrong protocol, and the failure message blamed the catalog. `accessDisabled` already treated status 0 as the third shape of "cannot tell"; that loop does now too.
+
+**Checked and correct, so the class has a boundary:**
+
+- `refreshCatalog` — a revalidation failure retains the active catalogs and allows a later retry, rather than emptying the list.
+- The models.dev enrichment path — a non-JSON upstream response generates the full catalog response instead of dropping models.
+
+Both were checked precisely because they are the paths where an empty answer would have produced the original symptom — a model list with nothing in it.
