@@ -42,7 +42,7 @@
 
 **这些能用之后剩下的**是另一个问题，而且与账号无关：OpenCode 的模型分布在**四种不同的 API 形状**上，而 DSH 是按 provider 行选择传输协议的——一条路由只能说一种形状。所以走 Responses / Messages / Mistral 的模型在基础问题解决之后就会返回 `500`。这正是插件**按模型而不是按 provider** 路由的原因。
 
-插件在网络层补齐所有缺失的协议要素——**且仅针对 OpenCode 路由**（`opencode` / `opencode-go` / `opencode-responses` / `opencode-anthropic` / `opencode-mistral`）。其余全部流量（DeepSeek、OpenAI、Anthropic、GitHub）原样通过。
+插件在网络层补齐所有缺失的协议要素——**且仅针对 OpenCode 路由**（`opencode` / `opencode-go` / `opencode-responses` / `opencode-anthropic` / `opencode-google`）。其余全部流量（DeepSeek、OpenAI、Anthropic、GitHub）原样通过。
 
 **三条主线。**
 
@@ -133,7 +133,7 @@ npm install dsh-opencode-patch
 
 网关提供四种线路家族，而 **OpenAI 自己就占了两种**：Chat Completions 与 Responses 是**两种不同的线路格式**，不是同一个东西的两个名字。需要 Responses 的模型在 completions 端点上不工作，而网关**不会回退**——它直接返回 `500`。
 
-DSH 能说其中三种，所以插件路由这三种，**故意不提供第四种**（Google Generative AI）。见下表。
+DSH 能说其中四种，插件就把这四种都路由掉。**Google Generative AI 走插件自己挂的路由 `opencode-google`** ——它曾经是唯一没有路由的一种，现在不是了。见下表。
 
 ### 1. OpenCode Zen (`provider: opencode`) — 按量计费与免费额度
 
@@ -158,7 +158,8 @@ Zen 的 provider 级 SDK 是 `@ai-sdk/openai-compatible`。models.dev **只在�
 | _（缺失）_ | 28 | OpenAI Chat Completions | 你配置的路由 |
 | `@ai-sdk/openai` | 30 | OpenAI Responses | `opencode-responses` |
 | `@ai-sdk/anthropic` | 18 | Anthropic Messages | `opencode-anthropic` |
-| `@ai-sdk/google` | 7 | _（DSH 无此协议）_ | **不提供** |
+| `@ai-sdk/google` | 7 | Google Generative AI | `opencode-google` |
+| `@ai-sdk/mistral` | 1 | _（本插件不服务的方言）_ | **不提供** |
 
 数量为 `models.dev` 中 `opencode` 的 84 个**在用**模型，统计于 2026-10-13 —— 其余已废弃或下架，补丁只内置网关仍在服务的部分。同样这 84 个模型离线内置在 `src/catalog-data.ts`，因此在第一次 catalog 刷新之前它们每一个路由都是正确的；用 `pnpm run catalog:shim` 重新生成该文件。
 

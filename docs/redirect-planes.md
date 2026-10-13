@@ -37,15 +37,15 @@ That is why the servability check treats `undefined` as servable, and why `@ai-s
 
 A route is a name the host can dispatch to, carrying exactly one plane's base URL and one protocol. The plugin registers them in-process, so a profile that declares none still gets every endpoint.
 
-| Route                       | Plane | Protocol                | Base URL |
-| :-------------------------- | :---- | :---------------------- | :------- |
-| `opencode`                  | Zen   | `openai-completions`    | Zen      |
-| `opencode-go`               | Go    | `openai-completions`    | Go       |
-| `opencode-responses`        | Zen   | `openai-responses`      | Zen      |
-| `opencode-anthropic`        | Zen   | `anthropic-messages`    | Zen      |
-| `opencode-mistral`          | Zen   | `mistral-conversations` | Zen      |
-| **`opencode-go-responses`** | Go    | `openai-responses`      | Go       |
-| **`opencode-go-anthropic`** | Go    | `anthropic-messages`    | Go       |
+| Route                       | Plane | Protocol               | Base URL |
+| :-------------------------- | :---- | :--------------------- | :------- |
+| `opencode`                  | Zen   | `openai-completions`   | Zen      |
+| `opencode-go`               | Go    | `openai-completions`   | Go       |
+| `opencode-responses`        | Zen   | `openai-responses`     | Zen      |
+| `opencode-anthropic`        | Zen   | `anthropic-messages`   | Zen      |
+| `opencode-google`           | Zen   | `google-generative-ai` | Zen      |
+| **`opencode-go-responses`** | Go    | `openai-responses`     | Go       |
+| **`opencode-go-anthropic`** | Go    | `anthropic-messages`   | Go       |
 
 The last two exist, and they are what closed the gap this section was written around: 13 Go models that name a non-completions SDK were offered with nowhere to go, and each now has a route on its own plane.
 

@@ -41,7 +41,7 @@ Three steps, all data-driven:
    };
    ```
 
-3. The protocol names a route. `internalRouteFor(provider, model, providerNpm)` answers which route serves that model (`opencode-responses`, `opencode-anthropic`, `opencode-mistral`), and only for providers in `COMPLETIONS_ROUTES`, the routes this plugin claims. Anything else returns `undefined` and is left alone.
+3. The protocol names a route. `internalRouteFor(provider, model, providerNpm)` answers which route serves that model (`opencode-responses`, `opencode-anthropic`, `opencode-google`), and only for providers in `COMPLETIONS_ROUTES`, the routes this plugin claims. Anything else returns `undefined` and is left alone.
 
 `src/responses-provider.ts` then **mounts the host's own `llm-pi-ai`** under isolated auth scopes to serve those routes. That is the piece with four host contracts to survive; read its header before touching it. The plugin registers the routes, so the user configures nothing.
 

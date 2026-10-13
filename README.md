@@ -42,7 +42,7 @@
 
 **What is left once those work is a different problem, and it is not about the account.** OpenCode serves its models on **four different API shapes**, while DSH picks a transport from the provider row — one route can speak one shape. So a model served on Responses, Messages or Mistral answers `500` the moment the basics are restored, which is why this plugin routes per **model** rather than per provider.
 
-**What this does.** It restores every missing protocol element at the network layer — **strictly for OpenCode routes** (`opencode` / `opencode-go` / `opencode-responses` / `opencode-anthropic` / `opencode-mistral`). All other traffic (DeepSeek, OpenAI, Anthropic, GitHub) passes through untouched.
+**What this does.** It restores every missing protocol element at the network layer — **strictly for OpenCode routes** (`opencode` / `opencode-go` / `opencode-responses` / `opencode-anthropic` / `opencode-google`). All other traffic (DeepSeek, OpenAI, Anthropic, GitHub) passes through untouched.
 
 **What you get.** A picker listing the whole OpenCode catalog with real names, prices and context windows; every model sent to the endpoint it is actually served on; and a live meter for the quota or the spend — no configuration.
 
