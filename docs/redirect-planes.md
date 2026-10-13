@@ -49,7 +49,7 @@ A route is a name the host can dispatch to, carrying exactly one plane's base UR
 | **`opencode-go-responses`** | Go    | `openai-responses`     | Go       |
 | **`opencode-go-anthropic`** | Go    | `anthropic-messages`   | Go       |
 
-The last two exist, and they are what closed the gap this section was written around: 13 Go models that name a non-completions SDK were offered with nowhere to go, and each now has a route on its own plane.
+The last two exist, and they are what closed the gap this section was written around: the Go models that name a non-completions SDK were offered with nowhere to go, and each now has a route on its own plane. The count is stated once, above, because it has already moved twice and a second copy of it is a second thing to keep true.
 
 ## 4. Invariants
 
