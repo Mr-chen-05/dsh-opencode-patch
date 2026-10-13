@@ -238,3 +238,21 @@ The second version asked the right question — does the name appear anywhere in
 The rule is _a test for a behaviour must perform that behaviour_, and the sweep for it is coarse: every case in every test file, checked for an assertion at all. **Zero cases assert nothing** — which is a weak result and worth saying so, because the check finds a case that verifies nothing and not a case that verifies the wrong thing. The one instance of the second kind found this session, the e2e probe asserted on a status that meant "no answer", needed a person to read it.
 
 That is the honest boundary of this sweep: it can say no case is empty, and it cannot say any case is right.
+
+## The sweeps, and what nine of them were worth
+
+Six found something real and three came back clean. The clean ones are results too, and the count matters more than any single finding: it is the difference between "I fixed the instance I tripped over" and "the class is empty".
+
+| class | result |
+| :-- | :-- |
+| module map | `login-credential.ts` unmapped — found by listing the modules the map omits, which is the only way an omission is visible |
+| route names | `opencode-mistral` named in five places and never a route; `opencode-google` a route and named nowhere |
+| counts | Go 31 where it is 32 — and this one was missed while fixing the Zen count beside it |
+| false claims | the free tier "reachable" in six places, two of them paragraphs written here and later withdrawn |
+| quoted code | `PROTOCOL_FOR_SDK` quoted with a member it never had and without the one it has |
+| identifiers | `orgByPlane`, a name from the design `org-cache.ts` replaced |
+| links | clean — and only clean once resolved from each file's own directory |
+| test assertions | clean — with the boundary stated: finds a case that verifies nothing, not one that verifies wrongly |
+| source comments | clean — no comment names a symbol the tree does not have |
+
+**Two of the sweeps were wrong before they were right**, and both were the wrong-context shape this file keeps recording: the count sweep missed Go while fixing Zen, and the identifier sweep asked whether names are exports when most of them are columns, fields and parameters. A sweep is only as good as the question it asks, and writing the question down is what makes the second attempt better than the first.
