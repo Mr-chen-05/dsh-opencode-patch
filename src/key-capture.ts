@@ -107,9 +107,9 @@ const bearerValue = (raw: string): string | undefined => {
 /**
  * Extract an API key from a `Headers` instance or a plain header record.
  *
- * Handles `Authorization: Bearer <key>`, `x-api-key`, and `api-key`. Returns the
- * raw value: deciding whether it is a *usable* credential is the caller's job
- * (see {@link isPlaceholderApiKey}).
+ * Handles Bearer, Anthropic and Google key headers. A placeholder in one
+ * header must not mask a real credential in another. When every value is a
+ * placeholder, returns the first raw value for callers that diagnose it.
  */
 export const extractApiKeyFromHeaders = (
   headers: unknown
@@ -117,41 +117,29 @@ export const extractApiKeyFromHeaders = (
   if (headers === null || headers === undefined) {
     return undefined;
   }
+  let read: ((keys: readonly string[]) => string | undefined) | undefined;
   if (typeof Headers !== "undefined" && headers instanceof Headers) {
-    const auth = headers.get("authorization") ?? headers.get("Authorization");
-    if (typeof auth === "string" && auth.length > 0) {
-      const bearer = bearerValue(auth);
-      if (bearer !== undefined) {
-        return bearer;
-      }
-    }
-    const xApiKey =
-      headers.get("x-api-key") ??
-      headers.get("X-Api-Key") ??
-      headers.get("api-key");
-    return typeof xApiKey === "string" && xApiKey.trim().length > 0
-      ? xApiKey.trim()
-      : undefined;
+    read = (keys) => headers.get(keys[0] ?? "") ?? undefined;
+  } else if (isRecord(headers)) {
+    read = (keys) => readHeaderString(headers, keys);
   }
-  if (isRecord(headers)) {
-    const auth = readHeaderString(headers, ["authorization", "Authorization"]);
-    if (auth !== undefined) {
-      const bearer = bearerValue(auth);
-      if (bearer !== undefined) {
-        return bearer;
-      }
-    }
-    const xApiKey = readHeaderString(headers, [
-      "x-api-key",
-      "X-Api-Key",
-      "api-key",
-      "API-KEY",
-    ]);
-    return xApiKey !== undefined && xApiKey.trim().length > 0
-      ? xApiKey.trim()
-      : undefined;
+  if (read === undefined) {
+    return undefined;
   }
-  return undefined;
+  const auth = read(["authorization", "Authorization"]);
+  const candidates = [
+    auth === undefined ? undefined : bearerValue(auth),
+    read(["x-api-key", "X-Api-Key"]),
+    read(["api-key", "API-KEY"]),
+    read(["x-goog-api-key", "X-Goog-Api-Key"]),
+  ]
+    .map((value) => value?.trim())
+    .filter(
+      (value): value is string => value !== undefined && value.length > 0
+    );
+  return (
+    candidates.find((value) => !isPlaceholderApiKey(value)) ?? candidates[0]
+  );
 };
 
 /**

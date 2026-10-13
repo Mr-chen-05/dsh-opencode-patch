@@ -276,6 +276,28 @@ describe("token-store: what it refuses to interpret", () => {
     await expect(store?.read()).resolves.toBeUndefined();
   });
 
+  it.each([undefined, null, "tomorrow", Number.NaN, Number.POSITIVE_INFINITY])(
+    "treats an invalid stored expiry (%s) as stale",
+    async (expiresAt) => {
+      const { credentials, records } = seamOver();
+      records.set("dsh-opencode-patch/opencode", {
+        accessToken: "st_legacy",
+        refreshToken: "rt_legacy",
+        expiresAt,
+      });
+      const store = createTokenStore({
+        credentials,
+        plane: "opencode",
+        scope: "dsh-opencode-patch",
+      });
+      await expect(store!.read()).resolves.toMatchObject({
+        accessToken: "st_legacy",
+        expiresInSeconds: 0,
+      });
+      await expect(store!.needsRefresh()).resolves.toEqual({ kind: "stale" });
+    }
+  );
+
   it("carries a login with no refresh token without inventing one", async () => {
     const { credentials } = seamOver();
     const store = createTokenStore({

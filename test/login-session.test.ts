@@ -112,6 +112,35 @@ describe("login-session: absent when a login cannot be kept", () => {
 });
 
 describe("login-session: a stored login in use", () => {
+  it("uses one grant snapshot per token resolution", async () => {
+    const credentials = seam();
+    const readRecord = vi.spyOn(credentials, "readRecord");
+    const store = createTokenStore({
+      credentials,
+      plane: "opencode",
+      scope: "dsh-opencode-patch",
+    });
+    const { client } = clientAnswering({
+      accessToken: "access-new",
+      refreshToken: "refresh-new",
+    });
+    await store!.write({
+      accessToken: "access-old",
+      refreshToken: "refresh-old",
+      expiresInSeconds: 10,
+      account: "fixture-account",
+    });
+    const result = await createLoginSession({ client, store })!.token();
+    expect(readRecord).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      kind: "ok",
+      token: { accessToken: "access-new", account: "fixture-account" },
+    });
+    await expect(store!.read()).resolves.toMatchObject({
+      account: "fixture-account",
+    });
+  });
+
   it("hands out a stored token without refreshing it", async () => {
     const { client, refreshes } = clientAnswering({
       accessToken: "access-two",

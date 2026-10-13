@@ -2,6 +2,27 @@
 
 The plugin's default is the deployment's own credential: whatever `apiKeyEnv` the profile already declares keeps resolving exactly as it does today. The pool is a SEPARATE credential the deployment opts into by pointing a route at it, and nothing about that happens as a side effect of adding an entry. A user who logs in with OAuth has taken an action; the plugin still resolves exactly what the profile names until the profile names the pool's reference.
 
+## Current request wiring
+
+The primary fetch fallback and the Google bridge share `src/login-credential.ts`. The primary path keeps real request auth untouched, then resolves a missing or placeholder credential in this order:
+
+    captured → declared environment key → DSH grant (requested plane, then other)
+      → installation account (opt-in) → installation key (opt-in) → nothing
+
+The `configured` key-source policy still skips captured fallback; an API key already present in a request is never displaced. Empty and placeholder environment values do not block the login fallback. The Google bridge still raises for an unresolved named reference rather than replacing it with a login.
+
+Authentication follows the wire format: Bearer for OpenAI, `x-api-key` for Anthropic `/messages`, and `x-goog-api-key` for Google generation. Header extraction skips placeholders when another header carries a real key; placeholder detection is case-insensitive. The URL's pathname determines the plane, not query text or a conflicting turn provider.
+
+**Absence permits fallback; refusal does not.** A missing grant may fall through to the other plane or opt-in installation account. An existing grant whose refresh is refused raises a secret-free `MISSING_CREDENTIAL` error and sends no model request, rather than silently selecting a different owner. The reader returns only the access token and org, not refresh tokens or owner metadata.
+
+The login reader returns the token **and its own org**. The primary request uses that pair directly, not a cached org from another credential; a login without an org removes a stale org header. `credentialOrg` remains the explicit override. Unknown gateway planes do not consult logins. No grant is copied into the installation's database, and its account remains off unless `readOpencodeStore` is on.
+
+One reader is shared by the lifecycle and bridge. It retains per-plane sessions but reads one grant snapshot per operation, so a login written after startup is visible and concurrent callers share one refresh. Refresh preserves the grant's account, owner, org list and selected org while replacing the token pair. Missing, nonnumeric or nonfinite expiry is stale, never an indefinitely current token. The Console client uses the original fetch: refreshing under an active OpenCode turn must not recursively enter the credential fallback.
+
+**Concurrency limit:** refresh deduplication is per shared reader/session, not across independent readers or processes. The seam writes a pair atomically, but does not lock the network exchange; a pending refresh can still race a new login or sign-out. Cross-process coordination and conditional replacement are separate work, not guarantees made by this wiring.
+
+These contracts are exercised with fixture grants and SQLite databases through `apply`, the fetch patch, and the bridge's reader. They verify credential selection and outgoing headers, **not** whether a live gateway accepts a session token on every model endpoint or grants free-tier access. The historical notes below describe earlier investigations; their attempted/reverted edits are not outstanding implementation work.
+
 ## The resolution chain
 
 One reference resolves per route, and the pool only enters the picture when the route names the pool's reference:
@@ -361,6 +382,6 @@ store           ← the local OpenCode CLI's database, only when neither is conf
 
 - **The free tier's real requirement is still unknown.** What does the captured credential carry that an `oc_sk_` key does not — a session token, a client fingerprint, a different key class? Until that is known, free models work only by inheriting whatever the chat was using, and `auto-review` cannot use them at all.
 - **`auto-review` deserves its own look.** `@deepseek-ai/dsh-experimental-auto-review` builds a bare options object — provider, model, system, messages, temperature — and calls `ctx.llm.stream()` with no session, no turn and no headers of its own, taking its route from `session.requestHeader()`. It is the only caller in the system that does this, and it is the one that fails on a route the chat itself succeeds on. `dsh-experimental-auto-review` is where it lives.
-- **`readOpencodeAccount` is written and tested and nothing calls it.** With the org now read too, it is the natural source for a credential that satisfies the free tier — if that is what the account token is. That is the experiment worth running, and it has not been run.
+- **`readOpencodeAccount` is wired into both request paths through the shared login reader.** Selection and org pairing are tested; whether that account token satisfies the free tier is still a live-gateway experiment, not a consequence of wiring it.
 - **The store is read per request with no cache**, deliberately: a rotation inside OpenCode should be picked up. It is also a SQLite open per keyless request.
 - **The collision is real and unaddressed.** `muse-spark-1.3-contributor-free` is a model this host serves itself AND a model the OpenCode catalog lists, so the same id can resolve onto a route that refuses it.

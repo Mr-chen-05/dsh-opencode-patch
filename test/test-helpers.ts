@@ -13,7 +13,51 @@ import nodePath from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import type { CredentialsWriter } from "../src/cordis-context.ts";
 import type { ActiveTurnState } from "../src/index.ts";
+
+/** An in-memory host seam with the same atomic grant path as the real service. */
+export const createCredentialsSeam = () => {
+  const records = new Map<string, { kind: string; payload: unknown }>();
+  const refs = new Map<string, { value: string }>();
+  const credentials: CredentialsWriter & {
+    modifyRecord: (
+      key: string,
+      mutate: (current?: unknown) => Promise<unknown>
+    ) => Promise<unknown>;
+  } = {
+    deleteRecord: async (key) => {
+      records.delete(key);
+    },
+    modifyRecord: async (key, mutate) => {
+      const next = await mutate(records.get(key));
+      if (next === undefined) {
+        records.delete(key);
+      } else {
+        records.set(key, next as { kind: string; payload: unknown });
+      }
+      return next;
+    },
+    readRecord: async (key) => records.get(key),
+    resolve: async (ref) => refs.get(ref),
+    set: async (ref, value) => {
+      refs.set(ref, { value });
+    },
+    unset: async (ref) => {
+      refs.delete(ref);
+    },
+    writeGrant: async (key, payload) => {
+      records.set(key, { kind: "grant", payload });
+    },
+  };
+  return {
+    credentials,
+    ctx: {
+      get: (key: string) => (key === "credentials" ? credentials : undefined),
+    },
+    records,
+  };
+};
 
 export const SESSION_RE = /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/;
 

@@ -25,6 +25,7 @@ import {
   type ResolvedPluginConfig,
   resolveConfig,
 } from "./config.ts";
+import { ConsoleAuthClient } from "./console-auth.ts";
 import {
   type CordisContext,
   readCredentialPoolRotator,
@@ -36,6 +37,7 @@ import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
 import { isFetchFunction } from "./guards.ts";
 import { LEGACY_NAME, LEGACY_PKG, name } from "./identity.ts";
+import { createLoginCredentialReader } from "./login-credential.ts";
 import { LoginService } from "./login-service.ts";
 import {
   type CatalogModelSpec,
@@ -242,7 +244,15 @@ const installFetchPatch = (
     await rotate(plane, status);
   };
 
+  // Use the unpatched fetch for refresh: a refresh inherits the active turn,
+  // so running it through this patch could recursively ask for the same login.
+  const loginCredential = createLoginCredentialReader(
+    ctx,
+    config.readOpencodeStore,
+    new ConsoleAuthClient({ fetch: originalFetch })
+  );
   const patched = patchFetch(originalFetch, als, config, {
+    loginCredential,
     onCredentialFailure: (plane, status) => {
       void rotateAfterFailure(plane, status);
     },
@@ -311,7 +321,11 @@ const installFetchPatch = (
     void (async () => {
       // The resolved config rides in: the credential pool is opt-in through
       // it, and a mount without it can only serve the profile's own key.
-      const stop = await registerResponsesProvider(ctx, config);
+      const stop = await registerResponsesProvider(
+        ctx,
+        config,
+        loginCredential
+      );
       if (released) {
         stop?.();
         return;

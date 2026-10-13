@@ -17,9 +17,14 @@ import { resolveOpencodeStoreKey } from "./go-discovery.ts";
 import {
   extractApiKeyFromHeaders,
   getCapturedApiKey,
+  isPlaceholderApiKey,
   recordCapturedApiKey,
   tierForRequest,
 } from "./key-capture.ts";
+import type {
+  LoginCredential,
+  LoginCredentialReader,
+} from "./login-credential.ts";
 import { enrichModelsResponse, isModelsListingUrl } from "./models-catalog.ts";
 import {
   fallbackSessionId,
@@ -43,13 +48,28 @@ import type { ActiveTurnState } from "./turn-store.ts";
  * because a rotation is a side effect.
  */
 const gatewayPlaneFor = (url: string): string => {
-  if (/\/zen\/go\//u.test(url)) {
+  const path = new URL(url).pathname;
+  if (/\/zen\/go\//u.test(path)) {
     return "opencode-go";
   }
-  if (/\/zen\//u.test(url)) {
+  if (/\/zen\//u.test(path)) {
     return "opencode";
   }
   return "";
+};
+
+/** The credential header the request's protocol actually reads. */
+const authHeaderFor = (url: string): string => {
+  const path = new URL(url).pathname;
+  if (path.endsWith("/messages")) {
+    return "x-api-key";
+  }
+  if (
+    /\/models\/[^/]+:(?:streamGenerateContent|generateContent)$/u.test(path)
+  ) {
+    return "x-goog-api-key";
+  }
+  return "authorization";
 };
 
 const extractUrl = (input: RequestInfo | URL): string => {
@@ -196,6 +216,8 @@ export interface FetchPatchHooks {
    * none — which is every key deployment, and the reason this is optional.
    */
   readonly resolveOrg?: (plane: string) => string | undefined;
+  /** Last-resort login lookup; returns the token with its own org. */
+  readonly loginCredential?: LoginCredentialReader;
   /**
    * One entry per claimed request, for the debug file.
    *
@@ -230,20 +252,25 @@ export const patchFetch = (
 
     // Capture the API key from the request headers so that quota monitoring,
     // usage display, and key resolution don't have to rely purely on static env vars.
-    const requestKey = extractApiKeyFromHeaders(headers);
+    const extracted = extractApiKeyFromHeaders(headers);
+    const requestKey =
+      extracted === undefined || isPlaceholderApiKey(extracted)
+        ? undefined
+        : extracted;
     if (requestKey !== undefined) {
       recordCapturedApiKey(requestKey, state?.provider, url);
     }
 
     // Ensure an Authorization header is present if the caller omitted it or provided a dummy value.
-    const authHeader =
-      headers.get("authorization") ?? headers.get("Authorization");
+    let login: LoginCredential | undefined;
+    const plane = gatewayPlaneFor(url);
+    const wireHeader = authHeaderFor(url);
+    const authHeader = headers.get(wireHeader);
+    const wireKey = authHeader?.replace(/^Bearer\s+/iu, "").trim();
     if (
-      authHeader === null ||
-      authHeader.length === 0 ||
-      authHeader === "Bearer undefined" ||
-      authHeader === "Bearer null" ||
-      authHeader === "Bearer unused"
+      wireKey === undefined ||
+      wireKey.length === 0 ||
+      isPlaceholderApiKey(wireKey)
     ) {
       // The captured key is looked up by tier as well as by provider: a user
       // may have named the route anything, and a provider-id miss must not hide
@@ -257,22 +284,44 @@ export const patchFetch = (
               state?.provider,
               tier === "unknown" ? undefined : tier
             );
-      // The installation's own store is the LAST resort, after everything the
-      // deployment declared: a key in the environment outranks one inferred
-      // from another program's file. The plane comes from the URL alone, the
-      // same rule the rotation observer uses, and an unrecognised URL answers
-      // nothing rather than guessing at an integration. Read only when nothing
-      // else resolved, so the default composition never opens the database.
+      // Explicit request auth (including x-api-key) and declared sources win.
+      // Only a known gateway plane may ask for a login: a configured provider
+      // can also claim other URLs, which must not receive an account token.
       const declared =
-        url.includes("/zen/go") || state?.provider === "opencode-go"
+        plane === "opencode-go" ||
+        (plane.length === 0 && state?.provider === "opencode-go")
           ? process.env.OPENCODE_GO_API_KEY
           : process.env.OPENCODE_API_KEY;
-      const fallbackKey =
+      const explicit =
+        requestKey ??
         captured ??
-        declared ??
-        resolveOpencodeStoreKey(gatewayPlaneFor(url), config.readOpencodeStore);
+        (declared === undefined ||
+        declared.length === 0 ||
+        isPlaceholderApiKey(declared)
+          ? undefined
+          : declared);
+      if (explicit === undefined && plane.length > 0) {
+        login = await hooks.loginCredential?.(plane);
+      }
+      const fallbackKey =
+        explicit ??
+        login?.accessToken ??
+        resolveOpencodeStoreKey(plane, config.readOpencodeStore);
       if (typeof fallbackKey === "string" && fallbackKey.length > 0) {
-        headers.set("Authorization", `Bearer ${fallbackKey}`);
+        headers.set(
+          wireHeader,
+          wireHeader === "authorization" ? `Bearer ${fallbackKey}` : fallbackKey
+        );
+        // Keep the Bearer fallback for callers that use it on other wire shapes.
+        // Never overwrite real request auth merely to add the protocol's header.
+        const bearer = headers.get("authorization");
+        if (
+          wireHeader !== "authorization" &&
+          (bearer === null ||
+            isPlaceholderApiKey(bearer.replace(/^Bearer\s+/iu, "")))
+        ) {
+          headers.set("authorization", `Bearer ${fallbackKey}`);
+        }
       }
     }
 
@@ -301,9 +350,18 @@ export const patchFetch = (
     // is only half a credential: the gateway gates the free tier on the org that
     // arrived with it, and a request carrying one without the other is answered
     // as though it carried a plain key.
-    const org = hooks.resolveOrg?.(gatewayPlaneFor(url));
+    // A selected login uses its own org, not a mutable cache that another
+    // request or a previous account may have populated. An explicit override
+    // still wins; absent login metadata must not revive a stale cached org.
+    const org =
+      config.credentialOrg ??
+      (login === undefined
+        ? hooks.resolveOrg?.(gatewayPlaneFor(url))
+        : login.orgId);
     if (org !== undefined && org.length > 0) {
       headers.set("x-opencode-org-id", org);
+    } else if (login !== undefined) {
+      headers.delete("x-opencode-org-id");
     }
 
     // 3. Client & Project origin headers: injected when enabled
@@ -339,7 +397,7 @@ export const patchFetch = (
     // credential, a session and an org were SENT is what explains an answer, and
     // the credential itself has no business in a log.
     hooks.debug?.({
-      auth: headers.get("Authorization") !== null,
+      auth: extractApiKeyFromHeaders(headers) !== undefined,
       claimed: true,
       org: headers.get("x-opencode-org-id") ?? null,
       plane: gatewayPlaneFor(url),

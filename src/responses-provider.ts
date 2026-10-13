@@ -38,7 +38,6 @@
  */
 
 import { DEFAULT_USAGE_KEY_ENV, type ResolvedPluginConfig } from "./config.ts";
-import { ConsoleAuthClient } from "./console-auth.ts";
 import {
   type CordisContext,
   readCredentialsResolver,
@@ -49,11 +48,12 @@ import {
   createCredentialPool,
   publishPoolKey,
 } from "./credential-pool.ts";
-import { resolveOpencodeStoreAccount } from "./go-discovery.ts";
 import { registerGoogleBridge } from "./google-bridge.ts";
 import { isFunctionLike, isRecord } from "./guards.ts";
-import { name } from "./identity.ts";
-import { createLoginSession } from "./login-session.ts";
+import {
+  createLoginCredentialReader,
+  type LoginCredentialReader,
+} from "./login-credential.ts";
 import {
   type CatalogModelSpec,
   getLiveGoCatalog,
@@ -68,7 +68,6 @@ import {
   ROUTE_FOR_PLANE_PROTOCOL,
   SELF_MOUNTED_ROUTES,
 } from "./responses-routes.ts";
-import { createTokenStore } from "./token-store.ts";
 
 /** The host plugin whose `apply` this module mounts. */
 const PI_AI_PACKAGE = "@deepseek-ai/dsh-llm-pi-ai";
@@ -515,7 +514,8 @@ const mountScope = (
  */
 export const registerResponsesProvider = async (
   ctx: CordisContext,
-  config?: ResolvedPluginConfig
+  config?: ResolvedPluginConfig,
+  loginCredential?: LoginCredentialReader
 ): Promise<(() => void) | undefined> => {
   const { llm } = ctx;
   if (llm === undefined || typeof llm.registerAdapter !== "function") {
@@ -591,7 +591,11 @@ export const registerResponsesProvider = async (
         apiKeyRef: inheritedCredentialRef(ctx),
         pool: poolFor("opencode"),
         // The credential a login already stored, read the same way the org is.
-        loginToken: loginTokenReader(ctx, config?.readOpencodeStore === true),
+        loginToken: loginTokenReader(
+          ctx,
+          config?.readOpencodeStore === true,
+          loginCredential
+        ),
         // And, last, the installation's own store - off unless the deployment
         // opted in, which is what `config` carries here.
         readOpencodeStore: config?.readOpencodeStore === true,
@@ -760,71 +764,25 @@ export const registerResponsesProvider = async (
 };
 
 /**
- * The token a login stored for one plane, if any.
+ * The bridge's token-only view of the shared login credential reader.
  *
  * @param ctx - the host context.
- * @param plane - the plane to read.
- * @returns the access token, or `undefined` when nothing is stored.
- */
-const storedTokenFor = async (
-  ctx: unknown,
-  plane: string
-): Promise<string | undefined> => {
-  const store = createTokenStore({
-    credentials: readCredentialsWriter(ctx),
-    plane,
-    scope: name,
-  });
-  // Through the session, not the store: `token()` refreshes first when the stored
-  // token is inside the window, so a caller never handles an expired one. Reading
-  // the store directly - which this did - hands out whatever is on disk until it
-  // expires and then fails, and the module that does the refresh was already
-  // written and tested.
-  const session = createLoginSession({
-    client: new ConsoleAuthClient({}),
-    store,
-  });
-  const result = await session?.token();
-  return result?.kind === "ok" ? result.token.accessToken : undefined;
-};
-
-/**
- * A reader for the token a login stored, per plane.
- *
- * Named and exported because it is the one piece of the bridge's chain that is
- * built here rather than in the bridge: the store answers `undefined` when there is
- * no login and does not throw, so this needs no guard, and a test can call it
- * without standing up a whole provider.
- *
- * @param ctx - the host context.
+ * @param readOpencodeStore - the user's opt-in to the installation's account.
+ * @param read - optionally the lifecycle's shared reader, including its sessions.
  * @returns a reader the bridge calls when a route named no reference.
  */
 export const loginTokenReader =
-  (ctx: unknown, readOpencodeStore = false) =>
-  async (plane: string): Promise<string | undefined> => {
-    // A grant is keyed per plane, but the ACCOUNT behind it is not: the same
-    // token serves both, measured. So a sign-in on one plane answers for the
-    // other too, rather than leaving a Go route with nothing because the card
-    // happened to default to Zen.
-    const other = plane === "opencode-go" ? "opencode" : "opencode-go";
-    const grant =
-      (await storedTokenFor(ctx, plane)) ?? (await storedTokenFor(ctx, other));
-    if (grant !== undefined) {
-      return grant;
-    }
-    // The grant wins outright, and this is the alternative to the device flow
-    // rather than a competitor to it: a user already signed in to OpenCode should
-    // not have to sign in again here. Off unless the deployment opted in, and
-    // never written back into the DSH seam - it is another program's credential.
-    const account = resolveOpencodeStoreAccount(readOpencodeStore);
-    if (account === undefined) {
-      return undefined;
-    }
-    // The request has to carry an org, and a token with the wrong one is worse
-    // than no token, so the org the installation recorded is published where the
-    // per-request resolver reads it.
-    if (account.orgId !== undefined) {
-      setOrg(plane, account.orgId);
-    }
-    return account.accessToken;
+  (
+    ctx: unknown,
+    readOpencodeStore = false,
+    read: LoginCredentialReader = createLoginCredentialReader(
+      ctx,
+      readOpencodeStore
+    )
+  ): ((plane: string) => Promise<string | undefined>) =>
+  async (plane) => {
+    const credential = await read(plane);
+    // Clear an old org too: it must never survive a change of credential owner.
+    setOrg(plane, credential?.orgId);
+    return credential?.accessToken;
   };

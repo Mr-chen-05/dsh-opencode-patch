@@ -12,8 +12,9 @@
  * every concurrent call would otherwise start its own — each rotating the
  * refresh token, so all but one would present a token the server had already
  * replaced. The in-flight promise is shared, which is the in-process half of the
- * seam's own cross-process exclusion; two processes are handled by the record
- * write, which replaces the pair whole.
+ * seam's atomic pair write. This excludes concurrent refreshes in this session,
+ * not in independent readers or processes; an atomic write alone cannot lock
+ * the network exchange or stop a late refresh from racing a new login.
  *
  * **Nothing here invents a token.** A store with nothing in it, a grant with no
  * refresh token, and a refresh the Console refuses all end the same way — this
@@ -24,8 +25,8 @@
  * @module dsh-opencode-patch/login-session
  */
 
-import type { ConsoleAuthClient, ConsoleTokens } from "./console-auth.ts";
-import type { TokenStore } from "./token-store.ts";
+import type { ConsoleAuthClient } from "./console-auth.ts";
+import type { StoredLogin, TokenStore } from "./token-store.ts";
 
 /** Why a session has no usable token, when it does not. */
 export type SessionFailure =
@@ -43,7 +44,7 @@ export interface LoginSession {
    * never has to handle an expired one.
    */
   readonly token: () => Promise<
-    | { readonly kind: "ok"; readonly token: ConsoleTokens }
+    | { readonly kind: "ok"; readonly token: StoredLogin }
     | { readonly failure: SessionFailure; readonly kind: "failed" }
   >;
   /** Drop the stored login and any in-flight refresh. */
@@ -79,12 +80,12 @@ export const createLoginSession = (
   }
   let inFlight:
     | Promise<
-        | { readonly kind: "ok"; readonly token: ConsoleTokens }
+        | { readonly kind: "ok"; readonly token: StoredLogin }
         | { readonly failure: SessionFailure; readonly kind: "failed" }
       >
     | undefined;
 
-  const refreshStored = async (current: ConsoleTokens) => {
+  const refreshStored = async (current: StoredLogin) => {
     const { refreshToken } = current;
     if (refreshToken === undefined) {
       // A grant with no refresh token is usable until it expires and useless
@@ -102,8 +103,13 @@ export const createLoginSession = (
       const tokens = await client.refresh(refreshToken);
       // The pair is written together, so the refresh token that goes with this
       // access token is the one stored beside it.
-      await store.write(tokens);
-      return { kind: "ok", token: tokens } as const;
+      const login: StoredLogin = {
+        ...current,
+        ...tokens,
+        account: tokens.account ?? current.account,
+      };
+      await store.write(login);
+      return { kind: "ok", token: login } as const;
     } catch (error) {
       return {
         failure: {
@@ -116,15 +122,15 @@ export const createLoginSession = (
   };
 
   const resolve = async () => {
-    const check = await store.needsRefresh(withinMs);
-    if (check.kind === "current") {
-      return { kind: "ok", token: check.token } as const;
-    }
+    // One snapshot per operation: reading again after a stale check can see a
+    // different owner's login and refresh a grant that is already fresh.
     const current = await store.read();
     if (current === undefined) {
       return { failure: { reason: "no login" }, kind: "failed" } as const;
     }
-    return refreshStored(current);
+    return current.expiresInSeconds * 1000 > withinMs
+      ? ({ kind: "ok", token: current } as const)
+      : refreshStored(current);
   };
 
   return {

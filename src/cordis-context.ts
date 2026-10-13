@@ -214,8 +214,8 @@ export interface CredentialsWriter {
    *
    * The seam's `modifyRecord` is the only write path for a record, and this
    * hands it a mutation that replaces the payload outright — which is what a
-   * rotating refresh token needs: the write must not be able to lose a token
-   * another process obtained in between a read and a write.
+   * rotating refresh token needs to keep its two halves together. This does
+   * not coordinate the preceding network refresh across processes.
    */
   readonly writeGrant: (key: string, payload: unknown) => Promise<void>;
   /** Remove one record; removing an absent one is a no-op. */

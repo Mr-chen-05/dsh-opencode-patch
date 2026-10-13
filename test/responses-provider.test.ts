@@ -39,9 +39,11 @@ import {
   SELF_MOUNTED_ROUTES,
 } from "../src/index.ts";
 import type { CordisContext } from "../src/index.ts";
+import { orgFor, clearOrgs, setOrg } from "../src/org-cache.ts";
 import { baseForProtocol } from "../src/pi-provider.ts";
 import { loginTokenReader } from "../src/responses-provider.ts";
 import { createTokenStore } from "../src/token-store.ts";
+import { createCredentialsSeam, createOpencodeStore } from "./test-helpers.ts";
 
 const MUSE = "muse-spark-1.3-contributor-free";
 
@@ -1532,6 +1534,48 @@ describe("responses-provider: a loader that breaks its own contract", () => {
 });
 
 describe("responses-provider · the login token a route falls back to", () => {
+  it("updates the bridge org for the selected account and clears it when none remains", async () => {
+    const fixture = createOpencodeStore([], {
+      accessToken: "st_installation",
+      orgId: "org_installation",
+    });
+    vi.stubEnv("XDG_DATA_HOME", fixture.root);
+    const { ctx, credentials } = createCredentialsSeam();
+    const store = createTokenStore({
+      credentials,
+      plane: "opencode",
+      scope: pluginName,
+    });
+    expect(store).toBeDefined();
+    const read = loginTokenReader(ctx, true);
+    try {
+      await expect(read("opencode-go")).resolves.toBe("st_installation");
+      expect(orgFor("opencode-go")).toBe("org_installation");
+      await store!.write({
+        accessToken: "st_dsh",
+        expiresInSeconds: 3600,
+        orgId: "org_dsh",
+      });
+      await expect(read("opencode-go")).resolves.toBe("st_dsh");
+      expect(orgFor("opencode-go")).toBe("org_dsh");
+      await store!.write({
+        accessToken: "st_without_org",
+        expiresInSeconds: 3600,
+      });
+      await expect(read("opencode-go")).resolves.toBe("st_without_org");
+      expect(orgFor("opencode-go")).toBeUndefined();
+      await store!.clear();
+      setOrg("opencode-go", "org_stale");
+      await expect(
+        loginTokenReader(ctx)("opencode-go")
+      ).resolves.toBeUndefined();
+      expect(orgFor("opencode-go")).toBeUndefined();
+    } finally {
+      fixture.cleanup();
+      vi.unstubAllEnvs();
+      clearOrgs();
+    }
+  });
   it("answers undefined when no credential service is reachable", async () => {
     // The store answers undefined rather than throwing, which is why the bridge
     // needs no guard around this: a deployment with no login simply falls through

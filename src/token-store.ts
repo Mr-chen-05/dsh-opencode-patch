@@ -115,7 +115,7 @@ export interface TokenStore {
   readonly needsRefresh: (
     withinMs?: number
   ) => Promise<
-    | { readonly kind: "current"; readonly token: ConsoleTokens }
+    | { readonly kind: "current"; readonly token: StoredLogin }
     | { readonly kind: "stale" }
   >;
 }
@@ -176,10 +176,11 @@ export const createTokenStore = (
       // A grant with no expiry is treated as expired rather than as never
       // expiring: an access token the seam cannot date is one this module must
       // refresh rather than hand out.
-      expiresInSeconds: Math.max(
-        0,
-        Math.floor((payload.expiresAt - Date.now()) / 1000)
-      ),
+      expiresInSeconds:
+        typeof payload.expiresAt === "number" &&
+        Number.isFinite(payload.expiresAt)
+          ? Math.max(0, Math.floor((payload.expiresAt - Date.now()) / 1000))
+          : 0,
       ...(payload.owner === undefined ? {} : { owner: payload.owner }),
       ...(payload.orgs === undefined ? {} : { orgs: payload.orgs }),
       ...(payload.orgId === undefined ? {} : { orgId: payload.orgId }),
