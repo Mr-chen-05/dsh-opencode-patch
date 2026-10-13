@@ -127,7 +127,8 @@ describe("AGENTS.md · the repo map", () => {
       "utf8"
     );
     const dir = new URL("../src/", import.meta.url);
-    const files = (await readdir(dir)).filter((f) => /\.tsx?$/u.test(f));
+    const entries = await readdir(dir);
+    const files = entries.filter((f) => /\.tsx?$/u.test(f));
     expect(files.length).toBeGreaterThan(0);
     const unnamed = files.filter(
       (f) => !f.startsWith("settings-") && !map.includes(f)
