@@ -352,3 +352,13 @@ Four times now the two READMEs, or the two meter documents, have drifted apart o
 What drifted was a **sentence**: the English says the screenshots are not committed and why, the Chinese says only that a script produces them. The section counts match, the numeric counts match, and the retry paragraph beside it matches. No mechanical comparison over counts, headings or identifiers sees the difference, because the difference is that one document explains something the other does not.
 
 So the rule for this class is procedural, not automated: **change both when you change one**, and treat a one-language edit as an unfinished edit. The three checks that do work are about numbers; this one is about completeness, and it belongs in the discipline rather than in the test suite.
+
+## The artifacts, checked against everything this session changed
+
+Not the source, the build. Every fix is present in the file the host loads and the file the browser loads, and the boundary between them is intact:
+
+- `lib/index.mjs` carries the opt-in store reader (`readOpencodeStore`, 21 references), the JSON credential extraction (`credentialToken`), the revocation rule (`MISSING_CREDENTIAL`, 4), the servability check (`isServableModel`, 3) and the diagnostic sentence.
+- `lib/client.js` carries the bounded re-read (`readUntilAnswered`, 2) and the login row's per-call resolution and its diagnostic.
+- `lib/client.js` contains no `node:sqlite`, no `node:fs` and no `opencode-store` — the host-only module did not leak into the bundle, which is the rule the bundle gate exists to enforce and the reason it is checked rather than assumed.
+
+That is the last thing worth doing without the host: the code is correct, the data is current, the documents say what the code does, and the artifacts contain all of it. What none of it can show is whether the deployment behaves differently, because that needs the process that is running to be the process that has this code.
