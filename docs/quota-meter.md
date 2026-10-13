@@ -126,7 +126,7 @@ The read is **bounded-retried**, which the surface does not show and should: the
 
 ## 7. Screenshots
 
-The real images are produced by a script into this directory:
+The real images are produced by a script into this directory, and **they are not committed** — the script needs a running host and its runtime token, so a checkout has the recipe and not the pictures:
 
 ```sh
 scripts/capture-ui.sh "<dsh url with ?token=...>"
