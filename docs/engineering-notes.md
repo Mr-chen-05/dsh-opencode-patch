@@ -196,3 +196,11 @@ The false claim — that a session token, or the org, or a header unlocks the fr
 **One place had it right before any of this work started.** `docs/opencode-1.19-api.md` already said, at the bottom of its own list: _"The free tier is not reachable by adding a header. Measured: the org id and the key together still answer 403. Any plan that assumed a header fix is wrong."_ That sentence is what the exhaustive table later confirmed, and it was there the whole time — which is the uncomfortable half of this record: the answer was written down, and six other places said the opposite, and the six won for several rounds.
 
 A sweep that ends clean is worth as much as one that finds something, and this one ends with the boundary drawn: every remaining mention of the free tier says it is not served from here.
+
+## A measurement of mine that was wrong, in the shape this file keeps describing
+
+Checking whether `UNSERVED_SDKS` still records the mistral decision, I imported it and printed it with `JSON.stringify`. A `Set` serialises to `{}`, so the module answered `new Set([MISTRAL_SDK])` and I read an empty object — and concluded the document was lying about a decision the code still holds.
+
+That is the wrong-context sweep this file already names three times: a symbol resolved in a context that cannot show it, producing a confident finding that is entirely wrong. `UNSERVED_SDKS` is fine. The count beside it was not — `redirect-planes.md` said `0 of 32 on Go` was `0 of 31`, missed when the catalog gained `cat-jam-free` — and that one is fixed.
+
+The rule that would have caught it is already written above and was not applied: assert that the input was actually read, and include a case whose answer you know. Printing a `Set` is not reading it.
