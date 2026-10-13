@@ -21,7 +21,7 @@ A **shape** is one wire protocol, named by the SDK a model declares in the catal
 
 | SDK in the catalog  | Protocol                | Zen |    Go |
 | :------------------ | :---------------------- | --: | ----: |
-| _(none)_            | `openai-completions`    |  28 |    19 |
+| _(none)_            | `openai-completions`    |  28 |    20 |
 | `@ai-sdk/openai`    | `openai-responses`      |  30 | **6** |
 | `@ai-sdk/anthropic` | `anthropic-messages`    |  18 | **6** |
 | `@ai-sdk/mistral`   | `mistral-conversations` |   1 |     — |

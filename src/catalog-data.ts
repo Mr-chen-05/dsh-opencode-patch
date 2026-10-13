@@ -195,6 +195,19 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
     name: "LongCat-2.0",
   },
   {
+    context_window: 262_144,
+    cost: {
+      cache_read: 0,
+      input: 0,
+      output: 0,
+    },
+    id: "cat-jam-free",
+    input_modalities: ["text"],
+    is_free: true,
+    max_output_tokens: 131_072,
+    name: "Cat Jam Free",
+  },
+  {
     context_window: 1_048_576,
     cost: {
       cache_read: 0.03,
