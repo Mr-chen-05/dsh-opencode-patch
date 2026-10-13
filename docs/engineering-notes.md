@@ -212,3 +212,9 @@ The rule that would have caught it is already written above and was not applied:
 `429 RATE_LIMIT: Upstream request failed: Endpoint is unavailable` is a second one, observed afterwards, and it is not about the model, the tier, or this plugin. The reviewer's own endpoint is rate-limited or down, and the tool call is refused before its body runs — which is what a refused tool call looks like from the outside, and why "auto-review failed" is not by itself evidence about the plugin.
 
 Worth keeping separate because the conclusions differ: the first is fixed by not selecting a free model, and the second has no fix here and no fix in the session — it is the reviewer's provider being unavailable, and it clears on its own.
+
+## Every count in the documentation, checked against the data
+
+Two were missed while chasing the catalog's changes — Go's total and its no-SDK row — so the sweep was finished properly: every number stated in any document, compared against `catalog-data.ts`. The facts are Zen 85 with 28 no-SDK, 30 openai, 18 anthropic, 8 google and 1 mistral, and Go 32 with 20 no-SDK, and every live count in the docs says exactly that.
+
+Two numbers that look stale are not, and they are worth naming so the next sweep does not "fix" them: `0 of 31` appears once, inside this file, as a quotation of the mistake; and `16 of 17` is a recorded test result from the round that narrowed the header test, not a count of anything current.
