@@ -232,3 +232,9 @@ Every backticked identifier in the documentation, checked against the code. **Th
 The second version asked the right question — does the name appear anywhere in the tree — and the glob still missed `test/e2e/*.ts`, so the two helpers the e2e cases use came back as unknown a second time. With that fixed, 88 of 98 resolve and the rest are host fields, a GitHub error string and an OpenCode migration name.
 
 **The one real finding was a name from a design that had been replaced.** `orgByPlane` appears in `credentials.md` and nowhere in `src/`: it is what the org cache looked like before `src/org-cache.ts`, in a paragraph that reads as a proposal. The fix it proposed was applied and the paragraph never said so, which is the difference between a historical note and a live claim. It says so now.
+
+## The tests, checked against the rule the repository states
+
+The rule is _a test for a behaviour must perform that behaviour_, and the sweep for it is coarse: every case in every test file, checked for an assertion at all. **Zero cases assert nothing** — which is a weak result and worth saying so, because the check finds a case that verifies nothing and not a case that verifies the wrong thing. The one instance of the second kind found this session, the e2e probe asserted on a status that meant "no answer", needed a person to read it.
+
+That is the honest boundary of this sweep: it can say no case is empty, and it cannot say any case is right.
