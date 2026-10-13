@@ -73,26 +73,39 @@ export const SCOPED_PKG = "@viztor/dsh-opencode-patch";
  * @param ctx - the settings context.
  * @returns the calls, or undefined when there is no login remote.
  */
-export const loginCalls = (
-  ctx: ClientContext
-): LoginRemoteCalls | undefined => {
-  const remote = ctx.remote?.opencodeLogin;
-  if (remote === undefined) {
-    // The row renders nothing when this is absent, which is the same silence the
-    // meter had. Say so, and say what the remote DOES expose - the list that
-    // distinguishes "the host mounted no login service" from "this bundle is not
-    // the one that knows about it".
-    console.warn(
-      "[dsh-opencode-patch] login row: no opencodeLogin service on the remote",
-      Object.keys(ctx.remote ?? {})
-    );
-    return undefined;
-  }
+export const loginCalls = (ctx: ClientContext): LoginRemoteCalls => {
+  // Resolved per call rather than once, and the calls are returned even when there
+  // is nothing to resolve.
+  //
+  // The remote is mounted by an asynchronous `$mount` started in an effect, and this
+  // runs while the injector builds the card's props. Asking once answered `undefined`
+  // whenever the mount had not resolved yet, and the card renders nothing when
+  // `login` is undefined - so the row was absent, with no second chance and no retry,
+  // and the warning below blamed a missing service for what was a late one.
+  //
+  // Returning the calls unconditionally is what makes the row render at all, which
+  // has a cost worth stating: a host that mounts no login service now shows a row
+  // that says so rather than showing nothing. That is the better failure - "no row"
+  // and "no service" stop looking identical - and it is the opposite of the meter's
+  // choice, which hides itself instead.
+  const service = () => {
+    const remote = ctx.remote?.opencodeLogin;
+    if (remote === undefined) {
+      // Say what the remote DOES expose - the list that distinguishes "the host
+      // mounted no login service" from "this bundle is not the one that knows about
+      // it".
+      console.warn(
+        "[dsh-opencode-patch] login row: no opencodeLogin service on the remote",
+        Object.keys(ctx.remote ?? {})
+      );
+    }
+    return remote;
+  };
   return {
     begin: async () =>
-      parseLoginChallenge(await unwrapRemote(remote.begin?.())),
-    poll: async () => parseLoginPoll(await unwrapRemote(remote.poll?.())),
-    read: async () => parseLoginState(await unwrapRemote(remote.state?.())),
+      parseLoginChallenge(await unwrapRemote(service()?.begin?.())),
+    poll: async () => parseLoginPoll(await unwrapRemote(service()?.poll?.())),
+    read: async () => parseLoginState(await unwrapRemote(service()?.state?.())),
   };
 };
 

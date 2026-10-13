@@ -255,10 +255,19 @@ describe("settings: the calls the page hands the row", () => {
     await expect(wired?.begin()).resolves.toMatchObject({ userCode: "X" });
   });
 
-  it("is undefined when the host mounted no login remote", () => {
-    // The same rule the meter keeps: no remote, no row — and no hard inject key
-    // that would hold the whole plugin waiting for a service nobody mounted.
-    expect(loginCalls({ remote: {} } as never)).toBeUndefined();
+  it("answers calls even when no login remote is mounted, so the row renders", () => {
+    // The opposite of the meter's rule, and deliberately. Resolving the remote once
+    // at inject time raced the asynchronous mount and left the row absent with no
+    // retry; returning the calls unconditionally is what makes it render at all. A
+    // host that mounted no service now shows a row that says so, which is better
+    // than "no row" and "no service" looking identical.
+    const absent = loginCalls({ remote: {} } as never);
+    expect(absent).toBeDefined();
+    expect(typeof absent.begin).toBe("function");
+    expect(typeof absent.poll).toBe("function");
+    expect(typeof absent.read).toBe("function");
+    // And the missing service still surfaces where a caller can see it.
+    return expect(absent.read()).rejects.toThrow(/did not answer/u);
   });
 
   it("turns a failed Remote result into a thrown reason", async () => {
