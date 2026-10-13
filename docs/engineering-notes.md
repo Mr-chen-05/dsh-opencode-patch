@@ -256,3 +256,9 @@ Six found something real and three came back clean. The clean ones are results t
 | source comments | clean — no comment names a symbol the tree does not have |
 
 **Two of the sweeps were wrong before they were right**, and both were the wrong-context shape this file keeps recording: the count sweep missed Go while fixing Zen, and the identifier sweep asked whether names are exports when most of them are columns, fields and parameters. A sweep is only as good as the question it asks, and writing the question down is what makes the second attempt better than the first.
+
+## Ten sweeps, and the tenth found the count that drifted the other way
+
+The settings card has eight controls — `CARD_FIELDS` in `settings-fields.ts` — and the English README said seven in two places. The Chinese README already said 八个. So the two documents drifted in opposite directions on the same fact, one round after the sweep that found the Chinese lagging the English on two others.
+
+Neither language is the source of truth and neither is reliably ahead: the fix is to count against `CARD_FIELDS` rather than to translate from the other file, which is what both rounds actually did, and why both found something.

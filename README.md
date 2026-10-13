@@ -231,13 +231,13 @@ Two surfaces, one reading. Both are pure views over the same Host data.
 | :-- | :-- | :-- |
 | **Meter trigger** | composer dock, beside the model selector | Go: a ring plus the window's percent. Zen: the session spend, and no ring |
 | **Meter panel** | click the trigger | The windows, the monthly allowance, the session spend, the Zen credit, the action links |
-| **Settings card** | _Settings → Plugins → OpenCode Patch_ | Seven controls, plus a live Go usage summary above them |
+| **Settings card** | _Settings → Plugins → OpenCode Patch_ | Eight controls, plus a live Go usage summary above them |
 
 Hovering the trigger explains its own number; clicking it opens the panel. The sections below show each surface, and [docs/quota-meter.md](./docs/quota-meter.md) documents every state it can be in.
 
 ### Settings card — _Settings → Plugins → OpenCode Patch_
 
-Seven controls in three sections — the decisions a user actually makes. Everything renders from the platform's own primitives (`Switch`, `Tag`, `Button`, host tokens), and every knob carries a hint plus a reset-to-default affordance.
+Eight controls in three sections — the decisions a user actually makes. Everything renders from the platform's own primitives (`Switch`, `Tag`, `Button`, host tokens), and every knob carries a hint plus a reset-to-default affordance.
 
 | Section | Control | Default | What it does |
 | :-- | :-- | :-: | :-- |
