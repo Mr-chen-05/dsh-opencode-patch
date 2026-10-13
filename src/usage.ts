@@ -61,6 +61,11 @@ export interface UsageOptions {
   keySource?: KeySourcePolicy;
   /** Escape hatch for callers that resolve the key themselves. */
   resolveApiKey?: () => Promise<string | undefined>;
+  /**
+   * Whether the installation's own credential store may be read as the last
+   * resort. Off unless the deployment opted in, which is the default.
+   */
+  readOpencodeStore?: boolean;
 }
 
 const isMissingCredential = (error: unknown): boolean => {
@@ -285,7 +290,8 @@ export class GoUsageService extends TypertRemoteService {
         : await resolveGoApiKey(
             this.ctx,
             targetProvider,
-            this.options.keySource ?? "auto"
+            this.options.keySource ?? "auto",
+            this.options.readOpencodeStore === true
           );
     } catch (error: unknown) {
       this.identity = undefined;

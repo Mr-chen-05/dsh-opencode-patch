@@ -590,6 +590,9 @@ export const registerResponsesProvider = async (
         pool: poolFor("opencode"),
         // The credential a login already stored, read the same way the org is.
         loginToken: loginTokenReader(ctx),
+        // And, last, the installation's own store - off unless the deployment
+        // opted in, which is what `config` carries here.
+        readOpencodeStore: config?.readOpencodeStore === true,
         ctx,
         host: loadPiAi(ctx),
         // The bridge reads the RAW catalog, not the config-shaped profile:

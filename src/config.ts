@@ -108,6 +108,7 @@ export const CONFIG_DEFAULTS = {
   keySource: DEFAULT_KEY_SOURCE,
   originClient: DEFAULT_ORIGIN_CLIENT,
   providers: DEFAULT_PROVIDERS,
+  readOpencodeStore: false,
   sessionIdEnv: DEFAULT_SESSION_ID_ENV,
   usageBaseURL: DEFAULT_USAGE_BASE_URL,
   usageEnabled: true,
@@ -129,6 +130,7 @@ export interface PluginConfig {
   keySource?: KeySourcePolicy;
   originClient?: string;
   providers?: string[];
+  readOpencodeStore?: boolean;
   sessionIdEnv?: string;
   userAgent?: string;
   usageBaseURL?: string;
@@ -165,6 +167,14 @@ export interface ResolvedPluginConfig {
   keySource: KeySourcePolicy;
   originClient: string;
   providers: Set<string>;
+  /**
+   * Whether the OpenCode installation's own credential store may be read.
+   *
+   * Off by default, and LAST in the resolution order when on: reading another
+   * program's private store is something a user turns on, and a credential they
+   * declared in DSH always outranks one inferred from the installation.
+   */
+  readonly readOpencodeStore: boolean;
   sessionIdEnv: string;
   userAgent?: string;
   usageBaseURL: string;
@@ -252,6 +262,10 @@ export const resolveConfig = (
     providers: new Set(
       providers.length > 0 ? providers : [...CONFIG_DEFAULTS.providers]
     ),
+    readOpencodeStore: readBoolean(
+      config.readOpencodeStore,
+      CONFIG_DEFAULTS.readOpencodeStore
+    ),
     sessionIdEnv:
       readString(config.sessionIdEnv) ?? CONFIG_DEFAULTS.sessionIdEnv,
     userAgent: readString(config.userAgent),
@@ -308,6 +322,16 @@ export const Config = z.object({
     .volatile()
     .description(
       "Which credential source wins when several resolve. auto: a literal key declared in another entry, then a key captured from a live request, then the declared reference, then a captured key for the other plane. request: a captured key first, then a literal one, then the declared reference. configured: a literal key, then the declared reference, then captured ones. An unrecognised value falls back to auto."
+    ),
+  readOpencodeStore: z
+    .boolean()
+    .default(CONFIG_DEFAULTS.readOpencodeStore)
+    .volatile()
+    .description(
+      "Read the credential the OpenCode installation already holds, from its " +
+        "own database, as the LAST resort: after every credential this " +
+        "deployment declares. Off by default — reading another tool's store is " +
+        "something a user turns on, not something that happens to them."
     ),
   injectOriginHeaders: z
     .boolean()

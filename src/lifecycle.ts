@@ -148,6 +148,8 @@ const installUsageService = (
   const usageOptions = {
     baseURL: () => resolveGoBaseURL(ctx, config.usageBaseURL),
     keySource: config.keySource,
+    // The installation's own store, last and only when the user turned it on.
+    readOpencodeStore: config.readOpencodeStore,
   };
   if (typeof ctx.plugin !== "function") {
     // `ctx.plugin` is the documented way and the one that gets cordis's own

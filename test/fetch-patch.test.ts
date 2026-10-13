@@ -25,6 +25,7 @@ import {
 } from "../src/index.ts";
 import {
   createCaptureFetch,
+  createOpencodeStore,
   headerOf,
   parseJsonBody,
   toolNamesOf,
@@ -32,7 +33,10 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  delete process.env.OPENCODE_API_KEY;
+  delete process.env.OPENCODE_GO_API_KEY;
   delete process.env.OPENCODE_SESSION_ID;
+  delete process.env.XDG_DATA_HOME;
   clearCapturedApiKeys();
 });
 
@@ -803,5 +807,65 @@ describe("patchFetch", () => {
     expect(headerOf(capture.init, "authorization")).toBe(
       "Bearer sk-go-key-aaa"
     );
+  });
+
+  it("fills the Authorization header from the installation's store, last", async () => {
+    // The request path, not the meter's: this interceptor is where a claimed
+    // request that carries no credential gets one, so a switch that read the
+    // store for the meter and not here would look wired and serve nothing.
+    const store = createOpencodeStore([
+      { integrationId: "opencode", value: "oc_sk_fixture_zen" },
+      { integrationId: "opencode-go", value: "sk-fixture-go" },
+    ]);
+    process.env.XDG_DATA_HOME = store.root;
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const call = async (
+      config: ReturnType<typeof resolveConfig>,
+      url: string
+    ): Promise<string | null> => {
+      const { capture, mockFetch } = createCaptureFetch();
+      await patchFetch(
+        mockFetch,
+        als,
+        config
+      )(url, {
+        headers: { Authorization: "Bearer unused" },
+        method: "POST",
+      });
+      return headerOf(capture.init, "authorization");
+    };
+
+    try {
+      const zen = "https://opencode.ai/zen/v1/chat/completions";
+      const go = "https://opencode.ai/zen/go/v1/chat/completions";
+
+      // Off by default: the sentinel the caller sent is the one that stays, so
+      // a deployment that never opted in cannot reach another tool's file.
+      expect(await call(resolveConfig(), zen)).toBe("Bearer unused");
+
+      // Opted in, the store answers — and it answers per PLANE, because the two
+      // integrations hold different accounts.
+      expect(await call(resolveConfig({ readOpencodeStore: true }), zen)).toBe(
+        "Bearer oc_sk_fixture_zen"
+      );
+      expect(await call(resolveConfig({ readOpencodeStore: true }), go)).toBe(
+        "Bearer sk-fixture-go"
+      );
+
+      // And everything the deployment declared still outranks it.
+      process.env.OPENCODE_API_KEY = "oc_sk_declared";
+      expect(await call(resolveConfig({ readOpencodeStore: true }), zen)).toBe(
+        "Bearer oc_sk_declared"
+      );
+      delete process.env.OPENCODE_API_KEY;
+
+      recordCapturedApiKey("oc_sk_captured", "opencode", zen);
+      expect(await call(resolveConfig({ readOpencodeStore: true }), zen)).toBe(
+        "Bearer oc_sk_captured"
+      );
+    } finally {
+      store.cleanup();
+      delete process.env.XDG_DATA_HOME;
+    }
   });
 });

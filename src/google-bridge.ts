@@ -50,6 +50,7 @@ import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import type { CatalogModelSpec } from "./catalog-data.ts";
 import { readCredentialsResolver } from "./cordis-context.ts";
 import type { CredentialPool } from "./credential-pool.ts";
+import { resolveOpencodeStoreKey } from "./go-discovery.ts";
 import { type Plane, piModelFor } from "./pi-provider.ts";
 import { GOOGLE_INTERNAL_ROUTE } from "./responses-routes.ts";
 
@@ -312,6 +313,14 @@ export interface GoogleBridgeInputs {
    * on its own, and it is what lets a signed-in deployment name no `apiKeyEnv`.
    */
   readonly loginToken?: (plane: string) => Promise<string | undefined>;
+  /**
+   * Whether the installation's own credential store may be read.
+   *
+   * The last resort of the same chain, reached only when a route named no
+   * reference and no login answered — and off unless the deployment opted in,
+   * which is the default.
+   */
+  readonly readOpencodeStore?: boolean;
 }
 
 /**
@@ -380,10 +389,19 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
       return resolveGatewayKey(ctx, named, String(route));
     }
     // No reference at all: the stored login, which is the credential the user
-    // already has. `undefined` when there is no login either, which is the
-    // adapter's cue to resolve ambient auth - exactly what happened before this.
-    return inputs.loginToken?.(
-      String(route).startsWith("opencode-go") ? "opencode-go" : "opencode"
+    // already has, then the installation's own store when the deployment opted
+    // in. `undefined` when neither has anything, which is the adapter's cue to
+    // resolve ambient auth - exactly what happened before this.
+    //
+    // The plane is an EXACT route id, not a prefix: this bridge serves the Zen
+    // models on the Zen base, and `"opencode-google".startsWith("opencode-go")`
+    // is true — the prefix test this replaces read the Zen route as the Go one.
+    // `loginTokenReader` masked that by falling back to the other plane; a store
+    // lookup keyed by integration id does not, and would have found nothing.
+    const plane = String(route) === "opencode-go" ? "opencode-go" : "opencode";
+    return (
+      (await inputs.loginToken?.(plane)) ??
+      resolveOpencodeStoreKey(plane, inputs.readOpencodeStore === true)
     );
   };
 

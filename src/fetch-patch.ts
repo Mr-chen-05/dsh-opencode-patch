@@ -13,6 +13,7 @@
 import type { AsyncLocalStorage } from "node:async_hooks";
 
 import { DEFAULT_GATEWAY_URLS, type ResolvedPluginConfig } from "./config.ts";
+import { resolveOpencodeStoreKey } from "./go-discovery.ts";
 import {
   extractApiKeyFromHeaders,
   getCapturedApiKey,
@@ -256,11 +257,20 @@ export const patchFetch = (
               state?.provider,
               tier === "unknown" ? undefined : tier
             );
+      // The installation's own store is the LAST resort, after everything the
+      // deployment declared: a key in the environment outranks one inferred
+      // from another program's file. The plane comes from the URL alone, the
+      // same rule the rotation observer uses, and an unrecognised URL answers
+      // nothing rather than guessing at an integration. Read only when nothing
+      // else resolved, so the default composition never opens the database.
+      const declared =
+        url.includes("/zen/go") || state?.provider === "opencode-go"
+          ? process.env.OPENCODE_GO_API_KEY
+          : process.env.OPENCODE_API_KEY;
       const fallbackKey =
         captured ??
-        (url.includes("/zen/go") || state?.provider === "opencode-go"
-          ? process.env.OPENCODE_GO_API_KEY
-          : process.env.OPENCODE_API_KEY);
+        declared ??
+        resolveOpencodeStoreKey(gatewayPlaneFor(url), config.readOpencodeStore);
       if (typeof fallbackKey === "string" && fallbackKey.length > 0) {
         headers.set("Authorization", `Bearer ${fallbackKey}`);
       }

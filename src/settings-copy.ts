@@ -35,6 +35,9 @@ export const en = {
   keySourceHint:
     "Which key wins when several resolve. Automatic takes the declared key, then one captured from a live request; the other two promote one side.",
   keySourceRequest: "Live request first",
+  readOpencodeStore: "Read the OpenCode installation's key (default off)",
+  readOpencodeStoreHint:
+    "Uses the credential OpenCode itself stored, as the LAST resort: a key you declared here or exported always wins. Off by default — turn it on to let this plugin read another tool's credential store.",
   overridden: "Overridden",
   readOnly: "This deployment stores settings read-only.",
   reset: "Reset to default",
@@ -159,6 +162,9 @@ export const zh: Record<keyof typeof en, string> = {
   keySourceHint:
     "多个来源都可用时以哪个为准。自动先取已声明密钥、再取捕获密钥；另两项各优先一侧。",
   keySourceRequest: "优先实时请求",
+  readOpencodeStore: "读取 OpenCode 安装的密钥（默认关闭）",
+  readOpencodeStoreHint:
+    "使用 OpenCode 自己保存的凭据，且仅作为最后兜底：你在此声明或导出的密钥始终优先。默认关闭——开启后本插件才会读取另一个工具的凭据库。",
   overridden: "已覆盖",
   readOnly: "当前部署配置为只读。",
   reset: "恢复默认",

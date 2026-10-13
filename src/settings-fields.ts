@@ -21,6 +21,7 @@ export const FIELD = {
   injectProject: "injectProject",
   injectUserAgent: "injectUserAgent",
   keySource: "keySource",
+  readOpencodeStore: "readOpencodeStore",
   usageEnabled: "usageEnabled",
 } as const;
 
@@ -252,6 +253,13 @@ export const CARD_FIELDS: readonly CardFieldSpec[] = [
       { labelKey: "keySourceRequest", value: "request" },
       { labelKey: "keySourceConfigured", value: "configured" },
     ],
+  },
+  {
+    field: FIELD.readOpencodeStore,
+    group: GROUP.quota,
+    hintKey: "readOpencodeStoreHint",
+    kind: "boolean",
+    labelKey: "readOpencodeStore",
   },
 ];
 

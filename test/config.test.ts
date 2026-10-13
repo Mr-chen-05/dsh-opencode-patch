@@ -8,6 +8,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CONFIG_DEFAULTS } from "../src/config.ts";
 import {
   Config,
   DEFAULT_KEY_SOURCE,
@@ -51,6 +52,30 @@ describe("resolveConfig", () => {
   it("honours an explicit off for the catalog switch", () => {
     const resolved = resolveConfig({ enrichModels: false });
     expect(resolved.enrichModels).toBe(false);
+  });
+
+  it("keeps the installation's own store off unless the row opts in", () => {
+    // The contract is the DEFAULT: a row that says nothing never reads another
+    // program's credential store. The explicit true is what proves the knob is
+    // wired through rather than a field that happens to be false everywhere.
+    expect(resolveConfig({}).readOpencodeStore).toBe(false);
+    expect(resolveConfig({ readOpencodeStore: true }).readOpencodeStore).toBe(
+      true
+    );
+    expect(resolveConfig({ readOpencodeStore: false }).readOpencodeStore).toBe(
+      false
+    );
+    // The schema is what the settings card binds, so its default has to agree
+    // with the resolver's or the card would render a switch that is on while
+    // the host behaves as though it were off.
+    // `Config` is a cordis Schema, not a zod one: calling it yields the lazy node
+    // rather than a plain value, so the default it would apply is read where it is
+    // declared. That is the agreement this assertion is about - the schema's
+    // default and the resolver's answer have to be the same, or the card renders a
+    // switch that is on while the host behaves as though it were off.
+    expect(CONFIG_DEFAULTS.readOpencodeStore).toBe(
+      resolveConfig({}).readOpencodeStore
+    );
   });
 
   it("treats a blank catalog value as the default", () => {
@@ -187,6 +212,7 @@ describe("Config schema", () => {
         "keySource",
         "originClient",
         "providers",
+        "readOpencodeStore",
         "sessionIdEnv",
         "usageBaseURL",
         "usageEnabled",
@@ -217,6 +243,7 @@ describe("Config schema", () => {
         "opencode-go-responses",
         "opencode-go-anthropic",
       ]),
+      readOpencodeStore: false,
       sessionIdEnv: "OPENCODE_SESSION_ID",
       usageBaseURL: "https://opencode.ai/zen/go/v1",
       usageEnabled: true,

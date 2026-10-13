@@ -6,7 +6,11 @@
 
 import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import os from "node:os";
+import nodePath from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import type { ActiveTurnState } from "../src/index.ts";
@@ -164,6 +168,76 @@ export const createMockContext = () =>
     // the contribution.
     reflect: { provide: () => disposeNoop },
   }) as never;
+
+/* ------------------------------------------------- OpenCode credential store */
+
+/** One row of the installation's `credential` table, as a fixture. */
+export interface FixtureCredential {
+  /** The integration the credential belongs to: `opencode`, `opencode-go`, … */
+  integrationId: string;
+  /** The credential's own name; defaults to the integration id. */
+  label?: string;
+  /** The secret. A fixture shaped like one, never a real credential. */
+  value: string;
+  /** `1` for the credential in use, `0` for one the user already replaced. */
+  active?: number;
+}
+
+/** A credential store the test owns, and the way to point the reader at it. */
+export interface FixtureStore {
+  /** Set this as `$XDG_DATA_HOME`: the reader resolves its path from it. */
+  root: string;
+  /** Remove the whole root. Call from `afterEach`. */
+  cleanup: () => void;
+}
+
+/**
+ * Build an OpenCode credential database in a temporary XDG data root.
+ *
+ * The reader resolves its own path from the environment, so a fixture is not a
+ * mock: this writes the real schema to a real SQLite file and hands back the
+ * root to export, which is the only thing that makes the store this test's
+ * rather than whatever the machine happens to have installed.
+ *
+ * @param credentials - the rows to insert, in order.
+ * @returns the data root and its cleanup.
+ */
+export const createOpencodeStore = (
+  credentials: readonly FixtureCredential[]
+): FixtureStore => {
+  const root = mkdtempSync(
+    nodePath.join(os.tmpdir(), "opencode-store-fixture-")
+  );
+  const directory = nodePath.join(root, "opencode");
+  mkdirSync(directory, { recursive: true });
+  const database = new DatabaseSync(nodePath.join(directory, "opencode.db"));
+  database.exec(`
+    CREATE TABLE credential (
+      id TEXT PRIMARY KEY, integration_id TEXT, label TEXT, value TEXT,
+      connector_id TEXT, method_id TEXT, active INTEGER,
+      time_created INTEGER, time_updated INTEGER
+    );
+  `);
+  const insert = database.prepare(
+    "INSERT INTO credential (id, integration_id, label, value, active) VALUES (?, ?, ?, ?, ?)"
+  );
+  for (const [index, credential] of credentials.entries()) {
+    insert.run(
+      `fixture-${index}`,
+      credential.integrationId,
+      credential.label ?? credential.integrationId,
+      credential.value,
+      credential.active ?? 1
+    );
+  }
+  database.close();
+  return {
+    cleanup: () => {
+      rmSync(root, { force: true, recursive: true });
+    },
+    root,
+  };
+};
 
 /* ------------------------------------------------ React element tree helpers */
 

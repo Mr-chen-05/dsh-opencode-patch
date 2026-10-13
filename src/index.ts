@@ -112,6 +112,7 @@ export {
   effectiveGoKeyRef,
   resolveGoApiKey,
   resolveGoBaseURL,
+  resolveOpencodeStoreKey,
   resolveRoutedKey,
   resolveZenCreditInfo,
   toGoBaseURL,

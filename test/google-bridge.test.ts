@@ -30,6 +30,7 @@ import {
   resolveGatewayKey,
 } from "../src/google-bridge.ts";
 import { GOOGLE_INTERNAL_ROUTE, GOOGLE_SDK } from "../src/responses-routes.ts";
+import { createOpencodeStore } from "./test-helpers.ts";
 
 /** The Gemini models of the Zen plane, straight from the generated catalog. */
 const geminiSpecs = OPENCODE_ZEN_CATALOG.filter(
@@ -566,12 +567,14 @@ describe("google-bridge · the login's token, when a route names no reference", 
   /** Run one stream and hand back the headers the bridge built. */
   const capturedHeaders = async (
     apiKeyRef: string,
-    loginToken?: (plane: string) => Promise<string | undefined>
+    loginToken?: (plane: string) => Promise<string | undefined>,
+    readOpencodeStore?: boolean
   ): Promise<Record<string, string>> => {
     const { llm, registered } = recordingLlm();
     registerGoogleBridge({
       ...bridgeInputs(llm, apiKeyRef),
       ...(loginToken === undefined ? {} : { loginToken }),
+      ...(readOpencodeStore === undefined ? {} : { readOpencodeStore }),
     });
     const adapter = registered[0]?.adapter as {
       stream: (options: unknown) => AsyncIterable<unknown>;
@@ -622,5 +625,44 @@ describe("google-bridge · the login's token, when a route names no reference", 
     // Which is the adapter's cue to resolve ambient auth, exactly as before.
     const headers = await capturedHeaders("");
     expect(headers["x-goog-api-key"]).toBeUndefined();
+  });
+
+  it("falls back to the installation's own store when the row opted in", async () => {
+    // The same chain, one step further: after the route's reference and the
+    // login, the credential OpenCode itself stored. A switch that read the store
+    // for the meter but not for a request would serve nothing here.
+    const store = createOpencodeStore([
+      { integrationId: "opencode", value: "oc_sk_fixture_zen" },
+    ]);
+    process.env.XDG_DATA_HOME = store.root;
+    try {
+      const headers = await capturedHeaders("", undefined, true);
+      expect(headers["x-goog-api-key"]).toBe("oc_sk_fixture_zen");
+      // Off — the default — the same store answers nothing, so the switch is
+      // what decided it rather than the file's presence.
+      const off = await capturedHeaders("");
+      expect(off["x-goog-api-key"]).toBeUndefined();
+    } finally {
+      store.cleanup();
+      delete process.env.XDG_DATA_HOME;
+    }
+  });
+
+  it("prefers a stored login over the installation's own store", async () => {
+    const store = createOpencodeStore([
+      { integrationId: "opencode", value: "oc_sk_fixture_zen" },
+    ]);
+    process.env.XDG_DATA_HOME = store.root;
+    try {
+      const headers = await capturedHeaders(
+        "",
+        () => Promise.resolve("st_from_login"),
+        true
+      );
+      expect(headers["x-goog-api-key"]).toBe("st_from_login");
+    } finally {
+      store.cleanup();
+      delete process.env.XDG_DATA_HOME;
+    }
   });
 });
