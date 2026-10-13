@@ -372,19 +372,15 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
     expect(isServableModel("gemini-3.1-pro", "opencode")).toBe(true);
   });
 
-  it("does not offer a free-tier model, whatever the catalog says", () => {
-    // Measured, not assumed: the gateway answers a free-tier model from outside
-    // OpenCode with `free_tier_restricted` under every header the real client
-    // sends, so the gate is not in the request and nothing here can serve one.
-    // Offering it would also be worse than a model that merely fails, because at
-    // least one free-tier id is a model this HOST serves itself: listing it lets
-    // the same id resolve onto a route that refuses, taking a working model down.
+  it("offers a free-tier model, which is a model a user may be running on", () => {
+    // A version of this briefly excluded free-tier ids on the strength of a
+    // measurement that turned out to be about the wrong credential: the account's
+    // session token is refused by the free tier, but an API key is not, and the
+    // session that prompted the change was itself running on a free-tier model.
+    // Excluding them removed models people were using.
     expect(isServableModel("muse-spark-1.3-contributor-free", "opencode")).toBe(
-      false
+      true
     );
-    expect(isServableModel("space-bunny-free", "opencode")).toBe(false);
-    // The exclusion is about what is OFFERED. A free-tier id named by hand still
-    // routes as it always did, so nothing that worked before stops working.
-    expect(isServableModel("gemini-3.1-pro", "opencode")).toBe(true);
+    expect(isServableModel("space-bunny-free", "opencode")).toBe(true);
   });
 });
