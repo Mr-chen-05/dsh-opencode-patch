@@ -74,11 +74,11 @@ Measured, one request each, `space-bunny-free` on both endpoints:
 | the deployment's `oc_…` key | `403 FreeTierError` | `403 FreeTierError` |
 | the same key plus `x-opencode-org-id` | `403 FreeTierError` | `403 FreeTierError` |
 | the literal `public` | `403 FreeTierError` | `403 FreeTierError` |
-| the real client's `st_…` token | — | served |
+| the real client's `st_…` token | — | **refused since** — see the note below |
 
 The literal `public` is worth recording because the source suggests it: a provider with no credential keeps only zero-cost models and answers `options: { apiKey: "public" }`. That is a local placeholder for the SDK, not a credential the gateway accepts, and this measurement is what says so.
 
-So the free tier's gate is the **session token**, and the org id alone does not open it.
+**That table is what this document originally concluded, and the last row is wrong.** The real client's session token served a free model _from inside the real client_ — the run it records is one where the client's own request was captured, and what the gateway accepted there is not reproducible from outside it. Measured since, with this account's session token **and its org**, every Zen `-free` id answers `403 FreeTierError` on both endpoints while a paid model on the same request answers `200`. So the gate is not the session token, and it is not the org: it is not anything a request can carry. See the exhaustive table in `docs/credentials.md`.
 
 ## What the free tier's gate is not
 
