@@ -10,10 +10,12 @@ A **plane** is one gateway base URL with its own catalog and its own credential.
 
 | Plane | Route id | Base URL | Credential | Models |
 | :-- | :-- | :-- | :-- | --: |
-| Zen (pay-as-you-go, free tier) | `opencode` | `https://opencode.ai/zen/v1` | `OPENCODE_API_KEY` | 120 |
-| Go (subscription) | `opencode-go` | `https://opencode.ai/zen/go/v1` | `OPENCODE_GO_API_KEY` | 36 |
+| Zen (pay-as-you-go, free tier) | `opencode` | `https://opencode.ai/zen/v1` | `OPENCODE_API_KEY` | 85 served / 120 listed |
+| Go (subscription) | `opencode-go` | `https://opencode.ai/zen/go/v1` | `OPENCODE_GO_API_KEY` | 32 served / 36 listed |
 
 A plane is a property of the **account and the base URL**, never of a model. The same model id can exist on both planes and be served on a different shape in each.
+
+**The two numbers per plane are two different questions**, and stating only one of them is how this table contradicted the section below it: _served_ is what the shim ships after retired ids are dropped, and _listed_ is everything `models.dev` carries for that provider, including the retired ones. The per-shape counts below are the served ones.
 
 ## 2. Shapes
 
