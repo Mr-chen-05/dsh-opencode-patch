@@ -424,6 +424,15 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
 
       for (const protocol of otherProtocols(expected ?? "")) {
         const wrong = await probe(protocol, model, ZEN_KEY);
+        if (accessDisabled(wrong)) {
+          // Status 0 is the gateway not answering, which is neither agreement nor
+          // refusal. `probe` returns it precisely so a case can skip instead of
+          // failing on an answer nobody received, and this loop was reading it as
+          // "the model IS served here" - the opposite conclusion from the evidence,
+          // and one that blames the catalog for a busy gateway.
+          context.skip();
+          return;
+        }
         expect(
           wrong.status,
           `${model} is ALSO served on ${protocol} (${wrong.summary}) — the ` +
