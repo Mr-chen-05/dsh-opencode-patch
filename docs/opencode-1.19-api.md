@@ -16,7 +16,7 @@ Everything below is measured. Where something is not, it says so.
 
 **What decides a request is the credential, not the path.** Measured across both paths with one key: `grok-4.7` answers `400 ModelProtocolUnsupported` on `/zen/v1` and on `/inference/openai/v1` alike, and `qwen3.8-max` answers the same `403` upstream error on both. They are two paths into one gateway, and for a paid model the choice between them changes nothing.
 
-The difference is entirely in what a credential can reach. A key reaches paid models; a session token reaches paid models and free ones, because the free tier is gated on the token and the org that comes with it.
+The difference is in what a credential can reach — but **not the way this document first claimed.** It said a session token reaches free models because the free tier is gated on the token and the org that comes with it. Measured exhaustively since, and that is false: with the account's session token **and its org**, every Zen `-free` id answers `403 FreeTierError` while a paid model on the same request answers `200`. So does a bare API key, a CLI `User-Agent`, the client header, a valid session id, the `read`/`bash` tool schemas, both endpoints, and no credential at all. The free tier is not gated on anything a request can carry, which is why this plugin does not offer a Zen `-free` id — see the table in `docs/credentials.md`.
 
 So a deployment's API key keeps working exactly as it does today, and the free tier becomes reachable by logging in — not by changing a URL.
 
@@ -43,7 +43,7 @@ Three facts, each load-bearing:
 
 - **The endpoint is not `/zen/v1`.** It is `/inference/openai/v1`, spoken through the OpenAI-compatible SDK.
 - **The credential is not an API key.** `OPENCODE_CONSOLE_TOKEN` is set from the signed-in account's access token, and `apiKey` in the provider options is that token.
-- **The org is named on every request.** `x-opencode-org-id` carries the active workspace, and the free tier is refused without it.
+- **The org is named on every request.** `x-opencode-org-id` carries the active workspace. It is what a session token needs to serve a **paid** model — measured `200` with it and `403` without — and it does not unlock the free tier, which nothing measured here does.
 
 ## The request, captured
 
