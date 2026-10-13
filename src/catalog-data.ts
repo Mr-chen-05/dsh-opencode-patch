@@ -1547,6 +1547,19 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
   {
     context_window: 1_048_576,
     cost: {
+      cache_read: 0.1,
+      input: 2,
+      output: 10,
+    },
+    id: "gemini-4-argon",
+    input_modalities: ["text", "image"],
+    max_output_tokens: 65_536,
+    name: "Gemini 4 Argon",
+    provider_npm: "@ai-sdk/google",
+  },
+  {
+    context_window: 1_048_576,
+    cost: {
       cache_read: 0,
       input: 0,
       output: 0,

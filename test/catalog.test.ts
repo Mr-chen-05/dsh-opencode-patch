@@ -160,7 +160,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // replacing the whole set — so these counts are the cold-start picker, and a
     // silent drop here is a model nobody can pick. Regenerate with
     // `scripts/regenerate-catalog-shim.ts` rather than editing by hand.
-    expect(OPENCODE_ZEN_CATALOG.length).toBe(84);
+    expect(OPENCODE_ZEN_CATALOG.length).toBe(85);
     const freeModels = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free === true);
     // Only the free tiers the gateway still serves.
     expect(freeModels.length).toBe(12);
