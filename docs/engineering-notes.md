@@ -268,3 +268,9 @@ Neither language is the source of truth and neither is reliably ahead: the fix i
 Every command the documentation names was run or checked: `catalog:shim` and `limits:shim` both work and both are what CI checks, and the one that looked unwired is not — `release:gate` runs `build && check && test && check.ts`, which is exactly what the workflow runs as four separate steps, so it is a convenience for a person rather than a step CI is missing.
 
 One finding came out of this class and it was the previous round's: `vp pack` was documented as the build command and produces `lib/client.cjs`, which the client loader cannot find. The command sweep was worth doing for that alone.
+
+## The paired documents, checked by fact rather than by line count
+
+The two READMEs are 51 lines apart, which is not evidence of anything — Chinese is denser, and line parity was never the claim. Checked by the facts that matter instead: the catalog total, the control count, `opencode-google`, and `step-5-preview` are all present in both, with the Chinese mentioning `FreeTierError` twice fewer and `opencode-google` once fewer, which is the difference between a translation and a copy.
+
+The first attempt at this comparison was the wrong-context shape again: stripping non-ASCII characters from the headings to diff them removes almost every Chinese heading, so the two lists could not align and the output said nothing. Facts survive that mistake; structure does not.
