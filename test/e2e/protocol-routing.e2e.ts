@@ -317,12 +317,19 @@ const redirectsOff = (model: string): boolean =>
 describe.skipIf(!LIVE)("live protocol routing", () => {
   it(
     "routes a free-tier model to the one endpoint that recognises it",
-    async () => {
+    async (context) => {
       const model = "muse-spark-1.3-contributor-free";
       const expected = servedProtocolFor(model);
       expect(expected, `${model} no longer redirects`).toBe("openai-responses");
 
       const right = await probe(expected ?? "", model);
+      if (accessDisabled(right)) {
+        // Status 0 is the gateway not answering, which is neither agreement nor
+        // refusal. Without this the assertion below reads a busy gateway as the
+        // route being wrong.
+        context.skip();
+        return;
+      }
       // 403 FreeTierError: the gateway parsed the model and then applied the
       // free-tier entitlement rule. It got far enough to identify it.
       //
@@ -340,6 +347,11 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
 
       for (const protocol of otherProtocols(expected ?? "")) {
         const wrong = await probe(protocol, model);
+        if (accessDisabled(wrong)) {
+          // Same reason as its sibling above: a non-answer is not evidence.
+          context.skip();
+          return;
+        }
         // The gateway changed under this assertion (measured 2026-10-09): the
         // free-tier entitlement gate now fires on EVERY endpoint, so a
         // wrong-endpoint cell answers 403 FreeTierError too — no longer 500.
@@ -567,6 +579,11 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
       ).toBe(200);
 
       const onCompletions = await probe("openai-completions", model, ZEN_KEY);
+      if (accessDisabled(onCompletions)) {
+        // Same reason as the pair above: a non-answer is not evidence.
+        context.skip();
+        return;
+      }
       expect(
         onCompletions.status,
         `${model} on completions: ${onCompletions.summary}`
