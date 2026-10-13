@@ -274,3 +274,9 @@ One finding came out of this class and it was the previous round's: `vp pack` wa
 The two READMEs are 51 lines apart, which is not evidence of anything — Chinese is denser, and line parity was never the claim. Checked by the facts that matter instead: the catalog total, the control count, `opencode-google`, and `step-5-preview` are all present in both, with the Chinese mentioning `FreeTierError` twice fewer and `opencode-google` once fewer, which is the difference between a translation and a copy.
 
 The first attempt at this comparison was the wrong-context shape again: stripping non-ASCII characters from the headings to diff them removes almost every Chinese heading, so the two lists could not align and the output said nothing. Facts survive that mistake; structure does not.
+
+## The diagnostic a user sees, now written down where they would look
+
+The stream hook reports a hand-named model it cannot serve, once per provider/model pair: _"is not offered by this plugin and cannot be served from here"_. It was added and then left undocumented, which matters more for a diagnostic than for most code — a message a user cannot look up is a message they will misread, and the gateway's own answer for a Zen free-tier id is exactly the misreading this exists to prevent.
+
+The trigger is a model named by hand rather than chosen from the picker: the picker no longer offers a Zen `-free` id, but a session that already selected one, a config file, or a direct call can still name it, and the warning is the only thing that says why.
