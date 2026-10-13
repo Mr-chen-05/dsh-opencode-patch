@@ -64,7 +64,12 @@ export interface CardProps {
   getLocale?: () => string | undefined;
   /** The Host's quota read; absent when the usage service is not registered. */
   readUsage?: () => Promise<GoUsage | undefined>;
-  /** The Host's sign-in remote; absent when no login service is mounted. */
+  /**
+   * The Host's sign-in remote. Never absent: the page always hands over the three
+   * calls, and each resolves the service when it is invoked, so a remote that mounts
+   * late is still reached and a host that mounts none shows a row that says so.
+   */
+
   login?: LoginRemoteCalls;
   edit: (field: string, text: string) => void;
   resetField: (field: string) => void;
