@@ -50,11 +50,7 @@ import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import type { CatalogModelSpec } from "./catalog-data.ts";
 import { readCredentialsResolver } from "./cordis-context.ts";
 import type { CredentialPool } from "./credential-pool.ts";
-import {
-  resolveOpencodeStoreAccount,
-  resolveOpencodeStoreKey,
-} from "./go-discovery.ts";
-import { setOrg } from "./org-cache.ts";
+import { resolveOpencodeStoreKey } from "./go-discovery.ts";
 import { type Plane, piModelFor } from "./pi-provider.ts";
 import { GOOGLE_INTERNAL_ROUTE } from "./responses-routes.ts";
 
@@ -416,17 +412,11 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
     if (granted !== undefined) {
       return granted;
     }
-    const account = resolveOpencodeStoreAccount(
-      inputs.readOpencodeStore === true
-    );
-    if (account !== undefined) {
-      // The org is half the credential: the gateway answers a session token sent
-      // without its org as though it were a plain key. It is recorded HERE, where
-      // the token is chosen, so the value is kept next to the thing that changes
-      // it - and the org belongs to this account rather than being invented.
-      setOrg(plane, account.orgId);
-      return account.accessToken;
-    }
+    // The installation's ACCOUNT is deliberately not read here. `loginTokenReader`
+    // answers it one level up, so reading it again would be a second
+    // implementation of the same fallback: covered by its own tests and never
+    // executed, which is the shape this repository has been audited for once
+    // already. This tail is the installation's KEY store and nothing else.
     return resolveOpencodeStoreKey(plane, inputs.readOpencodeStore === true);
   };
 

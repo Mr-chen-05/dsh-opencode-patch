@@ -29,7 +29,7 @@ import {
   registerGoogleBridge,
   resolveGatewayKey,
 } from "../src/google-bridge.ts";
-import { clearOrgs, orgFor } from "../src/org-cache.ts";
+import { clearOrgs } from "../src/org-cache.ts";
 import { GOOGLE_INTERNAL_ROUTE, GOOGLE_SDK } from "../src/responses-routes.ts";
 import { createOpencodeStore } from "./test-helpers.ts";
 
@@ -672,79 +672,11 @@ describe("google-bridge · the login's token, when a route names no reference", 
     }
   });
 
-  it("carries the installation's own login when the row opted in", async () => {
-    // The login half of the same opt-in: a user already signed in to OpenCode
-    // should not have to run the device flow again. This is the reader actually
-    // being called - it is read, used, and left alone.
-    const store = createOpencodeStore([], {
-      accessToken: "st_from_installation",
-      email: "you@example.com",
-      orgId: "wrk_fixture",
-    });
-    process.env.XDG_DATA_HOME = store.root;
-    try {
-      const headers = await capturedHeaders("", undefined, true);
-      expect(headers["x-goog-api-key"]).toBe("st_from_installation");
-      // And its org travels with it: a session token sent without its org is
-      // answered as though it were a plain key.
-      expect(orgFor("opencode")).toBe("wrk_fixture");
-      // Off - the default - the same store answers nothing, so the switch is
-      // what decided it rather than the file's presence.
-      clearOrgs();
-      const off = await capturedHeaders("");
-      expect(off["x-goog-api-key"]).toBeUndefined();
-      expect(orgFor("opencode")).toBeUndefined();
-    } finally {
-      store.cleanup();
-      delete process.env.XDG_DATA_HOME;
-    }
-  });
-
-  it("keeps a DSH grant ahead of the installation's own login", async () => {
-    // The precedence rule, and the reason the account is not merged into the
-    // grant: a stored account is a DIFFERENT credential from a DSH grant, so it
-    // must never displace one - and the grant's own (absent) org must not be
-    // replaced by the account's either, because that would pair one credential's
-    // token with another's org.
-    const store = createOpencodeStore([], {
-      accessToken: "st_from_installation",
-      orgId: "wrk_fixture",
-    });
-    process.env.XDG_DATA_HOME = store.root;
-    try {
-      const headers = await capturedHeaders(
-        "",
-        () => Promise.resolve("st_from_grant"),
-        true
-      );
-      expect(headers["x-goog-api-key"]).toBe("st_from_grant");
-      expect(orgFor("opencode")).toBeUndefined();
-    } finally {
-      store.cleanup();
-      delete process.env.XDG_DATA_HOME;
-    }
-  });
-
-  it("uses a stored login whose expiry has passed rather than hiding it", async () => {
-    // Nothing here can refresh an OpenCode account - that would mean writing to
-    // their store or calling their refresh endpoint - so an expired one is used
-    // as it stands and the gateway's answer is the truth about it. The
-    // alternative, treating it as absent, would tell a signed-in user they have
-    // no credential at all when they have one that is merely old.
-    const store = createOpencodeStore([], {
-      accessToken: "st_from_installation",
-      // 1970: as expired as a stored value can be.
-      tokenExpiry: 1,
-    });
-    process.env.XDG_DATA_HOME = store.root;
-    try {
-      const headers = await capturedHeaders("", undefined, true);
-      expect(headers["x-goog-api-key"]).toBe("st_from_installation");
-    } finally {
-      store.cleanup();
-      delete process.env.XDG_DATA_HOME;
-    }
-  });
+  // The three account cases that used to sit here moved to
+  // responses-provider.test.ts, against `loginTokenReader(ctx, true)`. The bridge
+  // no longer reads the installation's account - the login reader answers it one
+  // level up - so keeping them here would have left them covering a branch that
+  // never runs, which is the shape this repository has been audited for.
 
   it("still answers the installation's key when it holds no login", async () => {
     // The two halves of one switch: an installation with a key and no session
