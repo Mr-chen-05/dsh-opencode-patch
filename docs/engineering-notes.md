@@ -188,3 +188,11 @@ Both were checked precisely because they are the paths where an empty answer wou
 Five places named `opencode-mistral` as a route while `INTERNAL_ROUTES` has never contained it, and omitted `opencode-google` which it does. The worst of them was the Chinese README saying the patch deliberately does not provide Google Generative AI at all — true before the bridge, false since, and left standing in the translation after the English was corrected.
 
 Swept afterwards for the shape rather than assuming it was the only one: every `opencode-*` name in every document, checked against the routes and planes the code declares. The rest are header names (`opencode-client`, `opencode-org-id`, `opencode-parent-session-id`), the package name, a module name and the CLI — **no second phantom**. That is worth recording because a clean sweep is a result: it is what makes "these five were all of them" a finding rather than a hope.
+
+## The free-tier claim, and the one place it was right all along
+
+The false claim — that a session token, or the org, or a header unlocks the free tier — stood in six places and was swept out of all of them. Two of those places were paragraphs written here, during the round where the exclusion was withdrawn; both now record the withdrawal rather than standing as fact, because the session that appeared to run on a free model was running on `global:step-5-preview`, this host's own model, and the exclusion was right.
+
+**One place had it right before any of this work started.** `docs/opencode-1.19-api.md` already said, at the bottom of its own list: _"The free tier is not reachable by adding a header. Measured: the org id and the key together still answer 403. Any plan that assumed a header fix is wrong."_ That sentence is what the exhaustive table later confirmed, and it was there the whole time — which is the uncomfortable half of this record: the answer was written down, and six other places said the opposite, and the six won for several rounds.
+
+A sweep that ends clean is worth as much as one that finds something, and this one ends with the boundary drawn: every remaining mention of the free tier says it is not served from here.
