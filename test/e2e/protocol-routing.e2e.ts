@@ -487,6 +487,14 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
         checked += 1;
 
         const onMessages = await probe("anthropic-messages", model, ZEN_KEY);
+        if (accessDisabled(onMessages)) {
+          // Its sibling above guards this, and so does the google case below; this
+          // one did not. Status 0 is the gateway not answering, and asserting 400 on
+          // it reports a busy gateway as the model being served on the wrong
+          // protocol - the third instance of that shape in this file.
+          context.skip();
+          return;
+        }
         expect(
           onMessages.status,
           `${model} on messages: ${onMessages.summary} — if this is 200, the Go ` +

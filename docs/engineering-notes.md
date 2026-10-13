@@ -157,10 +157,11 @@ That is the same shape as the rest of this file — a claim about the tree that 
 
 Two instances, both fixed, and two paths checked that get it right. Worth recording as a class because the symptom is identical every time: something that could not be observed is reported as though it had been, and the conclusion drawn from it is the opposite of what the evidence supports.
 
-**Fixed:**
+**Fixed — three, not two.** The third was found by sweeping this file for the shape rather than by CI, which is the argument for recording a class and not just an instance:
 
 - The catalog-freshness job reports `is src/catalog-data.ts still current?` with exit 1 when its fetch times out. It cannot tell "could not reach models.dev" from "models.dev changed", and it says the second when it means the first. It went red three times in one day and only the third was real.
 - The e2e protocol-routing case asserted `toBe(400)` directly on a probe whose status 0 means "the gateway did not answer". A busy gateway was therefore read as the gateway serving a model on the wrong protocol, and the failure message blamed the catalog. `accessDisabled` already treated status 0 as the third shape of "cannot tell"; that loop does now too.
+- The same file, one case later: the anthropic-messages probe in the Go-plane case had no guard, while its sibling above and the google case below both did. CI had not reached it. Guarded now.
 
 **Checked and correct, so the class has a boundary:**
 
