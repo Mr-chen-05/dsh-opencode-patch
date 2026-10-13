@@ -293,3 +293,22 @@ The two modules existed and were tested before anything called them. The wiring 
 **One bug the wiring found, worth recording because the login reader masked it.** `google-bridge.ts` derived the plane with `String(route).startsWith("opencode-go")`, and `"opencode-google"` starts with `"opencode-go"` — so the Zen route was read as the Go one. `loginTokenReader` hid that by falling back to the other plane; an integration-id lookup does not, so the derivation is now an exact route comparison.
 
 The login half is separate and smaller: `readOpencodeAccount` is an alternative to the device flow, so it belongs wherever a stored grant is read, and it needs the same opt-in rather than its own.
+
+**And it is wired, so a user who has already signed in to OpenCode does not have to run the device flow again.** The bridge's tail now resolves in this order:
+
+    the DSH grant (refreshed through `createLoginSession`)
+      → the installation's stored account, when `readOpencodeStore` is on
+      → the installation's stored key, when it is on
+      → nothing
+
+Four things about that are decisions rather than details.
+
+**One switch, not two.** The account shares `readOpencodeStore`, because the question the switch answers is one question — may this plugin read another program's store at all — and a second switch would be a second way to say the same thing. A switch whose effect only exists inside another switch's surface is a state, not a decision.
+
+**The account never displaces a DSH grant, and the grant's org is never replaced by the account's.** They are different credentials: another program's store, another owner, possibly another account. So the account is consulted only after the grant, it is read and used and left alone — nothing writes it into the DSH seam — and the org that travels with it is recorded only on the path where the account's token is the one being used. Pairing one credential's token with another's org is worse than sending no org at all.
+
+**Where the org comes from, and that it CAN be known.** A session token is half a credential: the gateway answers one sent without its org as though it were a plain key. The org is not in the `account` row — the migration `20260309230000_move_org_to_state` moved it out of `account.selected_org_id` and into `account_state.active_org_id`, which is why the reader asks that table rather than the account's own columns. So an account read this way can carry an org, and it does: `readOpencodeAccount` joins `account_state` on `active_account_id` and returns `active_org_id` beside the token, taking the account the state row names as active rather than whichever row happens to be first. Both tables come from the same migration, so a database that has `account` at all has `account_state` next to it.
+
+**An expired stored token is used anyway.** Nothing here can refresh an OpenCode account — that would mean writing to their store or calling their refresh endpoint — so `token_expiry` is deliberately not consulted. The gateway's answer is the truth about a token, and the alternative, treating it as absent, would tell a signed-in user they have no credential when they have one that is merely old. The test pins it with an expiry in 1970.
+
+One consequence worth stating plainly rather than discovering later: on an endpoint whose credential slot reads an API key, an account token is refused — measured for `/chat/completions` at the top of this file. A deployment that has BOTH a session in the installation's `account` table and a key in its `credential` table therefore now prefers the account token on this route, where before it used the key. That is the precedence this file sets out, and it matches OpenCode's own behaviour — when it is signed in, the session credential is the one it sends — but it is a behaviour change on a machine that has both, and it is not measured for the Google endpoint this bridge serves.

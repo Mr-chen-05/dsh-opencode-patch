@@ -50,7 +50,11 @@ import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import type { CatalogModelSpec } from "./catalog-data.ts";
 import { readCredentialsResolver } from "./cordis-context.ts";
 import type { CredentialPool } from "./credential-pool.ts";
-import { resolveOpencodeStoreKey } from "./go-discovery.ts";
+import {
+  resolveOpencodeStoreAccount,
+  resolveOpencodeStoreKey,
+} from "./go-discovery.ts";
+import { setOrg } from "./org-cache.ts";
 import { type Plane, piModelFor } from "./pi-provider.ts";
 import { GOOGLE_INTERNAL_ROUTE } from "./responses-routes.ts";
 
@@ -316,9 +320,11 @@ export interface GoogleBridgeInputs {
   /**
    * Whether the installation's own credential store may be read.
    *
-   * The last resort of the same chain, reached only when a route named no
-   * reference and no login answered — and off unless the deployment opted in,
-   * which is the default.
+   * One switch for both halves of it, because it is one decision: may this
+   * plugin read another program's store at all. It governs the stored LOGIN
+   * (the alternative to the device flow, reached right after the grant) and the
+   * stored KEY (the last resort of the same chain), and it is off unless the
+   * deployment opted in, which is the default.
    */
   readonly readOpencodeStore?: boolean;
 }
@@ -389,9 +395,16 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
       return resolveGatewayKey(ctx, named, String(route));
     }
     // No reference at all: the stored login, which is the credential the user
-    // already has, then the installation's own store when the deployment opted
-    // in. `undefined` when neither has anything, which is the adapter's cue to
-    // resolve ambient auth - exactly what happened before this.
+    // already has, then the installation's own login when the deployment opted
+    // in, then the key that installation stores. `undefined` when none of them
+    // has anything, which is the adapter's cue to resolve ambient auth -
+    // exactly what happened before this.
+    //
+    // The order is the rule. A DSH grant is what the user asked for here, so it
+    // is always first. The installation's account is a DIFFERENT credential -
+    // another program's store, another owner, possibly another account - so it
+    // never displaces a grant, and it is read, used and left alone: nothing here
+    // writes it into the DSH seam.
     //
     // The plane is an EXACT route id, not a prefix: this bridge serves the Zen
     // models on the Zen base, and `"opencode-google".startsWith("opencode-go")`
@@ -399,10 +412,22 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
     // `loginTokenReader` masked that by falling back to the other plane; a store
     // lookup keyed by integration id does not, and would have found nothing.
     const plane = String(route) === "opencode-go" ? "opencode-go" : "opencode";
-    return (
-      (await inputs.loginToken?.(plane)) ??
-      resolveOpencodeStoreKey(plane, inputs.readOpencodeStore === true)
+    const granted = await inputs.loginToken?.(plane);
+    if (granted !== undefined) {
+      return granted;
+    }
+    const account = resolveOpencodeStoreAccount(
+      inputs.readOpencodeStore === true
     );
+    if (account !== undefined) {
+      // The org is half the credential: the gateway answers a session token sent
+      // without its org as though it were a plain key. It is recorded HERE, where
+      // the token is chosen, so the value is kept next to the thing that changes
+      // it - and the org belongs to this account rather than being invented.
+      setOrg(plane, account.orgId);
+      return account.accessToken;
+    }
+    return resolveOpencodeStoreKey(plane, inputs.readOpencodeStore === true);
   };
 
   const built: unknown = Reflect.construct(adapter, [

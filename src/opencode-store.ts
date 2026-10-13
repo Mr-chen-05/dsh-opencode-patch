@@ -116,8 +116,17 @@ export const readOpencodeCredentials = (
 /**
  * The stored login, or `undefined` when there is not one.
  *
- * The installation holds at most one account, and a row without an access token is
- * not a login, so the first usable row wins.
+ * The account the installation names as ACTIVE wins, and the first usable row is
+ * the fallback for a database whose state row names nobody. A row without an
+ * access token is not a login, so it is skipped either way.
+ *
+ * The org is JOINED rather than fetched separately, and that is a correctness
+ * point rather than a style one: `account_state` names which account is active
+ * and which org that account is working in, and an org read on its own could be
+ * paired with a DIFFERENT account's token. A token carrying another credential's
+ * org is worse than a token sent without one, which is the whole reason this is
+ * one query. Both tables come from the same migration, so a database that has
+ * `account` at all has `account_state` beside it.
  *
  * @param databasePath - the path {@link opencodeDatabasePath} resolved, or `:memory:`.
  * @returns the account, or `undefined`.
@@ -130,26 +139,21 @@ export const readOpencodeAccount = (
   }
   const found = rows(
     databasePath,
-    "SELECT email, access_token AS accessToken, refresh_token AS refreshToken FROM account"
+    "SELECT a.email AS email, a.access_token AS accessToken," +
+      " a.refresh_token AS refreshToken, s.active_org_id AS orgId" +
+      " FROM account a LEFT JOIN account_state s ON s.active_account_id = a.id" +
+      " ORDER BY (s.active_account_id IS NULL), a.time_created, a.id"
   );
   if (found === undefined) {
     return undefined;
   }
-  // The org lives in its own table, and only the active row matters. A missing
-  // table or a missing row is ordinary: the account is then usable only if the
-  // caller can supply an org some other way, which is the caller's judgement.
-  const state = rows(
-    databasePath,
-    "SELECT active_org_id AS orgId FROM account_state LIMIT 1"
-  );
-  const orgId = text(state?.[0]?.orgId);
   for (const row of found) {
     const accessToken = text(row.accessToken);
     if (accessToken !== undefined) {
       return {
         accessToken,
         email: text(row.email) ?? "",
-        orgId,
+        orgId: text(row.orgId),
         refreshToken: text(row.refreshToken),
       };
     }

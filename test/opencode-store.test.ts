@@ -160,6 +160,51 @@ describe("opencode-store: the account", () => {
     expect(readOpencodeAccount(path)?.orgId).toBe("org_fixture");
   });
 
+  it("reads the ACTIVE account, not merely the first row", () => {
+    // The state table names which account is in use, and a token from one the
+    // user has switched away from is not the login they hold.
+    const path = database((db) => {
+      schema(db);
+      db.prepare(
+        "INSERT INTO account (id, email, access_token, time_created) VALUES (?, ?, ?, ?)"
+      ).run("first", "first@example.com", "fixture-first", 1);
+      db.prepare(
+        "INSERT INTO account (id, email, access_token, time_created) VALUES (?, ?, ?, ?)"
+      ).run("second", "second@example.com", "fixture-second", 2);
+      db.prepare(
+        "INSERT INTO account_state (id, active_account_id, active_org_id) VALUES (?, ?, ?)"
+      ).run("state", "second", "org_second");
+    });
+    expect(readOpencodeAccount(path)).toEqual({
+      accessToken: "fixture-second",
+      email: "second@example.com",
+      orgId: "org_second",
+      refreshToken: undefined,
+    });
+  });
+
+  it("never attaches an org to an account it does not belong to", () => {
+    // The failure this reads around: an org taken from the state row and paired
+    // with whichever account happened to be first. A token carrying another
+    // credential's org is worse than a token carrying none, so a state row that
+    // names nobody leaves the org unset.
+    const path = database((db) => {
+      schema(db);
+      db.prepare(
+        "INSERT INTO account (id, email, access_token) VALUES (?, ?, ?)"
+      ).run("acct", "you@example.com", "fixture-access");
+      db.prepare(
+        "INSERT INTO account_state (id, active_account_id, active_org_id) VALUES (?, ?, ?)"
+      ).run("state", "someone-else", "org_fixture");
+    });
+    expect(readOpencodeAccount(path)).toEqual({
+      accessToken: "fixture-access",
+      email: "you@example.com",
+      orgId: undefined,
+      refreshToken: undefined,
+    });
+  });
+
   it("treats a row with no access token as no login", () => {
     const path = database((db) => {
       schema(db);

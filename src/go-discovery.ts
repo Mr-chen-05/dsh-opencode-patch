@@ -29,7 +29,11 @@ import {
   isPlaceholderApiKey,
 } from "./key-capture.ts";
 import { opencodeDatabasePath } from "./opencode-paths.ts";
-import { readOpencodeCredentials } from "./opencode-store.ts";
+import {
+  type OpencodeAccount,
+  readOpencodeAccount,
+  readOpencodeCredentials,
+} from "./opencode-store.ts";
 
 /** Gateway settings found in other entries, if any. */
 export interface DiscoveredGoConfig {
@@ -305,6 +309,25 @@ const firstResolved = async (
 };
 
 /**
+ * The database path the installation itself would use.
+ *
+ * Resolved per call rather than cached, because the two facts it depends on —
+ * the ambient environment and the home directory — belong to the process at
+ * request time.
+ *
+ * @returns the path the store readers take, which may be `:memory:`.
+ */
+const opencodeStorePath = (): string =>
+  opencodeDatabasePath(
+    {
+      channel: process.env.OPENCODE_CHANNEL,
+      env: process.env,
+      home: os.homedir(),
+    },
+    os.tmpdir()
+  );
+
+/**
  * The credential the OpenCode installation already holds for a plane.
  *
  * The path is resolved the way the installation resolves it, from the ambient
@@ -326,17 +349,35 @@ export const resolveOpencodeStoreKey = (
   if (!enabled || plane.length === 0) {
     return undefined;
   }
-  const path = opencodeDatabasePath(
-    {
-      channel: process.env.OPENCODE_CHANNEL,
-      env: process.env,
-      home: os.homedir(),
-    },
-    os.tmpdir()
-  );
-  const credentials = readOpencodeCredentials(path);
+  const credentials = readOpencodeCredentials(opencodeStorePath());
   return credentials?.find((entry) => entry.integrationId === plane)?.value;
 };
+
+/**
+ * The login the OpenCode installation already holds, when the deployment opted in.
+ *
+ * This is the alternative to the device flow: a user who is already signed in to
+ * OpenCode should not have to sign in again here. It is a DIFFERENT credential
+ * from a DSH grant — another program's store, another owner, possibly another
+ * account — so a caller consults it only after the grant, and never writes it
+ * back into the DSH seam.
+ *
+ * There is no plane argument because there is no per-plane login to choose: the
+ * installation holds at most one account, and one token is what OpenCode itself
+ * would send on either plane.
+ *
+ * Nothing throws and nothing logs, for the same reason the reader does not: a
+ * machine without OpenCode is the ordinary case.
+ *
+ * @param enabled - the deployment's opt-in. When false this answers `undefined`
+ *   without touching the filesystem, which is the default.
+ * @returns the stored login, or `undefined` when the switch is off or the
+ *   installation holds none this module can read.
+ */
+export const resolveOpencodeStoreAccount = (
+  enabled: boolean
+): OpencodeAccount | undefined =>
+  enabled ? readOpencodeAccount(opencodeStorePath()) : undefined;
 
 /**
  * Resolve the Go API key without ever exposing it to the client.
