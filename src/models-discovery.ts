@@ -219,9 +219,31 @@ const withoutRoute = (value: unknown, key: "id" | "provider"): unknown =>
  * Exported for its own test: it is the one place I1's second clause lives, and the
  * interesting case is a model no catalog describes.
  */
+/**
+ * Whether an id names an OpenCode free-tier model.
+ *
+ * Every free-tier id the catalog carries ends this way, and none of them is
+ * servable from here. Measured rather than assumed: the gateway answers one from
+ * outside OpenCode with `free_tier_restricted` under every header the real client
+ * sends, so the gate is not in the request and no amount of patching reaches it.
+ *
+ * @param id - the model id.
+ * @returns whether it is a free-tier id.
+ */
+const isFreeTierModelId = (id: string): boolean => id.endsWith("-free");
+
 export const isServableModel = (id: unknown, route: string): boolean => {
   if (typeof id !== "string") {
     return true;
+  }
+  // A free-tier model is not offered, because it cannot work here — and the cost
+  // of offering one is worse than a model that fails: at least one free-tier id
+  // is ALSO a model this host serves itself, so listing it lets the same id
+  // resolve onto a route that refuses, which takes a working model down with it.
+  // Routing is untouched: a free-tier id named by hand still routes as it always
+  // did, so nothing that worked before stops working.
+  if (isFreeTierModelId(id)) {
+    return false;
   }
   const sdk = findModelSpecOn(catalogPlaneForRoute(route), id)?.provider_npm;
   if (sdk !== undefined) {
