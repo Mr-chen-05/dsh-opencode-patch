@@ -280,3 +280,11 @@ The first attempt at this comparison was the wrong-context shape again: strippin
 The stream hook reports a hand-named model it cannot serve, once per provider/model pair: _"is not offered by this plugin and cannot be served from here"_. It was added and then left undocumented, which matters more for a diagnostic than for most code — a message a user cannot look up is a message they will misread, and the gateway's own answer for a Zen free-tier id is exactly the misreading this exists to prevent.
 
 The trigger is a model named by hand rather than chosen from the picker: the picker no longer offers a Zen `-free` id, but a session that already selected one, a config file, or a direct call can still name it, and the warning is the only thing that says why.
+
+## Seventeen sweeps, and the fourth time a sweep asked the wrong question
+
+Every script under `scripts/`, checked against whether a workflow runs it: `build`, `catalog:shim`, `limits:shim` and `cli:version` are all called, and the two that are not are meant not to be — `release:gate` is the four CI steps as one convenience for a person, and `token:refresh` rewrites a local credential store that CI does not have and should not.
+
+The first version of this check grepped the workflows for each script's **filename**, and reported three of them unwired. Workflows call npm script names, not files. That is the fourth time this session a sweep resolved a name in a context that could not show it — after the count sweep that missed Go, the identifier sweep that asked about exports, and the heading diff that stripped non-ASCII out of Chinese.
+
+Four instances in one session is no longer an accident of care. The rule that catches all four is written at the top of this file and has to be applied before the sweep is believed: **check that the thing being searched is the thing the claim is about.**
