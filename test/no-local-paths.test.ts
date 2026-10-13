@@ -111,3 +111,27 @@ describe("the hard rule: no local path leaves the machine", () => {
     }
   });
 });
+
+describe("AGENTS.md · the repo map", () => {
+  // Two modules were added this year and not named in the map - org-cache.ts and
+  // login-credential.ts - and both were found by listing the modules the map
+  // omits rather than by reading it. A map is read for what it says, so an
+  // omission is invisible in it; this is the check that makes it visible.
+  //
+  // The `settings-*` files are exempt because the map covers them by a phrase
+  // rather than by name ("the settings-* card and its controls"), which is a
+  // decision rather than an omission.
+  it("names every module that is not a settings-* file", async () => {
+    const map = await readFile(
+      new URL("../AGENTS.md", import.meta.url),
+      "utf8"
+    );
+    const dir = new URL("../src/", import.meta.url);
+    const files = (await readdir(dir)).filter((f) => /\.tsx?$/u.test(f));
+    expect(files.length).toBeGreaterThan(0);
+    const unnamed = files.filter(
+      (f) => !f.startsWith("settings-") && !map.includes(f)
+    );
+    expect(unnamed, "modules the repo map does not name").toEqual([]);
+  });
+});
