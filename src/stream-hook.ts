@@ -21,7 +21,7 @@ import {
   findModelSpec,
   findModelSpecOn,
 } from "./models-catalog.ts";
-import { isRouteRegistered } from "./models-discovery.ts";
+import { isRouteRegistered, isServableModel } from "./models-discovery.ts";
 import { internalRouteFor } from "./responses-routes.ts";
 import { recordTurnUsage } from "./session-cost.ts";
 import {
@@ -64,6 +64,12 @@ type StreamHandler = (options: unknown, next: () => unknown) => unknown;
  * string — so the full path, username included, would be sent as the project
  * name. This header is for attribution, not for a filesystem layout.
  */
+/**
+ * Models already reported as unservable, so the report happens once rather than on
+ * every request that names one.
+ */
+const warnedUnservable = new Set<string>();
+
 export const projectNameFrom = (cwd: string): string | undefined => {
   const trimmed = cwd.replace(/[\\/]+$/, "");
   // A folder name is trimmed for the same reason the resolver trims `cwd`:
@@ -105,6 +111,25 @@ export const createStreamHook = (
     const providerKey = String(providerProp);
     if (!providers.has(providerKey)) {
       return next();
+    }
+
+    // A model this plugin knows it cannot serve, named by hand. The gateway's own
+    // answer for a Zen free-tier id is `403 FreeTierError: can only be used from
+    // within OpenCode`, which reads as though the model were broken and sends a
+    // reader looking for the wrong thing - measured with every credential class,
+    // structure, header and endpoint, and none of them is the cause. Say what is
+    // actually true, once per model, because this hook runs on every request.
+    if (
+      typeof options.model === "string" &&
+      options.model.length > 0 &&
+      !isServableModel(options.model, providerKey) &&
+      !warnedUnservable.has(`${providerKey}/${options.model}`)
+    ) {
+      warnedUnservable.add(`${providerKey}/${options.model}`);
+      console.warn(
+        `[dsh-opencode-patch] ${providerKey}/${options.model} is not offered by this plugin and cannot be served from here`,
+        "a Zen free-tier model is refused outside OpenCode whatever headers are sent; pick a model the picker offers"
+      );
     }
 
     // A model the gateway serves on /responses cannot be dispatched through a
