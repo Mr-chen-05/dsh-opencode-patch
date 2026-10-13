@@ -262,3 +262,9 @@ Six found something real and three came back clean. The clean ones are results t
 The settings card has eight controls — `CARD_FIELDS` in `settings-fields.ts` — and the English README said seven in two places. The Chinese README already said 八个. So the two documents drifted in opposite directions on the same fact, one round after the sweep that found the Chinese lagging the English on two others.
 
 Neither language is the source of truth and neither is reliably ahead: the fix is to count against `CARD_FIELDS` rather than to translate from the other file, which is what both rounds actually did, and why both found something.
+
+## Twelve sweeps, and the commands were clean
+
+Every command the documentation names was run or checked: `catalog:shim` and `limits:shim` both work and both are what CI checks, and the one that looked unwired is not — `release:gate` runs `build && check && test && check.ts`, which is exactly what the workflow runs as four separate steps, so it is a convenience for a person rather than a step CI is missing.
+
+One finding came out of this class and it was the previous round's: `vp pack` was documented as the build command and produces `lib/client.cjs`, which the client loader cannot find. The command sweep was worth doing for that alone.
