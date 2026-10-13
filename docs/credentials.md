@@ -274,3 +274,14 @@ So a reader that hardcodes `~/.local/share/opencode/opencode.db` is right on a s
 The shape it would read, taken from the schema rather than guessed: `credential(id, integration_id, label, value, connector_id, method_id, active, time_created, time_updated)` and `account(id, email, url, access_token, refresh_token, token_expiry, time_created, time_updated)`. That is the same three kinds `~/dev/opencode`'s `Credential.Key | OAuth | External` describes — an API key lives in `credential.value` with its `integration_id` naming the provider, and a login lives in `account` with the token pair and its expiry. So the reader is two queries and a whitelist, and the login one is an alternative to the device flow rather than a second thing to invent.
 
 **It stays opt-in and off by default.** A declared DSH credential is always the first answer, and reading another tool's store is something a user turns on, not something that happens to them.
+
+## The wiring, which is the only part left
+
+The two modules exist and are tested; nothing calls them. Turning them on is six edits, and they go together — a config field with no reader is an empty switch, which this repository has already been audited for once.
+
+1. `src/config.ts` — `readOpencodeStore: false` in `CONFIG_DEFAULTS` (the object is alphabetical, so between `providers` and `sessionIdEnv`), the matching optional field on `PluginConfig`, and a `z.boolean().default(...).volatile()` row in the schema with a description that says what it reads and that it is off by default.
+2. `src/go-discovery.ts` — one more entry in the step map `firstResolved` takes, and **last in every policy**, because the user's own declaration wins: `opencodeStore: () => readFromStore(ctx, plane)`. It resolves the path with `opencodeDatabasePath({ channel: process.env.OPENCODE_CHANNEL, env: process.env, home: os.homedir() }, os.tmpdir())`, reads with `readOpencodeCredentials`, picks the entry whose `integrationId` matches the plane, and answers `undefined` for everything else — a missing file included.
+3. `src/settings-fields.ts` — one `CARD_FIELDS` control, which is what makes the switch reachable.
+4. Tests: the step answers a key from a store this suite builds, answers `undefined` with the switch off, and still loses to a declared credential.
+
+The login half is separate and smaller: `readOpencodeAccount` is an alternative to the device flow, so it belongs wherever a stored grant is read, and it needs the same opt-in rather than its own.
