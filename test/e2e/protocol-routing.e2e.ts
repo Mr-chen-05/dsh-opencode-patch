@@ -606,6 +606,14 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
       return;
     }
     const parsed = await probe("openai-responses", model, GO_KEY, GO_BASE);
+    if (accessDisabled(parsed)) {
+      // The claim below is "any answer the gateway produced after reading the model
+      // proves this path is the right one". A status 0 is no answer at all, and
+      // `not.toBe(404)` satisfies it - so a busy gateway would PASS this case while
+      // proving nothing, which is the quietest version of the same mistake.
+      context.skip();
+      return;
+    }
     // The claim is "this path is the right one", not "this request succeeds":
     // any answer the gateway produced after reading the model proves that, and a
     // 404 (no such path) or 500 (the shape does not parse) proves the opposite.
@@ -627,6 +635,12 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
       return;
     }
     const parsed = await probe("anthropic-messages", model, GO_KEY, GO_BASE);
+    if (accessDisabled(parsed)) {
+      // Same as its sibling: a non-answer satisfies `not.toBe(404)` without proving
+      // anything, so the case would pass on a gateway that never replied.
+      context.skip();
+      return;
+    }
     expect(parsed.status).not.toBe(404);
     expect(parsed.status).not.toBe(500);
   });
