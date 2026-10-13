@@ -344,3 +344,11 @@ The historical sections below it are labelled as such, which is why nothing in t
 The correction two rounds ago missed a table row that said `served` and a conclusion that named the token, because a grep for the claim matches wording and a table cell has none. So the claim was swept in its keyword-free forms - cells reading `served`, `yes`, `✅` - and the result is clean: the paid-models row says `served | served` and is right, the free-tier row beneath it now says it is not served either way, and every other hit is a different subject.
 
 Nine findings and two "the answer was already written down" have come out of reading these documents end to end, and not one of them from a grep. The rule that follows is not "grep harder" but "a document's central claim can be a table cell with no words in it", which is why the last four rounds have each read a file rather than searched one.
+
+## The language-pair drift resists automation, and the previous round's claim was too optimistic
+
+Four times now the two READMEs, or the two meter documents, have drifted apart on one fact, in both directions: the Chinese lagged on two claims and on a screenshots sentence, and the English lagged on the control count. The last round ended by saying this class "can be automated" - it cannot, and the reason is worth writing down rather than discovering again.
+
+What drifted was a **sentence**: the English says the screenshots are not committed and why, the Chinese says only that a script produces them. The section counts match, the numeric counts match, and the retry paragraph beside it matches. No mechanical comparison over counts, headings or identifiers sees the difference, because the difference is that one document explains something the other does not.
+
+So the rule for this class is procedural, not automated: **change both when you change one**, and treat a one-language edit as an unfinished edit. The three checks that do work are about numbers; this one is about completeness, and it belongs in the discipline rather than in the test suite.
