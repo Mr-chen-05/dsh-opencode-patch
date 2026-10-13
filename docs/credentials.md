@@ -383,9 +383,9 @@ So the refusal is not about structure, data, headers, route or credential class.
 
 With the real key, on `/zen/v1/chat/completions`: `space-bunny-free`, `step-5-preview-free` and `muse-spark-1.3-contributor-free` each answer `403 FreeTierError` ("OpenCode's free tier can only be used from within OpenCode"), while `deepseek-v4.1-flash` answers `200`. Both `/chat/completions` and `/responses` refuse identically, so the response format is not the discriminator.
 
-**And yet a session running on a free model works.** The resolution: the host's provider rows declare `apiKeyEnv: OPENCODE_API_KEY`, and the host process has **no `OPENCODE_*` variable set at all**, so the Authorization the gateway sees is filled by this plugin — and the only source left is the key **captured from a live request** (`src/key-capture.ts`). Whatever that key is, the free tier accepts it.
+**A note on a claim that stood here and was wrong.** This section used to say that a session running on a free model works, that the key the plugin captures from a live request is therefore accepted by the free tier, and that the refusal is about a bare API key rather than the tier — and it concluded that excluding free models was the wrong fix. All of it was withdrawn. The session that appeared to run on a free model was running on `global:step-5-preview`, **this host's own model and not in OpenCode's catalog at all**; the free tier had never served anything here. The exclusion was right, and it is back in place in `src/models-discovery.ts`.
 
-**So the free tier is not "unusable from outside OpenCode". It is unusable with a bare API key.** That is the whole reframing, and it is why an exclusion of free models was the wrong fix: hiding eleven models answers a question nobody asked.
+The lesson is recorded rather than deleted, because the same two moves produced it twice: a credential that failed was read as evidence about the tier, and a model whose name differed by one `-free` suffix was read as the same model.
 
 ### The order, which is the spec and was inverted once
 

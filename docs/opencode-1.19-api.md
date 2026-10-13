@@ -9,7 +9,7 @@ Everything below is measured. Where something is not, it says so.
 |  | An `oc_…` API key | An `st_…` session token |
 | :-- | :-- | :-- |
 | Paid models | served | served |
-| Free-tier models | `403 FreeTierError` | served |
+| Free-tier models | `403 FreeTierError` | `403 FreeTierError` — the free tier is not served from here either way |
 | Org context | not required | `x-opencode-org-id: wrk_…` |
 | Per-request id | not required | `x-opencode-request: msg_…` |
 | Where it comes from | a key a deployment pastes or exports | an account login |
@@ -18,7 +18,7 @@ Everything below is measured. Where something is not, it says so.
 
 The difference is in what a credential can reach — but **not the way this document first claimed.** It said a session token reaches free models because the free tier is gated on the token and the org that comes with it. Measured exhaustively since, and that is false: with the account's session token **and its org**, every Zen `-free` id answers `403 FreeTierError` while a paid model on the same request answers `200`. So does a bare API key, a CLI `User-Agent`, the client header, a valid session id, the `read`/`bash` tool schemas, both endpoints, and no credential at all. The free tier is not gated on anything a request can carry, which is why this plugin does not offer a Zen `-free` id — see the table in `docs/credentials.md`.
 
-So a deployment's API key keeps working exactly as it does today, and the free tier becomes reachable by logging in — not by changing a URL.
+So a deployment's API key keeps working exactly as it does today. **Logging in does not make the free tier reachable** — that was this document's claim and it is false, measured with the account's session token and its org. What a login buys is a credential for paid models; the free tier is not granted to anything sent from here.
 
 ## What OpenCode 1.19.0 resolves for itself
 
