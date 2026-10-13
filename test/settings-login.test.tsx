@@ -270,6 +270,38 @@ describe("settings: the calls the page hands the row", () => {
     return expect(absent.read()).rejects.toThrow(/did not answer/u);
   });
 
+  it("sees a remote that mounts after the calls were built", async () => {
+    // The bug this fix exists for, and the case the previous version failed: the
+    // injector builds the card's props while the remote is still mounting, so the
+    // remote appears AFTER loginCalls has already run. Resolving once meant the row
+    // was absent for the life of the page; resolving per call means the calls handed
+    // out work as soon as the service arrives.
+    //
+    // The assertion is that the call REACHES the service, not what the service
+    // answers - the parser's own shape is covered elsewhere, and this test is about
+    // which remote the call resolved.
+    const ctx = { remote: {} } as { remote: Record<string, unknown> };
+    const built = loginCalls(ctx as never);
+    const asked: string[] = [];
+    ctx.remote.opencodeLogin = {
+      begin: () => {
+        asked.push("begin");
+        return Promise.resolve({ error: "stub", ok: false });
+      },
+      poll: () => {
+        asked.push("poll");
+        return Promise.resolve({ error: "stub", ok: false });
+      },
+      state: () => {
+        asked.push("state");
+        return Promise.resolve({ error: "stub", ok: false });
+      },
+    };
+    await expect(built.read()).rejects.toThrow(/stub/u);
+    await expect(built.begin()).rejects.toThrow(/stub/u);
+    expect(asked).toEqual(["state", "begin"]);
+  });
+
   it("turns a failed Remote result into a thrown reason", async () => {
     // A refusal has to reach the row as a reason rather than as an empty value,
     // or a failed sign-in would render as a successful one with no account.
