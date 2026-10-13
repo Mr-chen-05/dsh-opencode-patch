@@ -54,7 +54,7 @@
 
 - 🔑 确定性的 `ses_<12hex><14base62>` 会话哈希，跨轮次、子代理与分叉保持 KV 缓存亲和
 - 🌐 网关来源恢复——`User-Agent`、`x-opencode-client`、`x-opencode-project`、父会话谱系
-- 🧰 免费层 `read` + `bash` 工具 schema 回退，让 Zen 免费模型不再报 `403 FreeTierError`
+- 🧰 免费层 `read` + `bash` 工具 schema 回退，让免费层的请求体带上它的端点所要求的工具定义——这去掉的是 `403` 的一个成因，而不是全部：网关的那道闸不在请求里，实测如此
 - 📇 基于 models.dev 的模型目录，带离线预置与后台 SWR 刷新——名称、上下文窗口、价格
 - ⭕ 实时双模式停靠栏计量——Go 额度环（5 小时 / 每周 / 每月）或 Zen 按量计费胶囊，外加会话消耗与模型费率
 - 🕵️ 严格凭据隔离——Zen 密钥（`oc_sk_…`）绝不查询 Go 额度端点
@@ -160,7 +160,7 @@ Zen 的 provider 级 SDK 是 `@ai-sdk/openai-compatible`。models.dev **只在�
 | `@ai-sdk/anthropic` | 18 | Anthropic Messages | `opencode-anthropic` |
 | `@ai-sdk/google` | 7 | _（DSH 无此协议）_ | **不提供** |
 
-数量为 `models.dev` 中 `opencode` 的 83 个**在用**模型，统计于 2026-10-05 —— 其余已废弃或下架，补丁只内置网关仍在服务的部分。同样这 83 个模型离线内置在 `src/catalog-data.ts`，因此在第一次 catalog 刷新之前它们每一个路由都是正确的；用 `pnpm run catalog:shim` 重新生成该文件。
+数量为 `models.dev` 中 `opencode` 的 84 个**在用**模型，统计于 2026-10-13 —— 其余已废弃或下架，补丁只内置网关仍在服务的部分。同样这 84 个模型离线内置在 `src/catalog-data.ts`，因此在第一次 catalog 刷新之前它们每一个路由都是正确的；用 `pnpm run catalog:shim` 重新生成该文件。
 
 插件把这两条内部路由同时挡在模型选择器和 _Settings → Models_ 之外。**三条性质今天就成立，还有一条尚未成立：**
 
