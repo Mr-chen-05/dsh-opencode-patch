@@ -40,6 +40,13 @@ export interface OpencodeAccount {
   readonly email: string;
   /** The access token. Never logged. */
   readonly accessToken: string;
+  /**
+   * The org the account is active in, when the installation records one.
+   *
+   * A request has to carry this, and a token with the wrong org is worse than no
+   * token — so it is read from `account_state` rather than assumed.
+   */
+  readonly orgId: string | undefined;
   /** The refresh token, when the installation stored one. */
   readonly refreshToken: string | undefined;
 }
@@ -128,12 +135,21 @@ export const readOpencodeAccount = (
   if (found === undefined) {
     return undefined;
   }
+  // The org lives in its own table, and only the active row matters. A missing
+  // table or a missing row is ordinary: the account is then usable only if the
+  // caller can supply an org some other way, which is the caller's judgement.
+  const state = rows(
+    databasePath,
+    "SELECT active_org_id AS orgId FROM account_state LIMIT 1"
+  );
+  const orgId = text(state?.[0]?.orgId);
   for (const row of found) {
     const accessToken = text(row.accessToken);
     if (accessToken !== undefined) {
       return {
         accessToken,
         email: text(row.email) ?? "",
+        orgId,
         refreshToken: text(row.refreshToken),
       };
     }

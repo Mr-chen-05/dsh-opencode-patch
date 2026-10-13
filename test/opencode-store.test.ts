@@ -50,6 +50,9 @@ const schema = (db: DatabaseSync): void => {
       refresh_token TEXT, token_expiry INTEGER,
       time_created INTEGER, time_updated INTEGER
     );
+    CREATE TABLE account_state (
+      id TEXT PRIMARY KEY, active_account_id TEXT, active_org_id TEXT
+    );
   `);
 };
 
@@ -134,8 +137,27 @@ describe("opencode-store: the account", () => {
     expect(readOpencodeAccount(path)).toEqual({
       accessToken: "fixture-access",
       email: "you@example.com",
+      // The table exists and is empty, which is the ordinary case: no org known.
+      orgId: undefined,
       refreshToken: "fixture-refresh",
     });
+  });
+
+  it("carries the active org, which lives in its own table", () => {
+    // The request has to send an org, and a token with the wrong one is worse than
+    // no token - so this is read from account_state rather than assumed. Measured
+    // against the real schema: account holds the token, account_state holds which
+    // org is active.
+    const path = database((db) => {
+      schema(db);
+      db.prepare(
+        "INSERT INTO account (id, email, access_token) VALUES (?, ?, ?)"
+      ).run("acct", "you@example.com", "fixture-access");
+      db.prepare(
+        "INSERT INTO account_state (id, active_account_id, active_org_id) VALUES (?, ?, ?)"
+      ).run("state", "acct", "org_fixture");
+    });
+    expect(readOpencodeAccount(path)?.orgId).toBe("org_fixture");
   });
 
   it("treats a row with no access token as no login", () => {
@@ -158,6 +180,7 @@ describe("opencode-store: the account", () => {
     expect(readOpencodeAccount(path)).toEqual({
       accessToken: "fixture-access",
       email: "you@example.com",
+      orgId: undefined,
       refreshToken: undefined,
     });
   });
