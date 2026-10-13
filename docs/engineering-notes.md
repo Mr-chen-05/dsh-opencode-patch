@@ -122,6 +122,10 @@ Found while chasing a card that says "读不到配额" beside a composer that sh
 | arguments | `{ provider, model, sessionId }` | `{ provider }` only |
 | helper | inline | `readGoUsage(ctx)` in `settings-usage.tsx` |
 
-Three differences and none of them is yet known to be the cause. `readGoUsage` warns on each of its failure paths, and the console at the time showed none of them, which rules out "no remote", "no service" and "unrecognised answer" for that reading — but that console was captured before a restart, so it is not evidence.
+Three differences, and reading further narrows it to none of them. The page's `inject` list does declare `remote`, so the card's scope can see the service; `readGoUsage` warns on every failure path and the console showed none of them, though that console predates a restart and is not evidence.
+
+**The mechanism is the read's timing, and it is the race already documented above for the remotes.** `UsageSummary` reads once when the card appears — its own comment says so — while the mount is an asynchronous `$mount` started in an effect. If the card renders before that resolves, the read answers `undefined` and **nothing reads again**: the effect's dependency is `readUsage`, whose identity is a fresh closure each render but whose answer never changes. The meter reads on every turn, so it always has the value.
+
+That also explains why the console can be silent. The read may not fail at all — it may succeed against a remote that is simply not there yet, which is a state `readGoUsage` reports rather than warns about, or it may be the "no remote" warning on a console nobody has open at boot. **Either way the fix is not to teach the card the arguments the meter passes.** It is to make the summary read again once the remote appears, which is the same fix the sign-in row needs and the same shape as the two separate mounts.
 
 **The shape is the finding**: one service, two reads, one of them passing a third of the arguments. That is the same shape as the meter and the sign-in row having separate mounts, and the fix is the same kind — make the two reads one read, rather than teaching the second one the arguments the first already had. Worth doing with the console in front of you, because which of the three differences matters is a measurement, not a reading.
