@@ -779,6 +779,44 @@ describe("catalog · the README's routing table", () => {
     expect(pairs.reduce((sum, pair) => sum + (pair[0] ?? 0), 0)).toBe(total);
   });
 
+  it("holds the prose totals to the catalog, in both languages", async () => {
+    // The tables above are parsed; the totals in the sentences beside them were
+    // not, and every count this repository has had to correct lived there - the
+    // README said 84 for a catalog of 85, the plane table said 120 served where
+    // 85 are, and the Chinese README carried both. A number in a sentence is the
+    // easiest kind to forget and the one a reader trusts most, so it is parsed
+    // too. The regex allows the emphasis markers the number is wrapped in.
+    const zen = Object.keys(OPENCODE_ZEN_CATALOG).length;
+    const go = Object.keys(OPENCODE_GO_CATALOG).length;
+    for (const file of ["../README.md", "../README.zh-CN.md"]) {
+      const text = await readFile(new URL(file, import.meta.url), "utf8");
+      const stated = [
+        ...text.matchAll(
+          /(\d+)\*{0,2}\s*(?:active[^.]*models|个\*\*在用\*\*模型)/gu
+        ),
+      ].map((m) => Number(m[1] ?? 0));
+      expect(
+        stated.length,
+        `${file} states the catalog total nowhere`
+      ).toBeGreaterThan(0);
+      for (const n of stated) {
+        expect(n, `${file} states a Zen total the catalog does not have`).toBe(
+          zen
+        );
+      }
+    }
+    // "85 served / 120 listed" and "32 served / 36 listed": the served half is
+    // ours to assert, the listed half comes from models.dev and is not.
+    const planes = await readFile(
+      new URL("../docs/redirect-planes.md", import.meta.url),
+      "utf8"
+    );
+    const served = [...planes.matchAll(/(\d+)\s*served\s*\//gu)].map((m) =>
+      Number(m[1] ?? 0)
+    );
+    expect(served).toEqual([zen, go]);
+  });
+
   it("holds the plane-by-plane table to both catalogs", async () => {
     // The third document with counts, and the one whose table is per plane:
     // every cell is a count, and every cell was stale when this was written.
