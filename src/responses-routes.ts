@@ -5,7 +5,7 @@
  * OpenCode Zen's provider-level SDK is `@ai-sdk/openai-compatible`; models.dev
  * names a DIFFERENT SDK per model only when that model needs one, so the
  * PRESENCE of `provider.npm` is the signal. Measured against the shipped
- * catalog: of its 83 `opencode` models, 27 name nothing (the default), **30 name
+ * catalog: of its 84 `opencode` models, 28 name nothing (the default), **30 name
  * `@ai-sdk/openai`**, **18 name `@ai-sdk/anthropic`**, 7 name `@ai-sdk/google`
  * and 1 names `@ai-sdk/mistral` — the only one this plugin does not serve.
  *

@@ -160,14 +160,15 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // replacing the whole set — so these counts are the cold-start picker, and a
     // silent drop here is a model nobody can pick. Regenerate with
     // `scripts/regenerate-catalog-shim.ts` rather than editing by hand.
-    expect(OPENCODE_ZEN_CATALOG.length).toBe(83);
+    expect(OPENCODE_ZEN_CATALOG.length).toBe(84);
     const freeModels = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free === true);
     // Only the free tiers the gateway still serves.
-    expect(freeModels.length).toBe(11);
+    expect(freeModels.length).toBe(12);
 
     const ids = new Set(OPENCODE_ZEN_CATALOG.map((m) => m.id));
     expect(ids.has("muse-spark-1.3-contributor-free")).toBe(true);
     expect(ids.has("space-bunny-free")).toBe(true);
+    expect(ids.has("cat-jam-free")).toBe(true);
     expect(ids.has("claude-sonnet-4-5")).toBe(true);
     expect(ids.has("gpt-5.4")).toBe(true);
     expect(ids.has("gemini-3.8-flash")).toBe(true);
@@ -748,7 +749,7 @@ describe("catalog · the README's routing table", () => {
   });
 
   it("holds the protocol doc's table to the same catalog", async () => {
-    // The same class of claim in a second document: "27 of 83" is a count
+    // The same class of claim in a second document: "28 of 84" is a count
     // written into prose, and it drifts exactly the way the README's did. The
     // numbers are parsed rather than trusted, and the total has to match too.
     const text = await readFile(
