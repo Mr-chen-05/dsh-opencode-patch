@@ -129,3 +129,18 @@ Three differences, and reading further narrows it to none of them. The page's `i
 That also explains why the console can be silent. The read may not fail at all — it may succeed against a remote that is simply not there yet, which is a state `readGoUsage` reports rather than warns about, or it may be the "no remote" warning on a console nobody has open at boot. **Either way the fix is not to teach the card the arguments the meter passes.** It is to make the summary read again once the remote appears, which is the same fix the sign-in row needs and the same shape as the two separate mounts.
 
 **The shape is the finding**: one service, two reads, one of them passing a third of the arguments. That is the same shape as the meter and the sign-in row having separate mounts, and the fix is the same kind — make the two reads one read, rather than teaching the second one the arguments the first already had. Worth doing with the console in front of you, because which of the three differences matters is a measurement, not a reading.
+
+## The sign-in row has the same race, one step worse
+
+The card's usage read is lazy — `readUsage: () => readGoUsage(ctx)` — so it resolves the remote when it is called, and it now reads until answered. The sign-in row is not:
+
+```ts
+login: loginCalls(ctx),   // called at inject time
+readUsage: () => readGoUsage(ctx),   // called when the card asks
+```
+
+`loginCalls` asks for `ctx.remote.opencodeLogin` **while the injector builds the props**, and the mount is an asynchronous `$mount` started in an effect. If it runs first, `loginCalls` answers `undefined`, the card's `props.login !== undefined` is false, and the row never renders — no retry, no second chance, and the warning it prints says the service is missing when it is merely late.
+
+**Two ways to fix it and they are not equivalent.** Make the calls lazy so each method resolves the remote when invoked, which keeps the row's own failure reporting and matches the meter's shape. Or make `loginCalls` answer the calls unconditionally, which always renders the row and shows the failure inside it — a behaviour change, because a host that mounts no login service would then show a row saying so rather than showing nothing. The first is the smaller change; the second is the one that makes "no row" impossible to mistake for "no service".
+
+Either way the tool for it now exists: `readUntilAnswered` in `settings-usage.tsx` is the pattern, and the row needs the same treatment the summary just got.
