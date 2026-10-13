@@ -172,6 +172,8 @@ Two instances, both fixed, and two paths checked that get it right. Worth record
 | 591, 612 | **not guarded** | benign but empty: they assert `not.toBe(404)` and `not.toBe(500)`, which a 0 satisfies, so nothing false is concluded and nothing is verified either |
 | 376, 413, 426, 477, 489, 557 | guarded | 426 and 489 were the two fixed above |
 
+**And the class stops at `probe`.** The other two e2e files call `await fetch(...)` directly rather than through a helper, so a timeout throws and the case fails with an error — which is honest, and is not this class. A failure converted into a value is what makes the shape possible; a failure that stays a failure cannot produce a conclusion at all. That is the boundary, and it is now swept rather than assumed.
+
 So the count was **six unguarded probes, three of them the same bug** — 325, 342 and 569 are guarded now, and 652 is deliberately not, because it reports a closed account rather than skipping it. The lesson is that recording a class is worth it even when the sweep that follows finds more than the class was named for.
 
 **Checked and correct, so the class has a boundary:**
