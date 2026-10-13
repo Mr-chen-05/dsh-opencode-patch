@@ -312,3 +312,55 @@ Four things about that are decisions rather than details.
 **An expired stored token is used anyway.** Nothing here can refresh an OpenCode account — that would mean writing to their store or calling their refresh endpoint — so `token_expiry` is deliberately not consulted. The gateway's answer is the truth about a token, and the alternative, treating it as absent, would tell a signed-in user they have no credential when they have one that is merely old. The test pins it with an expiry in 1970.
 
 One consequence worth stating plainly rather than discovering later: on an endpoint whose credential slot reads an API key, an account token is refused — measured for `/chat/completions` at the top of this file. A deployment that has BOTH a session in the installation's `account` table and a key in its `credential` table therefore now prefers the account token on this route, where before it used the key. That is the precedence this file sets out, and it matches OpenCode's own behaviour — when it is signed in, the session credential is the one it sends — but it is a behaviour change on a machine that has both, and it is not measured for the Google endpoint this bridge serves.
+
+## The handoff: free and paid authentication, stated plainly
+
+Everything below is measured against the live gateway and a real installation, or is marked as not measured. It is written for whoever picks this up next, so the parts that were wrong once are called out rather than quietly dropped.
+
+### The two planes
+
+|  | Zen — the OLD api | Go — the NEW api |
+| :-- | :-- | :-- |
+| base URL | `https://opencode.ai/zen/v1` | `https://opencode.ai/zen/go/v1` |
+| env var | `OPENCODE_API_KEY` | `OPENCODE_GO_API_KEY` |
+| key shape | `oc_sk_…`, 51 chars | `sk-…` |
+| org on the request | **not needed** | **needed** — `x-opencode-org-id` |
+| session header | accepted, not required | **required** (`400 MissingSessionID` without) |
+
+The org distinction is the one that matters most and was got wrong twice: it belongs to the **Go** plane only. `src/fetch-patch.ts` already scopes it per plane through `hooks.resolveOrg?.(gatewayPlaneFor(url))`.
+
+### The two sources, and which is which
+
+1. **DSH's own credential seam** — what the plugin reads through `readCredentialsWriter`, and what the host resolves from a provider row's `apiKeyEnv`.
+2. **OpenCode's own installation** — a SQLite database, opt-in, read-only, off by default. `src/opencode-paths.ts` finds it; `src/opencode-store.ts` reads two tables.
+
+Two facts about the second one that cost real time:
+
+- **Every `credential.value` is a JSON document, not a bare key.** `{type, key, metadata?}` for `opencode`, `google`, `cf-coding`, `nvidia` and the two Cloudflare integrations; `{type, methodID, refresh, access, expires}` for `xai`. `readOpencodeCredentials` extracts `key` or `access` and answers `undefined` for any other shape. Sending the raw document earns `Invalid credential` — or, on a free model, a refusal that reads as though the MODEL were unusable. It is not.
+- **`account` is a different shape and a different question.** `access_token` and `refresh_token` are bare 39-char strings, `token_expiry` is ms. The org is NOT in that table: it is `account_state.active_org_id`, joined on `active_account_id = account.id`.
+
+### What is measured about the free tier
+
+With the real key, on `/zen/v1/chat/completions`: `space-bunny-free`, `step-5-preview-free` and `muse-spark-1.3-contributor-free` each answer `403 FreeTierError` ("OpenCode's free tier can only be used from within OpenCode"), while `deepseek-v4.1-flash` answers `200`. Both `/chat/completions` and `/responses` refuse identically, so the response format is not the discriminator.
+
+**And yet a session running on a free model works.** The resolution: the host's provider rows declare `apiKeyEnv: OPENCODE_API_KEY`, and the host process has **no `OPENCODE_*` variable set at all**, so the Authorization the gateway sees is filled by this plugin — and the only source left is the key **captured from a live request** (`src/key-capture.ts`). Whatever that key is, the free tier accepts it.
+
+**So the free tier is not "unusable from outside OpenCode". It is unusable with a bare API key.** That is the whole reframing, and it is why an exclusion of free models was the wrong fix: hiding eleven models answers a question nobody asked.
+
+### The order, which is the spec and was inverted once
+
+```
+captured        ← the credential a user already connected with, and that works
+declared        ← apiKeyEnv; "almost always", and overridden when a working oauth exists
+store           ← the local OpenCode CLI's database, only when neither is configured
+```
+
+`src/fetch-patch.ts` implements exactly this. Do not invert it: a test named "fills the Authorization header from the installation's store, last" exists for that reason.
+
+### What is open
+
+- **The free tier's real requirement is still unknown.** What does the captured credential carry that an `oc_sk_` key does not — a session token, a client fingerprint, a different key class? Until that is known, free models work only by inheriting whatever the chat was using, and `auto-review` cannot use them at all.
+- **`auto-review` deserves its own look.** `@deepseek-ai/dsh-experimental-auto-review` builds a bare options object — provider, model, system, messages, temperature — and calls `ctx.llm.stream()` with no session, no turn and no headers of its own, taking its route from `session.requestHeader()`. It is the only caller in the system that does this, and it is the one that fails on a route the chat itself succeeds on. `dsh-experimental-auto-review` is where it lives.
+- **`readOpencodeAccount` is written and tested and nothing calls it.** With the org now read too, it is the natural source for a credential that satisfies the free tier — if that is what the account token is. That is the experiment worth running, and it has not been run.
+- **The store is read per request with no cache**, deliberately: a rotation inside OpenCode should be picked up. It is also a SQLite open per keyless request.
+- **The collision is real and unaddressed.** `muse-spark-1.3-contributor-free` is a model this host serves itself AND a model the OpenCode catalog lists, so the same id can resolve onto a route that refuses it.
