@@ -182,3 +182,9 @@ So the count was **six unguarded probes, five of them now guarded and one delibe
 - The models.dev enrichment path — a non-JSON upstream response generates the full catalog response instead of dropping models.
 
 Both were checked precisely because they are the paths where an empty answer would have produced the original symptom — a model list with nothing in it.
+
+## The phantom route, and the sweep that says it was the only one
+
+Five places named `opencode-mistral` as a route while `INTERNAL_ROUTES` has never contained it, and omitted `opencode-google` which it does. The worst of them was the Chinese README saying the patch deliberately does not provide Google Generative AI at all — true before the bridge, false since, and left standing in the translation after the English was corrected.
+
+Swept afterwards for the shape rather than assuming it was the only one: every `opencode-*` name in every document, checked against the routes and planes the code declares. The rest are header names (`opencode-client`, `opencode-org-id`, `opencode-parent-session-id`), the package name, a module name and the CLI — **no second phantom**. That is worth recording because a clean sweep is a result: it is what makes "these five were all of them" a finding rather than a hope.
