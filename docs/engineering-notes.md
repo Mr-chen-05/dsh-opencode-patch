@@ -338,3 +338,9 @@ Read end to end for the first time. The resolution chain matches `login-credenti
 That last clause is the whole free-tier finding, written into the document that is about credentials, and it was there before this session's exhaustive measurement confirmed it. The other documents said the opposite and won for several rounds; this one was right, and is the second place found where the correct answer was already written down.
 
 The historical sections below it are labelled as such, which is why nothing in them needed correcting - the same device `deep-dive.md` uses when it declines to restate a count.
+
+## The free-tier claim, swept in the form that has no keyword
+
+The correction two rounds ago missed a table row that said `served` and a conclusion that named the token, because a grep for the claim matches wording and a table cell has none. So the claim was swept in its keyword-free forms - cells reading `served`, `yes`, `✅` - and the result is clean: the paid-models row says `served | served` and is right, the free-tier row beneath it now says it is not served either way, and every other hit is a different subject.
+
+Nine findings and two "the answer was already written down" have come out of reading these documents end to end, and not one of them from a grep. The rule that follows is not "grep harder" but "a document's central claim can be a table cell with no words in it", which is why the last four rounds have each read a file rather than searched one.
