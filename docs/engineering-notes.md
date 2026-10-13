@@ -163,6 +163,16 @@ Two instances, both fixed, and two paths checked that get it right. Worth record
 - The e2e protocol-routing case asserted `toBe(400)` directly on a probe whose status 0 means "the gateway did not answer". A busy gateway was therefore read as the gateway serving a model on the wrong protocol, and the failure message blamed the catalog. `accessDisabled` already treated status 0 as the third shape of "cannot tell"; that loop does now too.
 - The same file, one case later: the anthropic-messages probe in the Go-plane case had no guard, while its sibling above and the google case below both did. CI had not reached it. Guarded now.
 
+**And the sweep that found the third found six more.** Every `await probe(...)` in that file, checked for an `accessDisabled` guard within the following lines:
+
+| line | result | shape |
+| --: | :-- | :-- |
+| 325, 342, 569, 652 | **not guarded** | the same bug — a status 0 would fail the assertion and report a busy gateway as a routing fault |
+| 591, 612 | **not guarded** | benign but empty: they assert `not.toBe(404)` and `not.toBe(500)`, which a 0 satisfies, so nothing false is concluded and nothing is verified either |
+| 376, 413, 426, 477, 489, 557 | guarded | 426 and 489 were the two fixed above |
+
+So the honest count is **six unguarded probes, four of them the same bug**, and the lesson is that recording a class is worth it even when the sweep that follows finds more than the class was named for.
+
 **Checked and correct, so the class has a boundary:**
 
 - `refreshCatalog` — a revalidation failure retains the active catalogs and allows a later retry, rather than emptying the list.
