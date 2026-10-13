@@ -132,7 +132,7 @@ That also explains why the console can be silent. The read may not fail at all �
 
 ## The sign-in row has the same race, one step worse
 
-The card's usage read is lazy — `readUsage: () => readGoUsage(ctx)` — so it resolves the remote when it is called, and it now reads until answered. The sign-in row is not:
+The card's usage read is lazy — `readUsage: () => readGoUsage(ctx)` — so it resolves the remote when it is called, and it now reads until answered. The sign-in row was not, and this paragraph describes what it was:
 
 ```ts
 login: loginCalls(ctx),   // called at inject time
