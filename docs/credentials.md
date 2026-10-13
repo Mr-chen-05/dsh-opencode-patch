@@ -360,6 +360,25 @@ Two facts about the second one that cost real time:
 - **Every `credential.value` is a JSON document, not a bare key.** `{type, key, metadata?}` for `opencode`, `google`, `cf-coding`, `nvidia` and the two Cloudflare integrations; `{type, methodID, refresh, access, expires}` for `xai`. `readOpencodeCredentials` extracts `key` or `access` and answers `undefined` for any other shape. Sending the raw document earns `Invalid credential` — or, on a free model, a refusal that reads as though the MODEL were unusable. It is not.
 - **`account` is a different shape and a different question.** `access_token` and `refresh_token` are bare 39-char strings, `token_expiry` is ms. The org is NOT in that table: it is `account_state.active_org_id`, joined on `active_account_id = account.id`.
 
+### The Zen free tier is refused, exhaustively
+
+Every combination below was sent to `https://opencode.ai/zen/v1` against a Zen `-free` id, and every one answered `403 FreeTierError` while a paid model on the same request answered `200`:
+
+| What was varied | Tried |
+| :-- | :-- |
+| credential | bare API key (`oc_sk_…`, 51 chars) · account session token (`st_…`, 39 chars) · the token **with** its org (`wrk_…`) · **no credential at all** |
+| structure | bare body · with the `read` and `bash` tool schemas the fallback injects |
+| headers | `x-opencode-client: cli` · `user-agent: opencode/1.19.0` · a valid `x-opencode-session-id` (`ses_…`) |
+| endpoint | `/chat/completions` · `/responses` |
+
+So the refusal is not about structure, data, headers, route or credential class. It is per-model, it is not in the request, and no patch reaches it.
+
+**The observation that made this look wrong is worth stating**, because it is the reason this was got wrong twice: a session appears to run on free models. It does not. The model-change notices name `global:step-5-preview` — this host's own model, **not in OpenCode's catalog at all** — while the failures name `opencode/step-5-preview-free`, `opencode/space-bunny-free` and `opencode/muse-spark-1.3-contributor-free`. The names differ by one `-free` suffix and the providers are entirely different.
+
+**Plane matters, and the rule has to be scoped.** `step-5-preview-free` and `longcat-2.5-preview-free` appear on BOTH planes; `space-bunny` and `muse-spark-1.3-contributor` are Go's and are untouched. So a retirement must be `provider === "zen" && id.endsWith("-free")`, never an id list and never global.
+
+**That rule breaks eleven tests, and they are not mechanical.** Several encode deliberate behaviour about which models are offered (`adds Space Bunny and removes retired 1.2`, `preserves Space Bunny while removing retired Muse 1.2 rows`), and `muse-spark-1.3-contributor-free` is the fixture six suites use for a responses-format model. Changing them is a design decision about what this plugin offers, not a rename. It was attempted and reverted rather than half-applied.
+
 ### What is measured about the free tier
 
 With the real key, on `/zen/v1/chat/completions`: `space-bunny-free`, `step-5-preview-free` and `muse-spark-1.3-contributor-free` each answer `403 FreeTierError` ("OpenCode's free tier can only be used from within OpenCode"), while `deepseek-v4.1-flash` answers `200`. Both `/chat/completions` and `/responses` refuse identically, so the response format is not the discriminator.
