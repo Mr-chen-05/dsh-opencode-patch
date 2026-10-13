@@ -49,6 +49,7 @@ import {
   createCredentialPool,
   publishPoolKey,
 } from "./credential-pool.ts";
+import { resolveOpencodeStoreAccount } from "./go-discovery.ts";
 import { registerGoogleBridge } from "./google-bridge.ts";
 import { isFunctionLike, isRecord } from "./guards.ts";
 import { name } from "./identity.ts";
@@ -58,6 +59,7 @@ import {
   getLiveGoCatalog,
   getLiveZenCatalog,
 } from "./models-catalog.ts";
+import { setOrg } from "./org-cache.ts";
 import { baseForProtocol } from "./pi-provider.ts";
 import {
   GOOGLE_INTERNAL_ROUTE,
@@ -589,7 +591,7 @@ export const registerResponsesProvider = async (
         apiKeyRef: inheritedCredentialRef(ctx),
         pool: poolFor("opencode"),
         // The credential a login already stored, read the same way the org is.
-        loginToken: loginTokenReader(ctx),
+        loginToken: loginTokenReader(ctx, config?.readOpencodeStore === true),
         // And, last, the installation's own store - off unless the deployment
         // opted in, which is what `config` carries here.
         readOpencodeStore: config?.readOpencodeStore === true,
@@ -798,14 +800,31 @@ const storedTokenFor = async (
  * @returns a reader the bridge calls when a route named no reference.
  */
 export const loginTokenReader =
-  (ctx: unknown) =>
+  (ctx: unknown, readOpencodeStore = false) =>
   async (plane: string): Promise<string | undefined> => {
     // A grant is keyed per plane, but the ACCOUNT behind it is not: the same
     // token serves both, measured. So a sign-in on one plane answers for the
     // other too, rather than leaving a Go route with nothing because the card
     // happened to default to Zen.
     const other = plane === "opencode-go" ? "opencode" : "opencode-go";
-    return (
-      (await storedTokenFor(ctx, plane)) ?? (await storedTokenFor(ctx, other))
-    );
+    const grant =
+      (await storedTokenFor(ctx, plane)) ?? (await storedTokenFor(ctx, other));
+    if (grant !== undefined) {
+      return grant;
+    }
+    // The grant wins outright, and this is the alternative to the device flow
+    // rather than a competitor to it: a user already signed in to OpenCode should
+    // not have to sign in again here. Off unless the deployment opted in, and
+    // never written back into the DSH seam - it is another program's credential.
+    const account = resolveOpencodeStoreAccount(readOpencodeStore);
+    if (account === undefined) {
+      return undefined;
+    }
+    // The request has to carry an org, and a token with the wrong one is worse
+    // than no token, so the org the installation recorded is published where the
+    // per-request resolver reads it.
+    if (account.orgId !== undefined) {
+      setOrg(plane, account.orgId);
+    }
+    return account.accessToken;
   };
