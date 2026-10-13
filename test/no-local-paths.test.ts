@@ -19,6 +19,8 @@ import { join, relative } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { CARD_FIELDS } from "../src/settings-fields.ts";
+
 const ROOT = new URL("..", import.meta.url).pathname;
 
 /** Directories a third party can read: the tree, plus the build output. */
@@ -134,5 +136,44 @@ describe("AGENTS.md · the repo map", () => {
       (f) => !f.startsWith("settings-") && !map.includes(f)
     );
     expect(unnamed, "modules the repo map does not name").toEqual([]);
+  });
+});
+
+describe("the READMEs · the settings control count", () => {
+  // The English README said "Seven controls" while CARD_FIELDS held eight and the
+  // Chinese README already said 八个 - the two documents drifted in opposite
+  // directions on one fact, and only one of them was right. Neither language is
+  // the source of truth, so both are held to the module that defines them.
+  const WORDS: Record<string, number> = {
+    Eight: 8,
+    Nine: 9,
+    Seven: 7,
+    Ten: 10,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
+  };
+
+  it("states the count CARD_FIELDS has, in both languages", async () => {
+    const expected = CARD_FIELDS.length;
+    expect(expected).toBeGreaterThan(0);
+    for (const file of ["../README.md", "../README.zh-CN.md"]) {
+      const text = await readFile(new URL(file, import.meta.url), "utf8");
+      const stated = [
+        ...text.matchAll(/\b(Seven|Eight|Nine|Ten)\s+controls/gu),
+        ...text.matchAll(/([七八九十])\s*个控件/gu),
+      ].map((m) => WORDS[m[1] ?? ""] ?? -1);
+      expect(
+        stated.length,
+        `${file} states the control count nowhere`
+      ).toBeGreaterThan(0);
+      for (const n of stated) {
+        expect(
+          n,
+          `${file} states a control count CARD_FIELDS does not have`
+        ).toBe(expected);
+      }
+    }
   });
 });
