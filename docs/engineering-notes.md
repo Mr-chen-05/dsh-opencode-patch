@@ -330,3 +330,11 @@ Three preventive mechanisms were installed and each was proved by making it fail
 That is the fifth wrong-context sweep of this session, after the count sweep that missed Go, the identifier sweep that asked about exports, the heading diff that stripped non-ASCII, and the script check that grepped filenames. Five in one session, each producing a confident list that was wrong, is the signal rather than the noise: the rule at the top of this file — check that the thing being searched is the thing the claim is about — is not a caution for the first attempt, it is the precondition for believing any of them.
 
 The three that work are recorded by their proof, not by their intent. The ones that do not are recorded here so the next pass does not spend a round rediscovering why.
+
+## credentials.md is current, including the conclusion that matters most
+
+Read end to end for the first time. The resolution chain matches `login-credential.ts` — captured, declared, the DSH grant on the requested plane then the other, the installation account and key when opted in — and the document states its own limits rather than implying they are guarantees: refresh deduplication is per shared reader and not across processes, and the fixtures "verify credential selection and outgoing headers, **not** whether a live gateway accepts a session token on every model endpoint **or grants free-tier access**."
+
+That last clause is the whole free-tier finding, written into the document that is about credentials, and it was there before this session's exhaustive measurement confirmed it. The other documents said the opposite and won for several rounds; this one was right, and is the second place found where the correct answer was already written down.
+
+The historical sections below it are labelled as such, which is why nothing in them needed correcting - the same device `deep-dive.md` uses when it declines to restate a count.
