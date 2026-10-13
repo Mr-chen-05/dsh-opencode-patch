@@ -120,7 +120,9 @@ OpenCode publishes only a percentage per window and no balance endpoint, so "lef
 
 "Left" is a percentage, not money. The official `/usage` gives one percentage per window and no balance endpoint, and the plan tier (Go $60 / Plus $120) cannot be probed — so any "how many dollars are left" figure would be a guess. That line of explanation is on the surface so the reader does not have to infer it.
 
-When the quota cannot be read it says so and **draws no numbers at all**: this page has no retry affordance, so a row of `0%` would be taken for a real reading.
+When the quota cannot be read it says so and **draws no numbers at all**: a row of `0%` would be taken for a real reading.
+
+The read is **bounded-retried**, which the surface does not show and should: the remote is mounted by an asynchronous effect, so a card that appears first reads against a remote that is not there yet. Reading once left the summary empty until the page was reloaded — the composer meter never had the problem because it reads on every turn — so `readUntilAnswered` asks up to five times with a growing wait and stops on the first answer. The retry is invisible by design; what it buys is that an empty summary means the quota could not be read, not that the card rendered too early.
 
 ## 7. Screenshots
 
