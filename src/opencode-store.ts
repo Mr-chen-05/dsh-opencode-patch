@@ -97,7 +97,17 @@ export const readOpencodeCredentials = (
   }
   const found = rows(
     databasePath,
-    "SELECT integration_id AS integrationId, label, value FROM credential WHERE active = 1"
+    // `active = 1` alone is wrong on a real installation. Measured: every row in
+    // the live database has `active IS NULL`, because they are legacy rows written
+    // before the flag existed, and OpenCode's own rule is that legacy rows carry no
+    // flag and the NEWEST one is selected. So the explicit flag wins when any row
+    // sets it, and otherwise the legacy rows are read newest-first rather than
+    // being dropped - which is the difference between this reader working and
+    // answering nothing on a machine that does have credentials.
+    `SELECT integration_id AS integrationId, label, value FROM credential
+     WHERE active = 1
+        OR (active IS NULL AND NOT EXISTS (SELECT 1 FROM credential WHERE active = 1))
+     ORDER BY time_updated DESC`
   );
   if (found === undefined) {
     return undefined;

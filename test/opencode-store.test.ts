@@ -94,6 +94,36 @@ describe("opencode-store: credentials", () => {
     ).toBe("Zen");
   });
 
+  it("reads legacy rows that carry no active flag at all", () => {
+    // Measured on a real installation: every row has `active IS NULL`, written
+    // before the flag existed. Filtering on `active = 1` alone answered nothing
+    // there, which is the difference between this reader working and not.
+    const path = database((db) => {
+      schema(db);
+      db.prepare(
+        "INSERT INTO credential (id, integration_id, label, value, active, time_updated) VALUES (?, ?, ?, ?, NULL, ?)"
+      ).run("legacy", "opencode", "Zen", "oc_sk_fixture_legacy", 100);
+    });
+    const found = readOpencodeCredentials(path);
+    expect(found).toHaveLength(1);
+    expect(found?.[0]?.value).toBe("oc_sk_fixture_legacy");
+  });
+
+  it("prefers an explicit active flag over legacy rows", () => {
+    // Legacy rows are the fallback, not an addition: once any row sets the flag,
+    // that is the user's selection and the unflagged rows are the old ones.
+    const path = database((db) => {
+      schema(db);
+      db.prepare(
+        "INSERT INTO credential (id, integration_id, label, value, active, time_updated) VALUES (?, ?, ?, ?, NULL, ?)"
+      ).run("legacy", "opencode", "Old", "oc_sk_fixture_legacy", 100);
+      addCredential(db, "new", "opencode", "oc_sk_fixture_new", 1);
+    });
+    const found = readOpencodeCredentials(path);
+    expect(found).toHaveLength(1);
+    expect(found?.[0]?.value).toBe("oc_sk_fixture_new");
+  });
+
   it("leaves an inactive credential behind", () => {
     // A retired key is one the user already replaced; offering it would resurrect
     // the thing they retired.
