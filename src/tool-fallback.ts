@@ -21,12 +21,22 @@ export const DUMMY_READ_TOOL_ANTHROPIC = {
   description: "Read a file or directory from the local filesystem.",
   input_schema: {
     properties: {
-      filePath: {
-        description: "The absolute path to the file",
+      path: {
+        description: "File or directory to read",
         type: "string",
       },
+      offset: {
+        description:
+          "The line or directory entry to start reading from (1-based)",
+        type: "number",
+      },
+      limit: {
+        description:
+          "The maximum number of lines or directory entries to read (defaults to and capped at 2000)",
+        type: "number",
+      },
     },
-    required: ["filePath"],
+    required: ["path"],
     type: "object",
   },
   name: "read",
@@ -37,7 +47,24 @@ export const DUMMY_BASH_TOOL_ANTHROPIC = {
   description: "Execute a bash command.",
   input_schema: {
     properties: {
-      command: { description: "The command to execute", type: "string" },
+      command: {
+        description: "Shell command string to execute",
+        type: "string",
+      },
+      workdir: {
+        description:
+          "Working directory to execute the command in. Defaults to the current working directory.",
+        type: "string",
+      },
+      timeout: {
+        description:
+          "Timeout in milliseconds. Set to 0 to disable the timeout.",
+        type: "number",
+      },
+      background: {
+        description: "Run the command in the background.",
+        type: "boolean",
+      },
     },
     required: ["command"],
     type: "object",
@@ -51,12 +78,22 @@ export const DUMMY_READ_TOOL = {
   name: "read",
   parameters: {
     properties: {
-      filePath: {
-        description: "The absolute path to the file",
+      path: {
+        description: "File or directory to read",
         type: "string",
       },
+      offset: {
+        description:
+          "The line or directory entry to start reading from (1-based)",
+        type: "number",
+      },
+      limit: {
+        description:
+          "The maximum number of lines or directory entries to read (defaults to and capped at 2000)",
+        type: "number",
+      },
     },
-    required: ["filePath"],
+    required: ["path"],
     type: "object",
   },
   type: "function",
@@ -68,7 +105,24 @@ export const DUMMY_BASH_TOOL = {
   name: "bash",
   parameters: {
     properties: {
-      command: { description: "The command to execute", type: "string" },
+      command: {
+        description: "Shell command string to execute",
+        type: "string",
+      },
+      workdir: {
+        description:
+          "Working directory to execute the command in. Defaults to the current working directory.",
+        type: "string",
+      },
+      timeout: {
+        description:
+          "Timeout in milliseconds. Set to 0 to disable the timeout.",
+        type: "number",
+      },
+      background: {
+        description: "Run the command in the background.",
+        type: "boolean",
+      },
     },
     required: ["command"],
     type: "object",
@@ -84,12 +138,22 @@ export const DUMMY_READ_TOOL_FUNCTION = {
     name: "read",
     parameters: {
       properties: {
-        filePath: {
-          description: "The absolute path to the file",
+        path: {
+          description: "File or directory to read",
           type: "string",
         },
+        offset: {
+          description:
+            "The line or directory entry to start reading from (1-based)",
+          type: "number",
+        },
+        limit: {
+          description:
+            "The maximum number of lines or directory entries to read (defaults to and capped at 2000)",
+          type: "number",
+        },
       },
-      required: ["filePath"],
+      required: ["path"],
       type: "object",
     },
   },
@@ -103,7 +167,24 @@ export const DUMMY_BASH_TOOL_FUNCTION = {
     name: "bash",
     parameters: {
       properties: {
-        command: { description: "The command to execute", type: "string" },
+        command: {
+          description: "Shell command string to execute",
+          type: "string",
+        },
+        workdir: {
+          description:
+            "Working directory to execute the command in. Defaults to the current working directory.",
+          type: "string",
+        },
+        timeout: {
+          description:
+            "Timeout in milliseconds. Set to 0 to disable the timeout.",
+          type: "number",
+        },
+        background: {
+          description: "Run the command in the background.",
+          type: "boolean",
+        },
       },
       required: ["command"],
       type: "object",
