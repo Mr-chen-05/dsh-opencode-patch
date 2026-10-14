@@ -7,9 +7,11 @@ import { describe, expect, it } from "vitest";
 
 import { OPENCODE_PLANE_API } from "../src/catalog-data.ts";
 import type { CatalogModelSpec } from "../src/catalog-data.ts";
+import { ENDPOINT_FAMILIES } from "../src/config-values.ts";
 import { OPENCODE_USER_AGENT } from "../src/identity.ts";
 import {
   BASE_FOR_PROTOCOL,
+  baseForProtocol,
   piModelFor,
   protocolFor,
   thinkingLevelMapFor,
@@ -238,6 +240,70 @@ describe("pi-provider · the tables themselves", () => {
         expect(base, protocol).toBe(expected);
       }
     }
+  });
+
+  it("resolves each endpoint family to its own base, and auto to the catalog", () => {
+    // `auto` is the catalog's own address and therefore cannot be wrong about
+    // which family is current; the other two pin one, which is the whole point
+    // of the setting — the two families are separately entitled.
+    expect(baseForProtocol("opencode", "openai-completions", "auto")).toBe(
+      OPENCODE_PLANE_API.zen
+    );
+    expect(baseForProtocol("opencode-go", "openai-completions", "auto")).toBe(
+      OPENCODE_PLANE_API.go
+    );
+
+    expect(baseForProtocol("opencode", "openai-completions", "legacy")).toBe(
+      "https://opencode.ai/zen/v1"
+    );
+    expect(baseForProtocol("opencode-go", "openai-completions", "legacy")).toBe(
+      "https://opencode.ai/zen/go/v1"
+    );
+
+    expect(baseForProtocol("opencode", "openai-completions", "modern")).toBe(
+      OPENCODE_PLANE_API.zen
+    );
+    expect(baseForProtocol("opencode-go", "openai-completions", "modern")).toBe(
+      OPENCODE_PLANE_API.go
+    );
+  });
+
+  it("keeps the Anthropic base one level shorter on every family", () => {
+    for (const family of ENDPOINT_FAMILIES) {
+      for (const plane of ["opencode", "opencode-go"] as const) {
+        const base = baseForProtocol(plane, "anthropic-messages", family);
+        expect(base?.endsWith("/v1"), `${plane}/${family}`).toBe(false);
+        expect(base?.endsWith("/v1/messages"), `${plane}/${family}`).toBe(
+          false
+        );
+      }
+    }
+  });
+
+  it("returns undefined for a plane the table does not carry", () => {
+    expect(
+      baseForProtocol("nope", "openai-completions", "modern")
+    ).toBeUndefined();
+  });
+
+  it("hands the model the base its family names", () => {
+    const model = {
+      context_window: 1000,
+      id: "x",
+      input_modalities: ["text"],
+      max_output_tokens: 100,
+      name: "X",
+    };
+    expect(
+      piModelFor("opencode", model, "openai-completions", {}, "legacy").baseUrl
+    ).toBe("https://opencode.ai/zen/v1");
+    expect(
+      piModelFor("opencode", model, "openai-completions", {}, "modern").baseUrl
+    ).toBe(OPENCODE_PLANE_API.zen);
+    // No family named means the catalog's own address, as before.
+    expect(
+      piModelFor("opencode", model, "openai-completions", {}).baseUrl
+    ).toBe(OPENCODE_PLANE_API.zen);
   });
 });
 

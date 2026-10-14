@@ -15,6 +15,7 @@ import type { CopyKey } from "./settings-copy.ts";
 
 /** Schema knob names the card edits; keys double as label ids. */
 export const FIELD = {
+  endpoint: "endpoint",
   enrichModels: "enrichModels",
   injectCoreTools: "injectCoreTools",
   injectOriginHeaders: "injectOriginHeaders",
@@ -106,6 +107,7 @@ export type FieldKind = "boolean" | "select";
  * Keeping each group's entries adjacent is what makes the heading appear once.
  */
 export const GROUP = {
+  access: "groupAccess",
   models: "groupModels",
   quota: "groupQuota",
   requests: "groupRequests",
@@ -197,8 +199,46 @@ const toSettingsFieldSpec = (entry: CardFieldSpec): SettingsFieldSpec =>
  * Entries are ordered so each {@link GROUP} stays contiguous: the card inserts a
  * heading where the group changes. Only decisions a user makes live here — the
  * override knobs are in {@link CONFIG_ONLY_FIELDS}.
+ *
+ * The endpoint family and the credential choice both live under
+ * {@link GROUP.access}: together they are "which account, on which endpoint",
+ * and filing the credential knob under the quota meter instead is what made it
+ * hard to find.
  */
 export const CARD_FIELDS: readonly CardFieldSpec[] = [
+  {
+    field: FIELD.endpoint,
+    group: GROUP.access,
+    hintKey: "endpointHint",
+    kind: "select",
+    labelKey: "endpoint",
+    // Values must stay in step with `ENDPOINT_FAMILIES`; a test pins that.
+    options: [
+      { labelKey: "endpointAuto", value: "auto" },
+      { labelKey: "endpointLegacy", value: "legacy" },
+      { labelKey: "endpointModern", value: "modern" },
+    ],
+  },
+  {
+    field: FIELD.keySource,
+    group: GROUP.access,
+    hintKey: "keySourceHint",
+    kind: "select",
+    labelKey: "keySource",
+    // Values must stay in step with `KEY_SOURCE_POLICIES`; a test pins that.
+    options: [
+      { labelKey: "keySourceAuto", value: "auto" },
+      { labelKey: "keySourceRequest", value: "request" },
+      { labelKey: "keySourceConfigured", value: "configured" },
+    ],
+  },
+  {
+    field: FIELD.readOpencodeStore,
+    group: GROUP.access,
+    hintKey: "readOpencodeStoreHint",
+    kind: "boolean",
+    labelKey: "readOpencodeStore",
+  },
   {
     field: FIELD.injectUserAgent,
     group: GROUP.requests,
@@ -240,26 +280,6 @@ export const CARD_FIELDS: readonly CardFieldSpec[] = [
     hintKey: "usageEnabledHint",
     kind: "boolean",
     labelKey: "usageEnabled",
-  },
-  {
-    field: FIELD.keySource,
-    group: GROUP.quota,
-    hintKey: "keySourceHint",
-    kind: "select",
-    labelKey: "keySource",
-    // Values must stay in step with `KEY_SOURCE_POLICIES`; a test pins that.
-    options: [
-      { labelKey: "keySourceAuto", value: "auto" },
-      { labelKey: "keySourceRequest", value: "request" },
-      { labelKey: "keySourceConfigured", value: "configured" },
-    ],
-  },
-  {
-    field: FIELD.readOpencodeStore,
-    group: GROUP.quota,
-    hintKey: "readOpencodeStoreHint",
-    kind: "boolean",
-    labelKey: "readOpencodeStore",
   },
 ];
 

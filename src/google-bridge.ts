@@ -48,6 +48,7 @@ import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generati
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 
 import type { CatalogModelSpec } from "./catalog-data.ts";
+import type { EndpointFamily } from "./config-values.ts";
 import { readCredentialsResolver } from "./cordis-context.ts";
 import type { CredentialPool } from "./credential-pool.ts";
 import { resolveOpencodeStoreKey } from "./go-discovery.ts";
@@ -180,10 +181,13 @@ export const ambientAuthContext = (): BridgeAuthContext => ({
  * append, so the bridge would only duplicate that work.
  *
  * @param specs - the catalogued models the route serves.
+ * @param family - the endpoint family to send them to; the catalog's own
+ *   address by default.
  * @returns the provider the adapter's collection will hold.
  */
 export const googleProviderFor = (
-  specs: readonly CatalogModelSpec[]
+  specs: readonly CatalogModelSpec[],
+  family: EndpointFamily = "auto"
 ): Record<string, unknown> => {
   const api = googleGenerativeAIApi();
   const models = specs.map((spec) => ({
@@ -191,7 +195,8 @@ export const googleProviderFor = (
       "opencode",
       spec,
       "google-generative-ai",
-      installedEntryFor("opencode", spec.id)
+      installedEntryFor("opencode", spec.id),
+      family
     ),
     provider: GOOGLE_INTERNAL_ROUTE,
   }));
@@ -323,6 +328,12 @@ export interface GoogleBridgeInputs {
    * deployment opted in, which is the default.
    */
   readonly readOpencodeStore?: boolean;
+  /**
+   * Which endpoint family the bridge's models are sent to. The catalog's own
+   * address by default, and the same choice the internal routes use so a
+   * deployment cannot end up on two families at once.
+   */
+  readonly endpoint?: EndpointFamily;
 }
 
 /**
@@ -350,7 +361,7 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
   if (typeof adapter !== "function" || specs.length === 0) {
     return undefined;
   }
-  const provider = googleProviderFor(specs);
+  const provider = googleProviderFor(specs, inputs.endpoint);
 
   // One profile, built once: the adapter memoizes its snapshot by the identity
   // of the profiles map, so a fresh map per call would rebuild the collection

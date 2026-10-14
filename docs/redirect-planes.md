@@ -10,8 +10,10 @@ A **plane** is one gateway base URL with its own catalog and its own credential.
 
 | Plane | Route id | Base URL | Credential | Models |
 | :-- | :-- | :-- | :-- | --: |
-| Zen (pay-as-you-go, free tier) | `opencode` | `https://opencode.ai/zen/v1` | `OPENCODE_API_KEY` | 82 served / 120 listed |
-| Go (subscription) | `opencode-go` | `https://opencode.ai/zen/go/v1` | `OPENCODE_GO_API_KEY` | 31 served / 36 listed |
+| Zen (pay-as-you-go, free tier) | `opencode` | the `endpoint` family's | `OPENCODE_API_KEY` | 82 served / 120 listed |
+| Go (subscription) | `opencode-go` | the `endpoint` family's | `OPENCODE_GO_API_KEY` | 31 served / 36 listed |
+
+**There is no longer one base URL per plane to quote.** The gateway answers on two endpoint families and the `endpoint` setting picks one: `auto` follows the catalog, which today names `…/inference/v1` and `…/inference/go/v1`, and `legacy` pins the older `…/zen/v1` and `…/zen/go/v1`. Both are still served and they are entitled separately, which is why the choice is the user's rather than a migration. The dated measurement below was taken on the legacy family.
 
 A plane is a property of the **account and the base URL**, never of a model. The same model id can exist on both planes and be served on a different shape in each.
 
@@ -126,12 +128,12 @@ Measured 2026-10-10 by building one with pi's own protocol implementations and i
 
 | Model's `api` | URL the gateway receives | Auth |
 | :-- | :-- | :-- |
-| `openai-responses` | `…/zen/v1/responses` | `Authorization: Bearer` |
-| `openai-completions` | `…/zen/v1/chat/completions` | `Authorization: Bearer` |
-| `anthropic-messages` | `…/zen/v1/messages?beta=true` | `x-api-key` |
-| `google-generative-ai` | `…/zen/v1/models/<id>:streamGenerateContent?alt=sse` | `x-goog-api-key` |
+| `openai-responses` | `…/{family}/responses` | `Authorization: Bearer` |
+| `openai-completions` | `…/{family}/chat/completions` | `Authorization: Bearer` |
+| `anthropic-messages` | `…/{family}/messages?beta=true` | `x-api-key` |
+| `google-generative-ai` | `…/{family}/models/<id>:streamGenerateContent?alt=sse` | `x-goog-api-key` |
 
-**The base URL is per protocol, not per plane.** The Anthropic SDK appends its own `/v1/messages`, so its base is one level shorter than the others: `…/zen` and `…/zen/go` against `…/zen/v1` and `…/zen/go/v1`. That is not derivable from the protocol name; it is a property of each SDK, and pi's own `opencode` provider records it per model.
+`{family}` is `zen` on the legacy endpoint and `inference` on the modern one; the paths are the same on both. **The base URL is per protocol, not per plane.** The Anthropic SDK appends its own `/v1/messages`, so its base is one level shorter than the others: the family root against `<family>/v1`. That is not derivable from the protocol name; it is a property of each SDK, and pi's own `opencode` provider records it per model.
 
 **The Google path is the one a hand-declared route cannot reach.** Its protocol name is not in the wrapper's three-entry table, so no route may name it; a self-built provider dispatches to it without any special case.
 

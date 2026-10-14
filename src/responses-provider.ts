@@ -661,6 +661,9 @@ export const registerResponsesProvider = async (
         // And, last, the installation's own store - off unless the deployment
         // opted in, which is what `config` carries here.
         readOpencodeStore: config?.readOpencodeStore === true,
+        // The same endpoint family the internal routes below are mounted with,
+        // so a deployment cannot end up sending to two families at once.
+        endpoint: config?.endpoint,
         ctx,
         host: loadPiAi(ctx),
         // The bridge reads the RAW catalog, not the config-shaped profile:
@@ -710,7 +713,8 @@ export const registerResponsesProvider = async (
           // The plane's own base stays the fallback for a protocol this table
           // does not carry, so an unknown protocol degrades to today's
           // behaviour rather than to an undefined URL.
-          baseURL: baseForProtocol(plane, protocol) ?? entry.baseURL,
+          baseURL:
+            baseForProtocol(plane, protocol, config?.endpoint) ?? entry.baseURL,
         }))
   );
   if (wanted.length === 0) {

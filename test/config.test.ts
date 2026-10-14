@@ -11,7 +11,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CONFIG_DEFAULTS } from "../src/config.ts";
 import {
   Config,
+  DEFAULT_ENDPOINT_FAMILY,
   DEFAULT_KEY_SOURCE,
+  ENDPOINT_FAMILIES,
   isOpenCodeRequest,
   KEY_SOURCE_POLICIES,
   resolveConfig,
@@ -209,6 +211,7 @@ describe("Config schema", () => {
         "credentialPool",
         "debug",
         "enrichModels",
+        "endpoint",
         "freeModelMarker",
         "gatewayUrls",
         "injectCoreTools",
@@ -233,6 +236,7 @@ describe("Config schema", () => {
       credentialPool: { enabled: false, go: [], zen: [] },
       debug: false,
       enrichModels: true,
+      endpoint: "auto",
       freeModelMarker: "free",
       gatewayUrls: ["opencode.ai/zen", "opencode.ai/inference"],
       injectCoreTools: true,
@@ -268,6 +272,22 @@ describe("Config schema", () => {
     );
     expect(resolveConfig({ keySource: "" as never }).keySource).toBe(
       DEFAULT_KEY_SOURCE
+    );
+  });
+
+  it("accepts each endpoint family and degrades an unknown one to auto", () => {
+    // Same rule as the key-source policy, for the same reason: the family is
+    // user-facing and hand-editable, and `auto` follows the catalog, so a typo
+    // degrades to the answer that cannot be wrong about which family is current.
+    for (const family of ENDPOINT_FAMILIES) {
+      expect(resolveConfig({ endpoint: family }).endpoint).toBe(family);
+    }
+    expect(resolveConfig({}).endpoint).toBe(DEFAULT_ENDPOINT_FAMILY);
+    expect(resolveConfig({ endpoint: "zen" as never }).endpoint).toBe(
+      DEFAULT_ENDPOINT_FAMILY
+    );
+    expect(resolveConfig({ endpoint: "" as never }).endpoint).toBe(
+      DEFAULT_ENDPOINT_FAMILY
     );
   });
 

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { KEY_SOURCE_POLICIES } from "../src/config-values.ts";
+import {
+  ENDPOINT_FAMILIES,
+  KEY_SOURCE_POLICIES,
+} from "../src/config-values.ts";
 import { Config } from "../src/index.ts";
 import { CARD_FIELDS, CONFIG_ONLY_FIELDS } from "../src/settings-fields.ts";
 import {
@@ -746,23 +749,37 @@ describe("settings-page: OpencodeCard rendering", () => {
     expect(boolFields.length + choiceFields.length + valueFields.length).toBe(
       CARD_FIELDS.length
     );
-    // The card shows only the decisions a user makes — 7 toggles and 1 enum.
+    // The card shows only the decisions a user makes — 7 toggles and 2 enums.
     // Every literal/marker override is config-only (see CONFIG_ONLY_FIELDS), so
     // no text or list field renders at all.
     // Seven booleans: the meter's own switch is one, and there is no nested
     // price switch inside it.
     expect(boolFields.length).toBe(7);
-    expect(choiceFields.length).toBe(1);
+    expect(choiceFields.length).toBe(2);
     expect(valueFields.length).toBe(0);
-    const [choiceField] = choiceFields;
-    assert.ok(choiceField, "expected a SettingsChoiceField");
-    expect(choiceField.props.id).toBe("plugin-config-opencode-keySource");
+    const choiceFieldsById = new Map(
+      choiceFields.map((field) => [String(field.props.id), field])
+    );
+    const choiceField = choiceFieldsById.get(
+      "plugin-config-opencode-keySource"
+    );
+    assert.ok(choiceField, "expected a keySource SettingsChoiceField");
     // The enum's choices are copy-resolved before they reach the control.
     expect(
       (choiceField.props.options as { label: string; value: string }[]).map(
         (option) => option.value
       )
     ).toEqual([...KEY_SOURCE_POLICIES]);
+    // The endpoint family's choices, from the same table `config-values` exports.
+    const endpointField = choiceFieldsById.get(
+      "plugin-config-opencode-endpoint"
+    );
+    assert.ok(endpointField, "expected an endpoint SettingsChoiceField");
+    expect(
+      (endpointField.props.options as { label: string; value: string }[]).map(
+        (option) => option.value
+      )
+    ).toEqual([...ENDPOINT_FAMILIES]);
 
     // No config-only knob may appear as a control: the simplified UI has to stay
     // simplified, and an override must not become editable by accident.
@@ -771,10 +788,17 @@ describe("settings-page: OpencodeCard rendering", () => {
       expect(renderedIds).not.toContain(`plugin-config-opencode-${field}`);
     }
 
-    // Test boolean field edit: first boolean field is injectUserAgent
-    const [firstBool] = boolFields;
-    assert.ok(firstBool);
-    const onBoolEdit = firstBool.props.onEdit as (text: string) => void;
+    // Test boolean field edit, addressed by id rather than by position: the
+    // render order is the card's own decision, and a positional read breaks the
+    // moment a field moves between sections.
+    const userAgentField = boolFields.find(
+      (field) => field.props.id === "plugin-config-opencode-injectUserAgent"
+    );
+    assert.ok(
+      userAgentField,
+      "expected an injectUserAgent SettingsBooleanField"
+    );
+    const onBoolEdit = userAgentField.props.onEdit as (text: string) => void;
     onBoolEdit("false");
     expect(edits).toContainEqual({ field: "injectUserAgent", text: "false" });
 
@@ -784,7 +808,7 @@ describe("settings-page: OpencodeCard rendering", () => {
     expect(edits).toContainEqual({ field: "keySource", text: "request" });
 
     // Test reset callback
-    const onReset = firstBool.props.onReset as () => void;
+    const onReset = userAgentField.props.onReset as () => void;
     onReset();
     expect(resets).toContain("injectUserAgent");
   });
@@ -966,14 +990,15 @@ describe("settings-page: field specs", () => {
 
   it("covers every field the card renders, in render order", () => {
     expect(SPECS.map((s) => s.field)).toEqual([
+      "endpoint",
+      "keySource",
+      "readOpencodeStore",
       "injectUserAgent",
       "injectOriginHeaders",
       "injectProject",
       "enrichModels",
       "injectCoreTools",
       "usageEnabled",
-      "keySource",
-      "readOpencodeStore",
     ]);
   });
 

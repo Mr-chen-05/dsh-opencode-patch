@@ -231,13 +231,13 @@ Two surfaces, one reading. Both are pure views over the same Host data.
 | :-- | :-- | :-- |
 | **Meter trigger** | composer dock, beside the model selector | Go: a ring plus the window's percent. Zen: the session spend, and no ring |
 | **Meter panel** | click the trigger | The windows, the monthly allowance, the session spend, the Zen credit, the action links |
-| **Settings card** | _Settings → Plugins → OpenCode Patch_ | Eight controls, plus a live Go usage summary above them |
+| **Settings card** | _Settings → Plugins → OpenCode Patch_ | Nine controls, plus a live Go usage summary above them |
 
 Hovering the trigger explains its own number; clicking it opens the panel. The sections below show each surface, and [docs/quota-meter.md](./docs/quota-meter.md) documents every state it can be in.
 
 ### Settings card — _Settings → Plugins → OpenCode Patch_
 
-Eight controls in three sections — the decisions a user actually makes. Everything renders from the platform's own primitives (`Switch`, `Tag`, `Button`, host tokens), and every knob carries a hint plus a reset-to-default affordance.
+Nine controls in four sections — the decisions a user actually makes. Everything renders from the platform's own primitives (`Switch`, `Tag`, `Button`, host tokens), and every knob carries a hint plus a reset-to-default affordance.
 
 | Section | Control | Default | What it does |
 | :-- | :-- | :-: | :-- |
@@ -247,7 +247,17 @@ Eight controls in three sections — the decisions a user actually makes. Everyt
 | **Models & Free Tier** | Enrich Models from Models.dev | `on` | Merges canonical specs, display names, prices and active free models into listings **and** native DSH discovery |
 | **Models & Free Tier** | Inject Core Tools | `on` | Adds the `read` + `bash` schemas free-tier `/responses` bodies require |
 | **Quota Meter** | Enable Composer Usage Meter | `on` | Mounts the live meter in the composer dock — the Go quota ring, or the Zen session spend |
-| **Quota Meter** | Credential Source | `auto` | Which key wins when several are known: **Automatic** · **Live request first** · **Declared key first** |
+| **Account & Endpoint** | API Endpoint | `auto` | Which endpoint family requests go to: **Automatic** (follow the catalog) · **Legacy** (`zen/v1`) · **Modern** (`inference/v1`) |
+| **Account & Endpoint** | Credential Source | `auto` | Which key wins when several are known: **Automatic** · **Live request first** · **Declared key first** |
+| **Account & Endpoint** | Read the OpenCode installation's key | `off` | Lets the plugin read the credential OpenCode itself stored, as the LAST resort — off by default |
+
+### Choosing the endpoint and the credential
+
+Two questions decide where a request goes, and the **Account & Endpoint** section is where you answer them.
+
+**Which endpoint family.** The gateway answers on two families — the older `/zen/v1` and the newer `/inference/v1` — and they are entitled **separately**: an account that works on one is not guaranteed to work on the other. `auto` follows the gateway's own catalog, which today names the newer family, so a catalog move carries you along; `legacy` and `modern` pin one, which is what you want when your account only works on the older one, or when you are checking that the newer one does.
+
+**Which credential wins.** `keySource` orders the sources the plugin can see — `auto` prefers a key you declared, then one captured from a live request, then the declared reference; `request` promotes a captured key first; `configured` does the reverse. Below it, `readOpencodeStore` lets the plugin read the credential OpenCode itself stored, as the **last** resort only. Both are `off`/`auto` by default, so nothing changes until you say so.
 
 Override-style knobs (literal strings, markers, route lists) are deliberately **config-only** so a default fits every documented setup — see [Configuration Reference](#-configuration-reference).
 
@@ -386,6 +396,7 @@ These exist in the schema but render no control — each is a literal, a marker,
         sessionIdEnv: "OPENCODE_SESSION_ID"
         freeModelMarker: "free"
         usageBaseURL: "https://opencode.ai/zen/go/v1"
+        endpoint: "auto" # auto | legacy | modern
         keySource: "auto" # auto | request | configured
         injectUserAgent: true
         injectOriginHeaders: true

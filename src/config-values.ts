@@ -64,6 +64,33 @@ export const isKeySourcePolicy = (value: unknown): value is KeySourcePolicy =>
   (KEY_SOURCE_POLICIES as readonly string[]).includes(value);
 
 /**
+ * Which endpoint family the gateway's requests go to.
+ *
+ * The gateway answers on two families and the user, not the catalog, is the one
+ * who knows which their account is entitled to:
+ *
+ * - `auto` follows the catalog — the `api` the vendor's own entry names, which
+ *   today is the `inference` family.
+ * - `legacy` forces the older `/zen/v1` pair.
+ * - `modern` forces the newer `/inference/v1` pair.
+ *
+ * Declared here rather than in `config.ts` so the client card can read the same
+ * list without importing schemastery.
+ */
+export const ENDPOINT_FAMILIES = ["auto", "legacy", "modern"] as const;
+
+/** One accepted {@link ENDPOINT_FAMILIES} value. */
+export type EndpointFamily = (typeof ENDPOINT_FAMILIES)[number];
+
+/** Family applied when a row does not name one. */
+export const DEFAULT_ENDPOINT_FAMILY: EndpointFamily = "auto";
+
+/** Whether `value` is one of the accepted families. */
+export const isEndpointFamily = (value: unknown): value is EndpointFamily =>
+  typeof value === "string" &&
+  (ENDPOINT_FAMILIES as readonly string[]).includes(value);
+
+/**
  * Unwrap a schemastery volatile `.get()` node to its current value.
  *
  * Idempotent: plain values pass through untouched, so the host behaves

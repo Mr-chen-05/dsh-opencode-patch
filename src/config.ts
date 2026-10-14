@@ -14,10 +14,14 @@
 import z from "@deepseek-ai/schemastery";
 
 import {
+  DEFAULT_ENDPOINT_FAMILY,
   DEFAULT_KEY_SOURCE,
   DEFAULT_PROVIDERS,
+  ENDPOINT_FAMILIES,
+  isEndpointFamily,
   isKeySourcePolicy,
   KEY_SOURCE_POLICIES,
+  type EndpointFamily,
   type KeySourcePolicy,
   readBoolean,
   readString,
@@ -25,9 +29,12 @@ import {
 } from "./config-values.ts";
 
 export {
+  DEFAULT_ENDPOINT_FAMILY,
   DEFAULT_KEY_SOURCE,
   DEFAULT_PROVIDERS,
+  ENDPOINT_FAMILIES,
   KEY_SOURCE_POLICIES,
+  type EndpointFamily,
   type KeySourcePolicy,
 };
 
@@ -110,6 +117,7 @@ export const CONFIG_DEFAULTS = {
   credentialPool: DEFAULT_CREDENTIAL_POOL,
   debug: false,
   enrichModels: true,
+  endpoint: DEFAULT_ENDPOINT_FAMILY,
   freeModelMarker: DEFAULT_FREE_MODEL_MARKER,
   gatewayUrls: DEFAULT_GATEWAY_URLS,
   injectCoreTools: true,
@@ -132,6 +140,7 @@ export interface PluginConfig {
   debug?: boolean;
   debugFile?: string;
   enrichModels?: boolean;
+  endpoint?: EndpointFamily;
   freeModelMarker?: string;
   gatewayUrls?: string[];
   injectCoreTools?: boolean;
@@ -166,6 +175,14 @@ export interface ResolvedPluginConfig {
   debug: boolean;
   debugFile?: string;
   enrichModels: boolean;
+  /**
+   * Which endpoint family the gateway's requests go to.
+   *
+   * The two families are independently entitled and both are still served, so
+   * the choice is the user's: `auto` follows the catalog, and `legacy` /
+   * `modern` pin one. See {@link ENDPOINT_FAMILIES}.
+   */
+  endpoint: EndpointFamily;
   /** `*` when the core-tool fallback should run for every model. */
   freeModelMarker: string;
   /** URL substrings marking gateway traffic; never empty after resolution. */
@@ -212,6 +229,18 @@ const resolvedKeySource = (raw: unknown): KeySourcePolicy => {
 };
 
 /**
+ * A row's endpoint family, or the default when it names something else.
+ *
+ * Lenient for the same reason {@link resolvedKeySource} is: a typo in a
+ * hand-edited row degrades to `auto`, which follows the catalog and is the
+ * answer that cannot be wrong about which family is current.
+ */
+const resolvedEndpoint = (raw: unknown): EndpointFamily => {
+  const value = readString(raw);
+  return isEndpointFamily(value) ? value : CONFIG_DEFAULTS.endpoint;
+};
+
+/**
  * The pool's configuration, with the deployment's own defaults filling in.
  *
  * A row that omits the section entirely, or sets the switch without listing
@@ -247,6 +276,7 @@ export const resolveConfig = (
       config.enrichModels,
       CONFIG_DEFAULTS.enrichModels
     ),
+    endpoint: resolvedEndpoint(config.endpoint),
     freeModelMarker:
       readString(config.freeModelMarker) ?? CONFIG_DEFAULTS.freeModelMarker,
     gatewayUrls:
@@ -394,6 +424,18 @@ export const Config = z.object({
     .description(
       "Enrich and override gateway models list using canonical models.dev catalog."
     ),
+  endpoint: z
+    .string()
+    .default(CONFIG_DEFAULTS.endpoint)
+    .description(
+      "Which endpoint family the gateway's requests go to. auto: follow the " +
+        "catalog's own address (today the inference family). legacy: force " +
+        "https://opencode.ai/zen/v1. modern: force " +
+        "https://opencode.ai/inference/v1. The two families are separately " +
+        "entitled and both still answer, so this is a choice rather than a " +
+        "migration; an unrecognised value falls back to auto."
+    )
+    .volatile(),
   usageBaseURL: z
     .string()
     .default(CONFIG_DEFAULTS.usageBaseURL)

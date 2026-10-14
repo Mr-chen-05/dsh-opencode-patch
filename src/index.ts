@@ -46,6 +46,7 @@ export { apply } from "./lifecycle.ts";
 export {
   CONFIG_DEFAULTS,
   Config,
+  DEFAULT_ENDPOINT_FAMILY,
   DEFAULT_FREE_MODEL_MARKER,
   DEFAULT_GATEWAY_URLS,
   DEFAULT_INJECT_PROJECT,
@@ -55,8 +56,10 @@ export {
   DEFAULT_SESSION_ID_ENV,
   DEFAULT_USAGE_BASE_URL,
   DEFAULT_USAGE_KEY_ENV,
+  ENDPOINT_FAMILIES,
   KEY_SOURCE_POLICIES,
   resolveConfig,
+  type EndpointFamily,
   type KeySourcePolicy,
   type PluginConfig,
   type ResolvedPluginConfig,

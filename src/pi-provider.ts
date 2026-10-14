@@ -26,6 +26,7 @@
 
 import type { CatalogModelSpec } from "./catalog-data.ts";
 import { OPENCODE_PLANE_API } from "./catalog-data.ts";
+import type { EndpointFamily } from "./config-values.ts";
 import {
   ANTHROPIC_SDK,
   GOOGLE_SDK,
@@ -62,6 +63,41 @@ const PLANE_BASE: Readonly<Record<Plane, string>> = {
 };
 
 /**
+ * The older endpoint each plane's requests used to go to.
+ *
+ * Still served — measured — and the reason an endpoint choice exists at all:
+ * the catalog moved to `…/inference/v1`, but a deployment whose account is only
+ * entitled on the older family needs `/zen/v1` and no catalog change will say
+ * so. `responses-routes.ts`'s `PLANES` is this table, kept as the declared name
+ * so the two cannot drift.
+ */
+export const LEGACY_PLANE_API: Readonly<Record<Plane, string>> = {
+  opencode: "https://opencode.ai/zen/v1",
+  "opencode-go": "https://opencode.ai/zen/go/v1",
+};
+
+/**
+ * The base URL one plane's requests go to under one endpoint family.
+ *
+ * `auto` is the catalog's own value, so following the vendor costs nothing here;
+ * `legacy` and `modern` pin the family explicitly. The two families are
+ * independently entitled, which is why a user can choose rather than being
+ * carried along by whatever the catalog happens to name.
+ *
+ * @param plane - the gateway plane.
+ * @param family - the endpoint family to resolve.
+ * @returns that plane's base URL.
+ */
+export const planeBaseFor = (plane: Plane, family: EndpointFamily): string => {
+  if (family === "legacy") {
+    return LEGACY_PLANE_API[plane];
+  }
+  return family === "modern"
+    ? OPENCODE_PLANE_API[plane === "opencode-go" ? "go" : "zen"]
+    : PLANE_BASE[plane];
+};
+
+/**
  * The protocol's path on the plane's base, or `null` when it is the base itself.
  *
  * The catalog's `api` is the base INCLUDING the version segment - `…/zen/v1`,
@@ -77,16 +113,35 @@ const PROTOCOL_SUFFIX: Readonly<Record<string, string | null>> = {
   "openai-responses": "",
 };
 
-export const BASE_FOR_PROTOCOL: Readonly<
-  Record<Plane, Readonly<Record<string, string>>>
-> = {
-  opencode: withPlaneBase("opencode"),
-  "opencode-go": withPlaneBase("opencode-go"),
+/**
+ * Every protocol on one plane under one endpoint family, sharing the base.
+ *
+ * Memoised per family: the table is rebuilt at most once per family per process,
+ * and the map keys are exactly the accepted {@link EndpointFamily} values, so an
+ * unknown family falls through to the catalog's own answer rather than to
+ * `undefined`.
+ */
+const BASES_BY_FAMILY = new Map<EndpointFamily, BaseTable>();
+
+const basesFor = (family: EndpointFamily): BaseTable => {
+  const cached = BASES_BY_FAMILY.get(family);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const table: BaseTable = {
+    opencode: withPlaneBase("opencode", family),
+    "opencode-go": withPlaneBase("opencode-go", family),
+  };
+  BASES_BY_FAMILY.set(family, table);
+  return table;
 };
 
-/** Every protocol on one plane, sharing the plane's base. */
-function withPlaneBase(plane: Plane): Readonly<Record<string, string>> {
-  const base = PLANE_BASE[plane];
+/** Every protocol on one plane and family, sharing that plane's base. */
+function withPlaneBase(
+  plane: Plane,
+  family: EndpointFamily
+): Readonly<Record<string, string>> {
+  const base = planeBaseFor(plane, family);
   const out: Record<string, string> = {};
   for (const [protocol, suffix] of Object.entries(PROTOCOL_SUFFIX)) {
     out[protocol] =
@@ -94,6 +149,17 @@ function withPlaneBase(plane: Plane): Readonly<Record<string, string>> {
   }
   return out;
 }
+
+/** One plane's protocol table, keyed by protocol. */
+type BaseTable = Readonly<Record<Plane, Readonly<Record<string, string>>>>;
+
+/**
+ * The base URL each protocol uses on each plane, following the catalog.
+ *
+ * Kept as the default table for callers that name no family; read
+ * {@link baseForProtocol} with an explicit family once one is known.
+ */
+export const BASE_FOR_PROTOCOL: BaseTable = basesFor("auto");
 
 /**
  * The protocol each SDK names, for a provider built here.
@@ -136,13 +202,15 @@ const isPlane = (value: string): value is Plane =>
  *
  * @param plane - the gateway plane.
  * @param protocol - the protocol the request speaks.
+ * @param family - the endpoint family; the catalog's own endpoint by default.
  * @returns the base URL, or undefined when the table does not carry that plane.
  */
 export const baseForProtocol = (
   plane: string,
-  protocol: string
+  protocol: string,
+  family: EndpointFamily = "auto"
 ): string | undefined =>
-  isPlane(plane) ? BASE_FOR_PROTOCOL[plane]?.[protocol] : undefined;
+  isPlane(plane) ? basesFor(family)[plane]?.[protocol] : undefined;
 
 /**
  * The pi model object for one catalogued model.
@@ -237,15 +305,30 @@ const ALL_THINKING_LEVELS = [
   "max",
 ] as const;
 
+/**
+ * The pi model object for one catalogued model.
+ *
+ * pi reads `api` to pick a protocol implementation and `baseUrl` to know where
+ * to send it, so both have to be right per model.
+ *
+ * @param plane - the gateway plane this model is served on.
+ * @param spec - the catalogued model.
+ * @param protocol - the protocol it speaks, from {@link protocolFor}.
+ * @param base - pi's installed catalog entry for this id, when it has one.
+ * @param family - the endpoint family to send it to; the catalog's own endpoint
+ *   by default.
+ * @returns the model object pi's provider dispatches on.
+ */
 export const piModelFor = (
   plane: Plane,
   spec: CatalogModelSpec,
   protocol: string,
-  base?: object
+  base?: object,
+  family: EndpointFamily = "auto"
 ) => ({
   ...base,
   api: protocol,
-  baseUrl: BASE_FOR_PROTOCOL[plane]?.[protocol],
+  baseUrl: baseForProtocol(plane, protocol, family),
   contextWindow: spec.context_window,
   cost: {
     cacheRead: spec.cost?.cache_read ?? 0,
