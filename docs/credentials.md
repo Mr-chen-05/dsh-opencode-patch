@@ -344,8 +344,9 @@ Everything below is measured against the live gateway and a real installation, o
 
 |  | Zen — the OLD api | Go — the NEW api |
 | :-- | :-- | :-- |
-| base URL | `https://opencode.ai/zen/v1` | `https://opencode.ai/zen/go/v1` |
+| base URL | the catalog's `opencode.api` | the catalog's `opencode-go.api` |
 | env var | `OPENCODE_API_KEY` | `OPENCODE_GO_API_KEY` |
+| the catalog's value today | `…/inference/v1` | `…/inference/go/v1` |
 | key shape | `oc_sk_…`, 51 chars | `sk-…` |
 | org on the request | **not needed** | **needed** — `x-opencode-org-id` |
 | session header | accepted, not required | **required** (`400 MissingSessionID` without) |
