@@ -390,3 +390,20 @@ Until then, another round produces another marginal commit. That is worth saying
 I wrote that the endpoint a request goes to is decided by the catalog's `api` field — `models.opencode.ai` declares `opencode.provider.api = https://opencode.ai/inference/v1` and `opencode-go.provider.api = https://opencode.ai/inference/go/v1`, so it looked like the answer. **I never read the code that would make that true.** What I actually read is `packages/ai/src/providers/opencode-zen.ts`, which has `const baseURL = "https://opencode.ai/zen/v1"` and `baseURL: input.baseURL ?? baseURL`, plus `packages/ai/src/route/endpoint.ts` saying a provider helper "can override it by configuring the route before selecting a model". Who passes `input.baseURL`, and whether the catalog's `api` reaches it, is unverified — grepping for callers of that provider in the checkout found only its own exports.
 
 That is the same failure this file keeps recording, applied to source code rather than to a document: a name that looks like the answer, read as the answer. Three subagents are reading the real chain — the endpoint resolution, the key minting and refresh, and a full 1.19-versus-2.x request comparison — and their findings will be recorded as findings rather than as inference. Until then, the sentence above is a hypothesis, not a measurement.
+
+## The endpoint chain, read out of the client instead of inferred
+
+The hypothesis above is now a finding, and the mechanism is not the one the names suggested. Read from the source at `dev` (2.0.27):
+
+- `packages/core/src/models-dev.ts:279` — `defaultSource = "https://models.opencode.ai"`, overridable by `OPENCODE_MODELS_URL`.
+- `packages/core/src/models-dev.ts:346` — `HttpClientRequest.get(\`${source}/api.json\`)`.
+- **`packages/core/src/models-dev.ts:106`** — the provider's `api` becomes `settings: { baseURL: item.api }`. This is the link that makes the catalog the endpoint's source.
+- `packages/core/src/plugin/models-dev.ts:56` — the provider is added to the catalog; `model.ts:204` merges provider settings under model settings, so a model-level value wins; `model-resolver.ts:221,234` passes them to `module.model(id, settings)`; `packages/ai/src/providers/openai-compatible.ts:29` turns `baseURL` into the route's endpoint; `packages/ai/src/route/endpoint.ts:57` renders the URL.
+
+**`OpenCodeZen.configure` is not on that path at all.** Its only callers are tests, and it cannot be a provider package because it exports no `model()`, which `ProviderPackage.Definition` requires. Its hard-coded `https://opencode.ai/zen/v1` matches the _bundled snapshot_ — which is the fallback when the cache is cold — not the live catalog, where `opencode.api` is `https://opencode.ai/inference/v1` and `opencode-go.api` is `https://opencode.ai/inference/go/v1`.
+
+Precedence in `models-dev.ts:385-401`: file, then cache, then bundled snapshot, then fetch — so a cold cache with no network serves the stale `/zen/v1` while steady state serves `/inference/v1`.
+
+**A per-model override exists and is named `provider.api` in 2.x**, not `api.url` as 1.x had it: `models-dev.ts:220` lifts `model.provider.api` into `Model.Info.settings.baseURL`. Neither `opencode` nor `opencode-go` sets one today.
+
+That is what the plugin should read, and it is why its own hard-coded `/zen/v1` is the older of the two live endpoints rather than a mistake about which one exists.
