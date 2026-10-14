@@ -329,32 +329,36 @@ export const patchFetch = (
       }
     }
 
-    // 1. Session headers: ALWAYS injected for OpenCode requests.
+    // 1. Session headers, as the version this plugin emulates sends them.
     //
-    // There are FOUR, and they do not all carry the same value. Read from the
-    // client's own source (`packages/core/src/session/model-request.ts`):
+    // Read from the 1.x line's last release, v1.19.0, in
+    // `packages/opencode/src/session/llm/request.ts`:
     //
-    //   x-opencode-session-id -> session.id   the session making THIS request
-    //   x-opencode-session    -> affinity     the id that groups them for cache
-    //   x-session-affinity    -> affinity
-    //   X-Session-Id          -> affinity
+    //   x-opencode-session-id -> sessionID     always
+    //   x-opencode-session    -> sessionID     for opencode providers
+    //   x-opencode-request    -> user.id       for opencode providers
+    //   x-session-affinity    -> sessionID     for OTHER providers only
+    //   X-Session-Id          -> sessionID     for OTHER providers only
     //
-    // where affinity is `parentID ?? fork.sessionID ?? id` (affinity.ts). So for a
-    // subagent the two differ by design: the child identifies itself in
-    // `session-id` while the cache grouping follows the parent. This plugin sent
-    // the child's id in all four, which put a subagent in its own cache group
-    // instead of its parent's - the opposite of the lineage the parent headers
-    // beside them describe.
+    // So `x-opencode-session` and `x-opencode-session-id` carry the SAME value,
+    // and the affinity pair belongs to relays. 2.x changed the first of those to
+    // an affinity id and split the value; an earlier version of this block
+    // followed 2.x, which put a subagent in its own cache group. The plugin
+    // emulates 1.19.0, so it follows 1.19.0.
+    //
+    // `x-opencode-request` is the one header of that set this plugin does not
+    // send: the CLI fills it from its own user/message id, and there is no
+    // equivalent in the turn store to fill it from. Sending a placeholder would
+    // be worse than leaving it off.
     const sessionVal = resolveSessionHeader(
       state,
       headers,
       config.sessionIdEnv
     );
-    const affinity = state?.parentValue ?? sessionVal;
-    headers.set(SESSION_HEADER, affinity);
     headers.set("x-opencode-session-id", sessionVal);
-    headers.set(SESSION_AFFINITY_HEADER, affinity);
-    headers.set(SESSION_ID_HEADER, affinity);
+    headers.set(SESSION_HEADER, sessionVal);
+    headers.set(SESSION_AFFINITY_HEADER, sessionVal);
+    headers.set(SESSION_ID_HEADER, sessionVal);
 
     // 1b. Parent session header: injected for subagents and child sessions
     if (state?.parentValue !== undefined) {

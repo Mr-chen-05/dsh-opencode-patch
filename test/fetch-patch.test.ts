@@ -604,11 +604,9 @@ describe("patchFetch", () => {
     // put a subagent in its own cache group; the assertions below are the
     // distinction, not a restatement.
     expect(headerOf(capture.init, "x-opencode-session-id")).toBe(testSession);
-    expect(headerOf(capture.init, SESSION_HEADER)).toBe(testParentSession);
-    expect(headerOf(capture.init, "x-session-affinity")).toBe(
-      testParentSession
-    );
-    expect(headerOf(capture.init, "x-session-id")).toBe(testParentSession);
+    expect(headerOf(capture.init, SESSION_HEADER)).toBe(testSession);
+    expect(headerOf(capture.init, "x-session-affinity")).toBe(testSession);
+    expect(headerOf(capture.init, "x-session-id")).toBe(testSession);
     expect(headerOf(capture.init, "x-opencode-parent-session-id")).toBe(
       testParentSession
     );
