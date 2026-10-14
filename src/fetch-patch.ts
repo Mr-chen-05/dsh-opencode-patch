@@ -456,8 +456,15 @@ export const patchFetch = (
       hooks.onCredentialFailure(gatewayPlaneFor(url), response.status);
     }
 
-    // If upstream returns 403 FreeTierError, demultiplex it to HTTP 400 so DSH's
-    // error classifier doesn't falsely categorize it as an invalid API key ("AUTH").
+    // A 403 the gateway means as an entitlement answer is remapped to 400, so
+    // DSH's error classifier does not read it as an invalid API key ("AUTH").
+    //
+    // The message states what was observed and nothing else. It used to say the
+    // free tier "can only be used from within OpenCode" and then recommend
+    // `space-bunny-free` in the same sentence - self-contradictory, and wrong:
+    // this plugin reaches the gateway through the host's adapter and does serve
+    // free models, so a refusal here is about this request, not about the tier.
+    // The gateway's own words are kept so the reader can search them.
     if (response.status === 403) {
       try {
         const cloned = response.clone();
@@ -470,7 +477,7 @@ export const patchFetch = (
             {
               error: {
                 message:
-                  "OpenCode's free tier can only be used from within OpenCode. Use space-bunny-free or a pay-as-you-go model.",
+                  "The gateway refused this model for the credential in use (403 FreeTierError). If it is a free-tier id the refusal is about this request rather than the key - the same credential answers 200 for a paid model on the same endpoint. Reported as 400 so DSH does not read it as an invalid API key.",
                 type: "free_tier_restricted",
               },
             },

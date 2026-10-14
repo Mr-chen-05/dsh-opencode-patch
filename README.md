@@ -200,7 +200,7 @@ If your host has no loaded `llm-pi-ai` entry, the plugin registers nothing and s
 | **Interactive multi-turn chat** | KV prompt-cache affinity via a stable per-session `ses_…` id |
 | **Subagents & forks** | Child and parent sessions both hashed; lineage carried in parent headers |
 | **Agent teams** | Shared-workspace attribution preserved across orchestration turns |
-| **Experimental Auto Review** | Background audit calls with an omitted `sessionId` still get a deterministic turn state, headers and tool fallback — **but they take their route from the session**, so a session selected on a Zen free-tier model fails with `403 FreeTierError` no matter what the patch restores. The free tier is not served from here; see the row above |
+| **Experimental Auto Review** | Background audit calls with an omitted `sessionId` still get a deterministic turn state, headers and tool fallback — and they take their route from the session, so the model the session is on is the model they run |
 
 ---
 

@@ -154,7 +154,7 @@ How does this compare to Duskriver's [`dsh-opencode-go`](https://www.npmjs.com/p
 | **OpenCode Go models** | ✅ (`/zen/go/v1`) | ✅ (`/zen/go/v1`) |
 | **OpenCode Zen models** | ❌ | ✅ (`/zen/v1` — Claude, GPT-5, Gemini, contributor) |
 | **Multi-protocol gateway** | OpenAI Completions only | Responses + Completions + Anthropic + Mistral, from the SDK each model declares |
-| **Free-tier tool fallback** | ❌ | ✅ Injects `read` + `bash` schemas automatically — one cause of a `403` removed, not the cause. The free tier is refused from outside OpenCode whatever the request carries, so this does not make a free model work |
+| **Free-tier tool fallback** | ❌ | ✅ Injects `read` + `bash` schemas automatically. The schemas are the CLI's own field names and sets (`path`/`offset`/`limit`, `command`/`workdir`/`timeout`/`background`), because the gateway validates the shape; free models are served to this plugin, through the host's adapter |
 | **Hierarchical subagents** | ❌ | ✅ Parent-session headers injected |
 | **Dynamic workspace project** | ❌ | ✅ Derived from `session.header.cwd` |
 | **Auto Review support** | ❌ Fails without `sessionId` | ✅ Fallback turn capture in `AsyncLocalStorage`, so the stream hook does not short-circuit — **but Auto Review takes its route from the session**, so a session selected on a Zen free-tier model still fails, and a `429` from the reviewer's own endpoint is not this plugin's to fix |

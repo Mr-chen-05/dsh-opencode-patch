@@ -9,7 +9,7 @@ Everything below is measured. Where something is not, it says so.
 |  | An `oc_…` API key | An `st_…` session token |
 | :-- | :-- | :-- |
 | Paid models | served | served |
-| Free-tier models | `403 FreeTierError` | `403 FreeTierError` — the free tier is not served from here either way |
+| Free-tier models | `403 FreeTierError` | `403 FreeTierError` — **from a bare HTTP client**. This plugin serves them, because it reaches the gateway through the host's adapter |
 | Org context | not required | `x-opencode-org-id: wrk_…` |
 | Per-request id | not required | `x-opencode-request: msg_…` |
 | Where it comes from | a key a deployment pastes or exports | an account login |
@@ -82,7 +82,7 @@ The literal `public` is worth recording because the source suggests it: a provid
 
 ## What the free tier's gate is not
 
-The error says the free tier "can only be used from within OpenCode", and enough has been excluded to take that sentence seriously.
+The error says the free tier "can only be used from within OpenCode". Everything a request can carry was excluded and the refusal did not move, which leaves the connection as the discriminator — and the sentence is literally true: this plugin, which reaches the gateway through the host's own adapter rather than a bare client, serves these models.
 
 | Excluded | How |
 | :-- | :-- |
