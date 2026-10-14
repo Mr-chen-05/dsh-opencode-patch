@@ -113,12 +113,16 @@ export const createStreamHook = (
       return next();
     }
 
-    // A model this plugin knows it cannot serve, named by hand. The gateway's own
-    // answer for a Zen free-tier id is `403 FreeTierError: can only be used from
-    // within OpenCode`, which reads as though the model were broken and sends a
-    // reader looking for the wrong thing - measured with every credential class,
-    // structure, header and endpoint, and none of them is the cause. Say what is
-    // actually true, once per model, because this hook runs on every request.
+    // A model this plugin cannot serve, named by hand - once per pair, because
+    // this hook runs on every request.
+    //
+    // The message states the reason it COMPUTED and nothing it did not. An
+    // earlier version blamed the Zen free tier for every unservable id, which was
+    // wrong twice over: for an `opencode-go` request that plane has no free tier
+    // at all, and once the free-tier exclusion was withdrawn the only reason left
+    // is the shape. A diagnostic that asserts a cause it never checked is worse
+    // than none - it sends the reader to the wrong subsystem, which is exactly
+    // what it did.
     if (
       typeof options.model === "string" &&
       options.model.length > 0 &&
@@ -126,9 +130,17 @@ export const createStreamHook = (
       !warnedUnservable.has(`${providerKey}/${options.model}`)
     ) {
       warnedUnservable.add(`${providerKey}/${options.model}`);
+      const sdk = findModelSpecOn(
+        catalogPlaneForRoute(providerKey),
+        options.model
+      )?.provider_npm;
+      const why =
+        sdk === undefined
+          ? "it names no SDK this plane has a route for"
+          : `its catalog SDK \`${sdk}\` names a protocol this plane has no route for`;
       console.warn(
-        `[dsh-opencode-patch] ${providerKey}/${options.model} is not offered by this plugin and cannot be served from here`,
-        "a Zen free-tier model is refused outside OpenCode whatever headers are sent; pick a model the picker offers"
+        `[dsh-opencode-patch] ${providerKey}/${options.model} cannot be served: ${why}`,
+        "the picker does not offer it for the same reason"
       );
     }
 

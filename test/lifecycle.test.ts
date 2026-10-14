@@ -371,10 +371,15 @@ describe("apply (plugin lifecycle)", () => {
       call();
       call();
       const mine = warnings.filter((args) =>
-        String(args[0]).includes("cannot be served from here")
+        String(args[0]).includes("cannot be served:")
       );
       expect(mine).toHaveLength(1);
       expect(String(mine[0]?.[0])).toContain("mistral-large-4");
+      // And it names the reason it COMPUTED. The message used to blame the Zen
+      // free tier for every unservable id, which was wrong for a Go request and
+      // wrong again once that exclusion was withdrawn; the only reason left is
+      // the shape, and the shape is what this now says.
+      expect(String(mine[0]?.[0])).toContain("@ai-sdk/mistral");
     } finally {
       spy.mockRestore();
     }
