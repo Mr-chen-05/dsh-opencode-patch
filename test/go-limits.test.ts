@@ -176,11 +176,24 @@ describe("go-limits: the generated table", () => {
   it("has a positive allowance in both tiers for every model", () => {
     // A zero means the parser read one tier and not the other — which is how a
     // plan figure could read as $0 without anything looking wrong.
+    // `NaN` is the third state and not a fourth kind of zero: it is a model the
+    // vendor's page does not list yet, which the meter renders as no allowance
+    // rather than as a figure. Asserting positivity for those would make the
+    // parser invent one.
+    let priced = 0;
     for (const [id, row] of Object.entries(GO_MODEL_LIMITS)) {
-      expect(row.go, `${id} go`).toBeGreaterThan(0);
-      expect(row.goPlus, `${id} goPlus`).toBeGreaterThan(0);
+      const published = !Number.isNaN(row.go);
+      expect(published, `${id} states one tier and not the other`).toBe(
+        !Number.isNaN(row.goPlus)
+      );
+      if (published) {
+        priced += 1;
+        expect(row.go, `${id} go`).toBeGreaterThan(0);
+        expect(row.goPlus, `${id} goPlus`).toBeGreaterThan(0);
+      }
       expect(row.name.length, `${id} name`).toBeGreaterThan(0);
     }
+    expect(priced, "nothing is priced at all").toBeGreaterThan(0);
   });
 
   it("is sorted, so a regeneration produces a minimal diff", () => {

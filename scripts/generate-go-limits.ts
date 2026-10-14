@@ -213,6 +213,20 @@ for (const [slug, allowance] of limits) {
   }
 }
 
+/**
+ * A number as TypeScript source.
+ *
+ * A model the vendor's page does not list has no published allowance, which the
+ * table records as `NaN`. The bare `NaN` identifier is a lint error, so the
+ * literal is written as `Number.NaN`; it stays `NaN` at runtime, which is the
+ * point - a model with no figure must not read as `$0`.
+ *
+ * @param value - the allowance.
+ * @returns the literal to emit.
+ */
+const numberLiteral = (value: number): string =>
+  Number.isNaN(value) ? "Number.NaN" : String(value);
+
 const body = [...resolved.keys()]
   .toSorted()
   .map((id) => {
@@ -228,8 +242,8 @@ const body = [...resolved.keys()]
     // whitespace.
     return [
       `  ${jsKey(id)}: {`,
-      `    go: ${row.go},`,
-      `    goPlus: ${row.goPlus},`,
+      `    go: ${numberLiteral(row.go)},`,
+      `    goPlus: ${numberLiteral(row.goPlus)},`,
       `    name: ${JSON.stringify(row.name)},`,
       "  },",
     ].join("\n");
