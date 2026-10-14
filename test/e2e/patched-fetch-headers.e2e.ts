@@ -83,10 +83,15 @@ describe.skipIf(!ENABLED)("patched fetch over a real socket", () => {
     const response = await als.run(state, () => patched(`${origin}/models`));
     expect(response.status).toBe(200);
 
-    // The three session spellings the gateway has accepted over time.
-    expect(headerOf(0, SESSION_HEADER)).toBe(state.value);
+    // The four session headers the client sends, and they are NOT one value.
+    // Read from `packages/core/src/session/model-request.ts`: `session-id` carries
+    // the session making the request while the other three carry the affinity,
+    // which is `parentID ?? fork ?? id`. So a subagent identifies itself and
+    // groups its cache under the parent - and this asserted one value four times.
     expect(headerOf(0, "x-opencode-session-id")).toBe(state.value);
-    expect(headerOf(0, SESSION_AFFINITY_HEADER)).toBe(state.value);
+    expect(headerOf(0, SESSION_HEADER)).toBe(state.parentValue);
+    expect(headerOf(0, SESSION_AFFINITY_HEADER)).toBe(state.parentValue);
+    expect(headerOf(0, "x-session-id")).toBe(state.parentValue);
 
     // Parent lineage, in both spellings.
     expect(headerOf(0, PARENT_SESSION_HEADER)).toBe("ses_parent00000");
