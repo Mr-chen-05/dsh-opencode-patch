@@ -10,6 +10,7 @@
  */
 
 import type { AsyncLocalStorage } from "node:async_hooks";
+import { existsSync } from "node:fs";
 
 import type { ResolvedPluginConfig } from "./config.ts";
 import { readSessionMetaResolver } from "./cordis-context.ts";
@@ -70,6 +71,9 @@ type StreamHandler = (options: unknown, next: () => unknown) => unknown;
  */
 const warnedUnservable = new Set<string>();
 
+/** Markers whose presence makes a directory a repository root, either kind. */
+const VCS_MARKERS = [".git", ".hg"] as const;
+
 export const projectNameFrom = (cwd: string): string | undefined => {
   const trimmed = cwd.replace(/[\\/]+$/, "");
   // A folder name is trimmed for the same reason the resolver trims `cwd`:
@@ -82,6 +86,29 @@ export const projectNameFrom = (cwd: string): string | undefined => {
     folder === ".."
   ) {
     return undefined;
+  }
+  // The REPOSITORY's name, not this folder's. OpenCode's project id resolves up
+  // to the version-control root and strips the marker - `.git` or `.hg`, both
+  // markers, because a repository is not necessarily git - and a worktree or a
+  // subdirectory therefore reports its main repository (`packages/core/src/
+  // project.ts:52,307-315,356-376`). Taking the `cwd`'s own last segment made a
+  // session in `/repo/packages/foo` report `foo` while a session in `/repo`
+  // reported `repo`: two names for one workspace, which is the attribution the
+  // header is for.
+  //
+  // The basename is sent rather than the root's path, which is OpenCode's actual
+  // value, because this repository's hard rule forbids a local path from leaving
+  // the machine - and the path carries the username.
+  const segments = trimmed.split(/[\\/]/);
+  for (let index = segments.length; index > 0; index -= 1) {
+    const candidate = segments.slice(0, index).join("/");
+    if (VCS_MARKERS.some((marker) => existsSync(`${candidate}/${marker}`))) {
+      const root = segments[index - 1]?.trim();
+      if (root !== undefined && root.length > 0) {
+        return root;
+      }
+      break;
+    }
   }
   return folder;
 };

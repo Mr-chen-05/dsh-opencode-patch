@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { basename } from "node:path";
 /**
  * projectNameFrom — the value behind `x-opencode-project`.
  *
@@ -55,5 +59,31 @@ describe("projectNameFrom", () => {
     for (const input of ["/", ".", "..", "", "   ", "///"]) {
       expect(projectNameFrom(input)).toBeUndefined();
     }
+  });
+});
+
+// The repository root, not the folder the session started in.
+//
+// OpenCode's project id resolves up to the version-control root and strips the
+// marker - `.git` or `.hg`, both, because a repository is not necessarily git -
+// so a subdirectory and the root itself report the same workspace, and a
+// worktree reports its main repository (`packages/core/src/project.ts:52,
+// 307-315, 356-376`). Taking the cwd's own last segment made
+// `/repo/packages/foo` report `foo` while `/repo` reported `repo`: two names
+// for one workspace, which is the attribution the header exists for.
+describe("projectNameFrom reports the repository, not the session's folder", () => {
+  const root = mkdtempSync(join(tmpdir(), "oc-proj-"));
+  const nested = join(root, "packages", "foo");
+  mkdirSync(nested, { recursive: true });
+  mkdirSync(join(root, ".git"));
+
+  it("gives one name for the root and for a directory inside it", () => {
+    expect(projectNameFrom(root)).toBe(basename(root));
+    expect(projectNameFrom(nested)).toBe(basename(root));
+  });
+
+  it("falls back to the folder when the tree is not a repository", () => {
+    const bare = mkdtempSync(join(tmpdir(), "oc-bare-"));
+    expect(projectNameFrom(bare)).toBe(basename(bare));
   });
 });
