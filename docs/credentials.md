@@ -408,3 +408,18 @@ store           ← the local OpenCode CLI's database, only when neither is conf
 - **`readOpencodeAccount` is wired into both request paths through the shared login reader**, and the account token with its org was measured to serve a paid model (`200`). It does not help the free tier, which nothing does.
 - **The store is read per request with no cache**, deliberately: a rotation inside OpenCode should be picked up. It is also a SQLite open per keyless request.
 - **The id collision is addressed the only way it can be**: `muse-spark-1.3-contributor-free` is no longer offered, so the host's own model of nearly the same name cannot be confused with it in the picker.
+
+### The two keys and the two endpoints are not a constraint, measured
+
+Four combinations, one paid model and one free model, all with the same client headers:
+
+| credential | endpoint | `deepseek-v4.1-flash` | `step-5-preview-free` |
+| :-- | :-- | :-- | :-- |
+| the deployment's `OPENCODE_API_KEY` | `…/zen/v1` | **200** | `403 FreeTierError` |
+| the deployment's `OPENCODE_API_KEY` | `…/inference/v1` | **200** | `403 FreeTierError` |
+| the installation's `auth.json` key | `…/zen/v1` | **200** | `403 FreeTierError` |
+| the installation's `auth.json` key | `…/inference/v1` | **200** | `403 FreeTierError` |
+
+**So neither key is bound to either endpoint.** They are two paths into one gateway, which is what `opencode-1.19-api.md` said before any of this, and a plugin does not have to pick between them for the credential's sake. A route that was built to move a request from one family to the other on the strength of the key's format was withdrawn for exactly this reason.
+
+**And the free tier is refused to all four**, while the same plugin serves `opencode/step-5-preview-free` normally. That is the shape of the gate: it is the connection, not the credential, the endpoint, the headers or the body. The two keys are also different values - the installation's is the one OpenCode 2.x minted, the deployment's is the one the profile declares - and the deployment's two environment variables hold the _same_ key, so they do not distinguish the planes. The entry name does, in both stores.

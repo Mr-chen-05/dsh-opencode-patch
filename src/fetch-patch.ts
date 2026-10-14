@@ -13,7 +13,6 @@
 import type { AsyncLocalStorage } from "node:async_hooks";
 
 import { DEFAULT_GATEWAY_URLS, type ResolvedPluginConfig } from "./config.ts";
-import { isNewFormatKey, pairedEndpointUrl } from "./endpoint-pairing.ts";
 import { resolveOpencodeStoreKey } from "./go-discovery.ts";
 import {
   extractApiKeyFromHeaders,
@@ -345,38 +344,28 @@ export const patchFetch = (
     // an affinity id and split the value; an earlier version of this block
     // followed 2.x, which put a subagent in its own cache group. The plugin
     // emulates 1.19.0, so it follows 1.19.0.
+    // 1. Session headers, as the version this plugin emulates sends them.
     //
-    // `x-opencode-request` is the one header of that set this plugin does not
-    // send: the CLI fills it from its own user/message id, and there is no
-    // equivalent in the turn store to fill it from. Sending a placeholder would
-    // be worse than leaving it off.
+    // Read from the 1.x line's last release, v1.19.0, in
+    // `packages/opencode/src/session/llm/request.ts`: `x-opencode-session-id`
+    // and `x-opencode-session` both carry `sessionID`, and the affinity pair
+    // belongs to relays. 2.x splits the first of those into an affinity id; the
+    // plugin emulates 1.19.0, so it follows 1.19.0.
+    //
+    // Which ENDPOINT the request goes to is the deployment's, not this block's:
+    // measured, either key serves a paid model on either endpoint - they are two
+    // paths into one gateway - so nothing here has to pick one. `x-opencode-
+    // request` is the one header of the set this plugin does not send, because
+    // the CLI fills it from its own user id and the turn store has no equivalent.
     const sessionVal = resolveSessionHeader(
       state,
       headers,
       config.sessionIdEnv
     );
-    // Which GENERATION the session headers follow is the credential's, because
-    // the two endpoint families are matched sets and so are the request shapes:
-    //
-    //   1.19.0  x-opencode-session-id -> sessionID   x-opencode-session -> sessionID
-    //           affinity pair -> other providers only
-    //   2.x     x-opencode-session-id -> sessionID   x-opencode-session -> affinity
-    //           affinity pair -> always, where affinity is parentID ?? fork ?? id
-    //
-    // A 2.x key talks to a 2.x endpoint, so it gets the 2.x shape; the older key
-    // keeps the 1.19 one, which is what this plugin emulated before either was
-    // distinguished. Reading the credential here is safe: the block above has
-    // already resolved it.
-    const sessionCredential = headers
-      .get(wireHeader)
-      ?.replace(/^Bearer\s+/iu, "")
-      .trim();
-    const isTwoX = isNewFormatKey(sessionCredential);
-    const affinity = state?.parentValue ?? sessionVal;
     headers.set("x-opencode-session-id", sessionVal);
-    headers.set(SESSION_HEADER, isTwoX ? affinity : sessionVal);
-    headers.set(SESSION_AFFINITY_HEADER, isTwoX ? affinity : sessionVal);
-    headers.set(SESSION_ID_HEADER, isTwoX ? affinity : sessionVal);
+    headers.set(SESSION_HEADER, sessionVal);
+    headers.set(SESSION_AFFINITY_HEADER, sessionVal);
+    headers.set(SESSION_ID_HEADER, sessionVal);
 
     // 1b. Parent session header: injected for subagents and child sessions
     if (state?.parentValue !== undefined) {
@@ -433,19 +422,7 @@ export const patchFetch = (
       }
     }
 
-    // The credential's format decides which endpoint family it belongs to. A
-    // mismatched pair is refused in a way that reads like an entitlement fault,
-    // so the request is moved to the family its own credential names.
-    const wireCredential = headers
-      .get(wireHeader)
-      ?.replace(/^Bearer\s+/iu, "")
-      .trim();
-    const paired = pairedEndpointUrl(url, wireCredential);
-    const response = await original.call(
-      this,
-      paired === url ? input : paired,
-      newInit
-    );
+    const response = await original.call(this, input, newInit);
 
     // One line per request the interceptor touched, so a run that misbehaves can
     // be read back instead of guessed at. Presence, never values: whether a
