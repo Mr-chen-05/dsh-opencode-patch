@@ -1,7 +1,4 @@
 import { mkdirSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { basename } from "node:path";
 /**
  * projectNameFrom — the value behind `x-opencode-project`.
  *
@@ -13,6 +10,8 @@ import { basename } from "node:path";
  *
  * @module test/project-name.test
  */
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
