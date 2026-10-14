@@ -13,7 +13,7 @@
 import type { AsyncLocalStorage } from "node:async_hooks";
 
 import { DEFAULT_GATEWAY_URLS, type ResolvedPluginConfig } from "./config.ts";
-import { pairedEndpointUrl } from "./endpoint-pairing.ts";
+import { isNewFormatKey, pairedEndpointUrl } from "./endpoint-pairing.ts";
 import { resolveOpencodeStoreKey } from "./go-discovery.ts";
 import {
   extractApiKeyFromHeaders,
@@ -355,10 +355,28 @@ export const patchFetch = (
       headers,
       config.sessionIdEnv
     );
+    // Which GENERATION the session headers follow is the credential's, because
+    // the two endpoint families are matched sets and so are the request shapes:
+    //
+    //   1.19.0  x-opencode-session-id -> sessionID   x-opencode-session -> sessionID
+    //           affinity pair -> other providers only
+    //   2.x     x-opencode-session-id -> sessionID   x-opencode-session -> affinity
+    //           affinity pair -> always, where affinity is parentID ?? fork ?? id
+    //
+    // A 2.x key talks to a 2.x endpoint, so it gets the 2.x shape; the older key
+    // keeps the 1.19 one, which is what this plugin emulated before either was
+    // distinguished. Reading the credential here is safe: the block above has
+    // already resolved it.
+    const sessionCredential = headers
+      .get(wireHeader)
+      ?.replace(/^Bearer\s+/iu, "")
+      .trim();
+    const isTwoX = isNewFormatKey(sessionCredential);
+    const affinity = state?.parentValue ?? sessionVal;
     headers.set("x-opencode-session-id", sessionVal);
-    headers.set(SESSION_HEADER, sessionVal);
-    headers.set(SESSION_AFFINITY_HEADER, sessionVal);
-    headers.set(SESSION_ID_HEADER, sessionVal);
+    headers.set(SESSION_HEADER, isTwoX ? affinity : sessionVal);
+    headers.set(SESSION_AFFINITY_HEADER, isTwoX ? affinity : sessionVal);
+    headers.set(SESSION_ID_HEADER, isTwoX ? affinity : sessionVal);
 
     // 1b. Parent session header: injected for subagents and child sessions
     if (state?.parentValue !== undefined) {
