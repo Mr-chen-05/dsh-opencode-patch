@@ -493,3 +493,16 @@ A session did run on `opencode/step-5-preview-free` through this plugin when the
 So a raw client cannot distinguish them for this model, and the session that worked on the old family did so through the host's adapter rather than through any of those. **Whether the adapter's path to `/inference/v1` is treated the same way as its path to `/zen/v1` is not measured**, and it is the first thing to check after a restart: the endpoint change moved every request to the new family, including the free-tier ones.
 
 That is recorded rather than asserted, because the honest position is that the plugin's free models worked on one endpoint in practice and are refused on both in measurement - which is exactly the place this work has been wrong before.
+
+## Both remotes absent at once, and the two console lines that would say why
+
+The card now reports `the login remote did not answer` and `读不到配额` together. Both services are the plugin's own — `opencodeLogin` and `opencodeGoUsage` — and both are mounted by the same helper in `settings-page.tsx:140-160`, so one failure explains both.
+
+It is **not** the read race: the login row resolves its remote per call, and the usage summary reads up to five times with a growing wait, so a mount that arrived late would be found by either. Both being absent means the mount did not happen or did not succeed.
+
+The helper warns in exactly two ways, and the console will carry one of them:
+
+- `[dsh-opencode-patch] <what>: the settings context has no remote to mount on` followed by `Object.keys(ctx)` — the settings context exposes no `remote`, which is also what would stop the plugin activating at all if `remote` were a hard inject key.
+- `[dsh-opencode-patch] <what> did not mount` followed by the thrown error — `ctx.remote.$mount` rejected.
+
+Neither line is visible in a screenshot, and which one it is decides the fix: the first is a wiring problem in this plugin, the second is the host refusing the contribution. Ask for the line rather than guessing, which is the mistake this file keeps recording.
