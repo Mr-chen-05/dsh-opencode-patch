@@ -121,6 +121,19 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
     name: "LongCat 2.5 Preview Free",
   },
   {
+    context_window: 1_048_576,
+    cost: {
+      cache_read: 0.2,
+      input: 4,
+      output: 20,
+    },
+    id: "gemini-4-argon-contributor",
+    input_modalities: ["text", "image"],
+    max_output_tokens: 65_536,
+    name: "Gemini 4 Argon Contributor",
+    provider_npm: "@ai-sdk/google",
+  },
+  {
     context_window: 1_000_000,
     cost: {
       cache_read: 0.03,
@@ -169,18 +182,6 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
     input_modalities: ["text", "image"],
     max_output_tokens: 384_000,
     name: "DeepSeek V4.1 Flash",
-  },
-  {
-    context_window: 1_000_000,
-    cost: {
-      cache_read: 0.003,
-      input: 0.15,
-      output: 0.6,
-    },
-    id: "deepseek-v4-flash-vision-exp",
-    input_modalities: ["text", "image"],
-    max_output_tokens: 384_000,
-    name: "DeepSeek V4 Flash Vision Exp",
   },
   {
     context_window: 1_000_000,
@@ -464,18 +465,6 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
     max_output_tokens: 65_536,
     name: "Qwen3.7 Plus",
     provider_npm: "@ai-sdk/anthropic",
-  },
-  {
-    context_window: 1_000_000,
-    cost: {
-      cache_read: 0.003,
-      input: 0.15,
-      output: 0.6,
-    },
-    id: "deepseek-v4-flash",
-    input_modalities: ["text"],
-    max_output_tokens: 384_000,
-    name: "DeepSeek V4 Flash",
   },
 ];
 

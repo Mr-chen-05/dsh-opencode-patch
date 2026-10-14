@@ -11,6 +11,7 @@ import {
   UNSERVED_SDKS,
   SELF_MOUNTED_ROUTES,
 } from "../src/index.ts";
+import { UNSERVED_PLANE_SDKS } from "../src/responses-routes.ts";
 
 /**
  * The protocols this plugin mounts must be ones the harness's own pi-ai layer
@@ -149,7 +150,11 @@ describe("routing · every catalogued model has a protocol its plane can serve",
       for (const model of catalog) {
         const sdk = model.provider_npm;
         // No SDK means the provider's own default, which is always servable.
-        if (sdk === undefined || UNSERVED_SDKS.has(sdk)) {
+        if (
+          sdk === undefined ||
+          UNSERVED_SDKS.has(sdk) ||
+          UNSERVED_PLANE_SDKS.has(`${id} + ${sdk}`)
+        ) {
           continue;
         }
         checked += 1;

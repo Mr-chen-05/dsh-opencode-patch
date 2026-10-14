@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 /**
  * OpenCode Model Catalog & Enrichment.
  *
@@ -5,8 +6,6 @@
  *
  * @module test/catalog.test
  */
-
-import assert from "node:assert/strict";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFile } from "node:fs/promises";
 
@@ -38,6 +37,7 @@ import {
   type ActiveTurnState,
 } from "../src/index.ts";
 import { findModelSpec } from "../src/models-catalog.ts";
+import { UNSERVED_PLANE_SDKS } from "../src/responses-routes.ts";
 import { createCaptureFetch, headerOf, SESSION_RE } from "./test-helpers.ts";
 
 afterEach(() => {
@@ -47,7 +47,7 @@ afterEach(() => {
 
 describe("OpenCode Model Catalog & Enrichment", () => {
   it("ships only active, priced models in the bundled Go shim", () => {
-    expect(OPENCODE_GO_CATALOG.length).toBe(32);
+    expect(OPENCODE_GO_CATALOG.length).toBe(31);
     for (const model of OPENCODE_GO_CATALOG) {
       expect(model.id.length).toBeGreaterThan(0);
       expect(model.name.length).toBeGreaterThan(0);
@@ -922,7 +922,11 @@ describe("catalog · plane and SDK coverage", () => {
     for (const [plane, catalog] of planes) {
       for (const model of catalog) {
         const sdk = (model as { provider_npm?: string }).provider_npm;
-        if (sdk === undefined || UNSERVED_SDKS.has(sdk)) {
+        if (
+          sdk === undefined ||
+          UNSERVED_SDKS.has(sdk) ||
+          UNSERVED_PLANE_SDKS.has(`${plane} + ${sdk}`)
+        ) {
           continue;
         }
         if (internalRouteFor(plane, model.id, sdk) === undefined) {

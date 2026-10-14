@@ -142,6 +142,22 @@ export const PROTOCOL_FOR_SDK: Readonly<Record<string, string>> = {
  *   measure it. It moves to `PROTOCOL_FOR_SDK` the day that changes.
  */
 export const UNSERVED_SDKS: ReadonlySet<string> = new Set([MISTRAL_SDK]);
+/**
+ * Pairs that are knowingly unserved even though the SDK is served elsewhere.
+ *
+ * `@ai-sdk/google` is served on Zen by the bridge, and the vendor added a Google
+ * model to the GO plane as well. The bridge mounts on Zen, so that model has no
+ * route on its own plane - and a route carries one plane, so the Zen one cannot
+ * serve it. It is therefore not offered, which the servability check already
+ * enforces, and this records the decision rather than leaving the coverage guard
+ * to report it as a gap.
+ *
+ * Serving it means mounting the bridge on the Go plane too, which is a change to
+ * what the bridge is rather than to this table.
+ */
+export const UNSERVED_PLANE_SDKS: ReadonlySet<string> = new Set([
+  "opencode-go + @ai-sdk/google",
+]);
 
 /**
  * Routes this plugin registers through its own adapter rather than the
