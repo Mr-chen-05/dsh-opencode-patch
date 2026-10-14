@@ -252,7 +252,10 @@ export const piModelFor = (
   // need not carry these models at all, and when it does not, `reasoning` and
   // `thinkingLevelMap` were simply absent - which is the thinking level the
   // picker could not offer for any model.
-  ...(spec.reasoning === undefined ? {} : { reasoning: spec.reasoning }),
+  // Required by pi's Model, not optional: a model that declares no reasoning
+  // takes none, and `false` is what that means. Omitting it left an object the
+  // package's own type says cannot exist.
+  reasoning: spec.reasoning === true,
   ...(thinkingLevelMapFor(spec) === undefined
     ? {}
     : { thinkingLevelMap: thinkingLevelMapFor(spec) }),

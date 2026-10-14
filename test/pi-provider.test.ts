@@ -250,3 +250,57 @@ describe("pi-provider · the User-Agent the stream hook sends", () => {
     expect(OPENCODE_USER_AGENT).toBe("opencode/1.19.0");
   });
 });
+
+describe("pi-provider · the object pi requires", () => {
+  // pi's `Model` declares `reasoning: boolean` and `thinkingLevelMap?`, and a
+  // model built here may have no entry in pi's installed catalog at all - the
+  // spread that was supposed to carry those fields is then an empty object. So
+  // the fields pi requires have to be set, not inherited.
+  const requiredSpec = {
+    context_window: 1_048_576,
+    cost: { input: 1, output: 2 },
+    id: "x",
+    input_modalities: ["text"],
+    max_output_tokens: 65_536,
+    name: "X",
+    reasoning: true,
+    reasoning_options: [{ type: "effort", values: ["low", "high"] }],
+  };
+
+  it("sets every required field, with no catalog entry to inherit from", () => {
+    const model = piModelFor(
+      "opencode",
+      requiredSpec as never,
+      "openai-completions"
+    );
+    for (const field of [
+      "api",
+      "baseUrl",
+      "contextWindow",
+      "cost",
+      "id",
+      "input",
+      "maxTokens",
+      "name",
+      "provider",
+      "reasoning",
+    ]) {
+      expect(model, field).toHaveProperty(field);
+    }
+    expect(typeof model.reasoning).toBe("boolean");
+  });
+
+  it("says false rather than nothing when a model declares no reasoning", () => {
+    const model = piModelFor(
+      "opencode",
+      {
+        ...requiredSpec,
+        reasoning: undefined,
+        reasoning_options: undefined,
+      } as never,
+      "openai-completions"
+    );
+    expect(model.reasoning).toBe(false);
+    expect(model.thinkingLevelMap).toBeUndefined();
+  });
+});
