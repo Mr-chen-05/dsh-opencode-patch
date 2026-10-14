@@ -403,6 +403,15 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
     expect(isServableModel("gemini-3.1-pro", "opencode")).toBe(true);
   });
 
+  it("refuses a model whose plane + SDK combination is declared unserved", () => {
+    // gemini-4-argon-contributor is in the Go catalog with @ai-sdk/google,
+    // but the Google bridge only mounts on Zen. UNSERVED_PLANE_SDKS marks
+    // 'opencode-go + @ai-sdk/google' so it is not offered on Go.
+    expect(isServableModel("gemini-4-argon-contributor", "opencode-go")).toBe(
+      false
+    );
+  });
+
   it("offers a free-tier model, because a signed-in deployment can run one", () => {
     // This asserted the opposite for several rounds. The measurements behind the
     // exclusion sent an API key, the account token, the token with its org, every

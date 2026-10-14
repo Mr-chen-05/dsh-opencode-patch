@@ -34,6 +34,7 @@ import {
   isInternalRoute,
   isServableSdk,
   protocolFromModelId,
+  UNSERVED_PLANE_SDKS,
 } from "./responses-routes.ts";
 
 export interface DiscoveryCandidate {
@@ -249,6 +250,9 @@ export const isServableModel = (id: unknown, route: string): boolean => {
   // should be given instead of an empty picker.
   const sdk = findModelSpecOn(catalogPlaneForRoute(route), id)?.provider_npm;
   if (sdk !== undefined) {
+    if (UNSERVED_PLANE_SDKS.has(`${route} + ${sdk}`)) {
+      return false;
+    }
     return isServableSdk(sdk);
   }
   // A model the catalog does not describe: `undefined` is the completions default,
