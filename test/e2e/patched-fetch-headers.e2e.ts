@@ -91,8 +91,8 @@ describe.skipIf(!ENABLED)("patched fetch over a real socket", () => {
     // generation, while the plugin emulates 1.19.0.
     expect(headerOf(0, "x-opencode-session-id")).toBe(state.value);
     expect(headerOf(0, SESSION_HEADER)).toBe(state.value);
-    expect(headerOf(0, SESSION_AFFINITY_HEADER)).toBe(state.value);
-    expect(headerOf(0, "x-session-id")).toBe(state.value);
+    expect(headerOf(0, SESSION_AFFINITY_HEADER)).toBeNull();
+    expect(headerOf(0, "x-session-id")).toBeNull();
 
     // Parent lineage, in both spellings.
     expect(headerOf(0, PARENT_SESSION_HEADER)).toBe("ses_parent00000");
