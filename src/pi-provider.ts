@@ -171,6 +171,62 @@ export const baseForProtocol = (
  * @param base - pi's installed catalog entry for this id, when it has one.
  * @returns the model object pi's provider dispatches on.
  */
+/**
+ * The thinking levels a model accepts, as pi's map.
+ *
+ * pi's `ThinkingLevelMap` is `Partial<Record<ModelThinkingLevel, string | null>>`
+ * — each of pi's levels mapped onto the spelling the model's own wire uses, with
+ * `null` marking a level it does not take. The catalog says which levels a model
+ * has and says nothing about the wire's spelling, so the mapping is the identity
+ * where the two agree, and every level the catalog does not list is `null` rather
+ * than absent: absent means "use the provider default", which would offer a level
+ * the model refuses.
+ *
+ * Only the shapes the catalog actually uses are handled — `effort` with a value
+ * list, and `toggle` for on/off. `budget_tokens` carries a minimum rather than a
+ * list of levels, so it contributes no map: pi's token-budget field is a separate
+ * mechanism and guessing one here would be worse than offering none.
+ *
+ * @param spec - the catalogued model.
+ * @returns the map, or `undefined` when the model declares no levels.
+ */
+export const thinkingLevelMapFor = (
+  spec: CatalogModelSpec
+): Partial<Record<string, string | null>> | undefined => {
+  const options = spec.reasoning_options ?? [];
+  const levels = options.find(
+    (option) => option.type === "effort" && (option.values?.length ?? 0) > 0
+  )?.values;
+  if (levels !== undefined) {
+    // `off` is part of the map too, and `null` there means the model has no
+    // off switch - which is what the installed catalog says for these models.
+    const map: Record<string, string | null> = { off: null };
+    for (const level of ALL_THINKING_LEVELS) {
+      map[level] = levels.includes(level) ? level : null;
+    }
+    return map;
+  }
+  if (options.some((option) => option.type === "toggle")) {
+    // On or off: every level is the same "on", and `off` is the model's own.
+    const map: Record<string, string | null> = { off: null };
+    for (const level of ALL_THINKING_LEVELS) {
+      map[level] = "on";
+    }
+    return map;
+  }
+  return undefined;
+};
+
+/** pi's levels, in its own order, so the map is complete rather than partial. */
+const ALL_THINKING_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
 export const piModelFor = (
   plane: Plane,
   spec: CatalogModelSpec,
@@ -192,4 +248,12 @@ export const piModelFor = (
   maxTokens: spec.max_output_tokens,
   name: spec.name,
   provider: plane,
+  // Explicit, because the spread above is only a floor: pi's installed catalog
+  // need not carry these models at all, and when it does not, `reasoning` and
+  // `thinkingLevelMap` were simply absent - which is the thinking level the
+  // picker could not offer for any model.
+  ...(spec.reasoning === undefined ? {} : { reasoning: spec.reasoning }),
+  ...(thinkingLevelMapFor(spec) === undefined
+    ? {}
+    : { thinkingLevelMap: thinkingLevelMapFor(spec) }),
 });
