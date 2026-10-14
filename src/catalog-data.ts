@@ -752,18 +752,6 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     name: "MiniMax-M2.5",
   },
   {
-    context_window: 1_048_576,
-    cost: {
-      input: 0,
-      output: 0,
-    },
-    id: "exo-free",
-    input_modalities: ["text", "image"],
-    is_free: true,
-    max_output_tokens: 131_072,
-    name: "Exo Free",
-  },
-  {
     context_window: 400_000,
     cost: {
       cache_read: 0.005,

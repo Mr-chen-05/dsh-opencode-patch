@@ -94,7 +94,7 @@ So the fix belongs here rather than in anyone's profile: the routes for the othe
 
 **And the deeper half: a model the catalog does not carry cannot be routed at all.** Measured: `gemini-3.8-flash` and `claude-sonnet-4-6` are in neither shipped catalog, so `findModelSpecOn` finds no entry, `provider_npm` is `undefined`, and `undefined` is the DEFAULT — the completions shape. That default is right for a model that omits its SDK and wrong for one the catalog has never heard of, and the two are indistinguishable at that point. A model listed by hand on a completions route therefore stays there whatever protocol it actually speaks, and the gateway answers `400` — which is the whole of the reported symptom.
 
-`catalog-data.ts` carries `provider_npm` only for models that override the default, so absence is meaningful for the 83 it ships and meaningless for anything else. A hand-listed model needs its protocol from somewhere: the catalog, a route that declares it, or a rule that reads it off the id.
+`catalog-data.ts` carries `provider_npm` only for models that override the default, so absence is meaningful for the 82 it ships and meaningless for anything else. A hand-listed model needs its protocol from somewhere: the catalog, a route that declares it, or a rule that reads it off the id.
 
 **And the other half of I1: it is still OFFERED.** `models-discovery.ts` filters a route's listing with `isServableModel`, which asks the catalog for the model's SDK and treats a missing answer as servable — correctly, because absence means the completions default. For a model the catalog has never heard of, absence means the same thing by accident, so a hand-listed model is offered on a route that cannot serve it. The routing fix above moves it when it is chosen; this is the half that would stop it being offered at all, and the two belong together: I1 says a model that cannot work is not offered, and today that clause holds only for models the catalog describes.
 
@@ -215,7 +215,7 @@ Worth keeping separate because the conclusions differ: the first is fixed by not
 
 ## Every count in the documentation, checked against the data
 
-Two were missed while chasing the catalog's changes — Go's total and its no-SDK row — so the sweep was finished properly: every number stated in any document, compared against `catalog-data.ts`. The facts are Zen 85 with 28 no-SDK, 30 openai, 18 anthropic, 8 google and 1 mistral, and Go 32 with 20 no-SDK, and every live count in the docs says exactly that.
+Two were missed while chasing the catalog's changes — Go's total and its no-SDK row — so the sweep was finished properly: every number stated in any document, compared against `catalog-data.ts`. The facts are Zen 82 with 25 no-SDK, 30 openai, 18 anthropic, 8 google and 1 mistral, and Go 32 with 20 no-SDK, and every live count in the docs says exactly that.
 
 Two numbers that look stale are not, and they are worth naming so the next sweep does not "fix" them: `0 of 31` appears once, inside this file, as a quotation of the mistake; and `16 of 17` is a recorded test result from the round that narrowed the header test, not a count of anything current.
 
@@ -480,3 +480,16 @@ Steps 1 and 2 alone change nothing, and step 3 without 1 or 2 moves a constant. 
 The plugin's turn state carries `model`, `parentValue`, `project`, `provider` and `value` (`src/turn-store.ts`), and none of them is a message id: `value` is the session's derived id, which is a different object from the message. The stream hook's `options` carries no message either — the adapter builds the body after the hook returns — so there is nothing at this layer to send, and inventing a value would be worse than omitting the header.
 
 **What it needs is not a code change but a datum**: the host exposing a per-turn message id in the turn state. The gateway itself reads this header as a metric (`packages/console/app/src/routes/zen/util/handler.ts:127-135`), not as an entitlement, so nothing functional is lost while it is absent — but a plugin that wanted to match 1.19.0's request byte for byte would need it.
+
+## A free model ran on /zen/v1 and may not run on /inference/v1 — measured, unresolved
+
+The observed error is this plugin's own remap with the old wording, which means the running host predates the message change - but the endpoint it was refused on is the new one, and that is the part that matters.
+
+A session did run on `opencode/step-5-preview-free` through this plugin when the mount sent to `…/zen/v1`. Measured on the raw HTTP path, that model is refused on **both** families:
+
+- deployment key → `/zen/v1`: 403, → `/inference/v1`: 403
+- installation key → `/zen/v1`: 403, → `/inference/v1`: 403
+
+So a raw client cannot distinguish them for this model, and the session that worked on the old family did so through the host's adapter rather than through any of those. **Whether the adapter's path to `/inference/v1` is treated the same way as its path to `/zen/v1` is not measured**, and it is the first thing to check after a restart: the endpoint change moved every request to the new family, including the free-tier ones.
+
+That is recorded rather than asserted, because the honest position is that the plugin's free models worked on one endpoint in practice and are refused on both in measurement - which is exactly the place this work has been wrong before.
