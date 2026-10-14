@@ -166,6 +166,7 @@ export {
 } from "./models-catalog.ts";
 export {
   decorateModelDiscovery,
+  decorateModelInfo,
   hideResponsesRoute,
   isRouteRegistered,
   mergeDiscoveredModels,

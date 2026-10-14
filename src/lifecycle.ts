@@ -47,6 +47,7 @@ import {
 } from "./models-catalog.ts";
 import {
   decorateModelDiscovery,
+  decorateModelInfo,
   hideResponsesRoute,
 } from "./models-discovery.ts";
 import { orgFor, setOrg } from "./org-cache.ts";
@@ -294,6 +295,10 @@ const installFetchPatch = (
     // Decorate discovery in the same effect so disabling the plugin restores
     // both the gateway fetch behavior and the Host discovery method.
     const stopDiscoveryDecoration = decorateModelDiscovery(ctx, config);
+    // And the model-info decoration, which is what the picker's Effort row
+    // reads. Same effect and same reason: it replaces a Host method, so it has
+    // to live on this fiber to be undone on reload rather than stacked.
+    const stopModelInfoDecoration = decorateModelInfo(ctx, config);
     // Same reasoning for the listing patch: it replaces Host methods, so it must
     // be tied to this fiber. Called OUTSIDE an effect it would never be undone,
     // and every live reload would stack another wrapper. Installed before the
@@ -336,6 +341,7 @@ const installFetchPatch = (
       releaseResponsesProvider();
       stopCatalogHiding?.();
       stopDiscoveryDecoration?.();
+      stopModelInfoDecoration?.();
       if (globalThis.fetch === patched) {
         globalThis.fetch = originalFetch;
       }

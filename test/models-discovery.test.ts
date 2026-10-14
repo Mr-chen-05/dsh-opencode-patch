@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   decorateModelDiscovery,
+  decorateModelInfo,
   hideResponsesRoute,
   isRouteRegistered,
   mergeDiscoveredModels,
@@ -425,5 +426,111 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
     // the stream hook, and a hidden model is reported nowhere.
     expect(isServableModel("space-bunny-free", "opencode")).toBe(true);
     expect(isServableModel("step-5-preview-free", "opencode")).toBe(true);
+  });
+});
+
+/**
+ * The picker's Effort row. `buildModelCatalog` in the session controller calls
+ * `ctx.llm.resolveModelInfo` per model and renders thinking-level choices only
+ * from what comes back, so a plane route whose adapter reports no `reasoning`
+ * shows the model with NO Effort row at all. These cases are that surface.
+ */
+describe("models-discovery: the Effort row a model reports", () => {
+  /** A minimal Host `llm` service whose `resolveModelInfo` answers per route. */
+  const llmWith = (answer: (provider: string, model: string) => unknown) => ({
+    llm: {
+      resolveModelInfo: async (provider: string, model: string) =>
+        answer(provider, model),
+    },
+  });
+
+  const enrichConfig = resolveConfig({ enrichModels: true });
+  const patched = (
+    ctx: CordisContext
+  ): ((...a: unknown[]) => Promise<unknown>) =>
+    (ctx.llm as { resolveModelInfo: (...a: unknown[]) => Promise<unknown> })
+      .resolveModelInfo;
+
+  it("fills the reasoning a plane route's adapter does not report", async () => {
+    const ctx = llmWith(() => ({
+      id: "minimax-m3",
+      name: "MiniMax-M3",
+      provider: "opencode",
+    })) as never as CordisContext;
+    const stop = decorateModelInfo(ctx, enrichConfig);
+
+    // The plane route is the user's own: it declares no models, so its adapter
+    // answers straight from the installed catalog and reports no reasoning.
+    const resolved = await patched(ctx)("opencode", "minimax-m3");
+    expect(resolved).toMatchObject({
+      context: { contextWindow: 512_000 },
+      reasoning: { efforts: expect.any(Array) },
+    });
+    const { efforts } = (
+      resolved as { reasoning: { efforts: { id: string; name: string }[] } }
+    ).reasoning;
+    expect(efforts.length).toBeGreaterThan(0);
+    for (const effort of efforts) {
+      expect(typeof effort.id).toBe("string");
+      expect(typeof effort.name).toBe("string");
+      // `off` is never offered: the map pins it to null, which is the
+      // adapter's way of saying the model has no off switch.
+      expect(effort.id).not.toBe("off");
+    }
+
+    stop?.();
+  });
+
+  it("leaves the internal routes alone, because their adapter is already right", async () => {
+    const answer = (provider: string) => ({
+      id: "minimax-m3",
+      name: "MiniMax-M3",
+      provider,
+      reasoning: { efforts: [{ id: "high", name: "High" }] },
+    });
+    const ctx = llmWith(answer) as never as CordisContext;
+    const stop = decorateModelInfo(ctx, enrichConfig);
+
+    const resolved = await patched(ctx)("opencode-anthropic", "minimax-m3");
+    // Unchanged: decorating our own route would risk disagreeing with dispatch.
+    expect(resolved).toEqual(answer("opencode-anthropic"));
+
+    stop?.();
+  });
+
+  it("keeps an adapter's own answer, and does not decorate what dispatch honours", async () => {
+    const own = {
+      context: { contextWindow: 4096 },
+      id: "minimax-m3",
+      name: "MiniMax-M3",
+      provider: "opencode",
+      reasoning: { efforts: [{ id: "high", name: "High" }] },
+    };
+    const ctx = llmWith(() => own) as never as CordisContext;
+    const stop = decorateModelInfo(ctx, enrichConfig);
+
+    const resolved = await patched(ctx)("opencode", "minimax-m3");
+    expect(resolved).toEqual(own);
+
+    stop?.();
+  });
+
+  it("restores the original method on dispose, and only if it is still ours", () => {
+    const before = async () => ({ id: "x" });
+    const ctx = { llm: { resolveModelInfo: before } } as never as CordisContext;
+    const stop = decorateModelInfo(ctx, enrichConfig);
+
+    expect(patched(ctx)).not.toBe(before);
+    stop?.();
+    expect(patched(ctx)).toBe(before);
+  });
+
+  it("installs nothing when the plugin is not enriching models", () => {
+    const before = async () => ({ id: "x" });
+    const ctx = { llm: { resolveModelInfo: before } } as never as CordisContext;
+    expect(
+      decorateModelInfo(ctx, resolveConfig({ enrichModels: false }))
+    ).toBeUndefined();
+    expect(patched(ctx)).toBe(before);
   });
 });

@@ -29,6 +29,7 @@ import {
   type CatalogModelSpec,
   type CatalogProvider,
 } from "./models-catalog.ts";
+import { thinkingLevelMapFor } from "./pi-provider.ts";
 import {
   internalRouteFor,
   isInternalRoute,
@@ -432,6 +433,133 @@ export const decorateModelDiscovery = (
   return () => {
     if (llm.discoverModels === decorated) {
       llm.discoverModels = discover;
+    }
+  };
+};
+
+/** Every pi thinking level, in escalation order, `off` first. */
+const PI_THINKING_LEVELS: readonly string[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+
+/**
+ * The reasoning efforts DSH renders for one model, read off the SAME
+ * thinking-level map the routes dispatch on.
+ *
+ * One rule, so a level the composer offers is a level the model answers: a
+ * level the map pins to `null` is not offered, and every other level is. The
+ * wire spelling is NOT carried — an adapter's effort `id` is the pi level, and
+ * `resolveReasoningLevel` matches it by that name before the adapter translates
+ * it, so re-spelling it here would make the composer offer an effort the
+ * resolver refuses.
+ *
+ * @param map - the model's `thinkingLevelMap`.
+ * @returns the efforts, in escalation order.
+ */
+const effortsFromLevelMap = (
+  map: Partial<Record<string, string | null>>
+): { id: string; name: string }[] =>
+  PI_THINKING_LEVELS.filter((level) => map[level] !== null).map((level) => ({
+    id: level,
+    name:
+      level === "off"
+        ? "Off"
+        : `${level.charAt(0).toUpperCase()}${level.slice(1)}`,
+  }));
+
+/**
+ * Wrap the Host's `resolveModelInfo` so a plane route's model reports the
+ * thinking level the catalog declares and the context window it names.
+ *
+ * This is the seam the model picker actually reads. `buildModelCatalog`
+ * (`dsh-api-session-controller`) calls `ctx.llm.resolveModelInfo` per model and
+ * renders an Effort row only from what comes back — so a plane route whose
+ * adapter reports no `reasoning` shows no Effort row at all, which is the exact
+ * symptom this exists for: `MiniMax-M3` and `MiniMax-M2.7` declare
+ * `reasoning: true` in the catalog and still offered no thinking level.
+ *
+ * The plane routes are the user's own (`opencode`, `opencode-go`), declared in
+ * their profile with no `models` list, so their adapter falls back to the
+ * installed catalog — which knows nothing about these ids — and reports
+ * `reasoning: false`. The INTERNAL routes this plugin mounts already carry the
+ * right metadata through {@link reasoningEffortsFor}, and are passed through
+ * untouched so the two never disagree.
+ *
+ * Only MISSING fields are filled. An adapter that reports its own `reasoning` or
+ * `context` keeps it, because that is what dispatch will honour.
+ *
+ * @param ctx - host context carrying the LLM registry.
+ * @param config - the resolved plugin config.
+ * @returns the disposer restoring the original method, or `undefined`.
+ */
+export const decorateModelInfo = (
+  ctx: CordisContext,
+  config: ResolvedPluginConfig
+): (() => void) | undefined => {
+  if (!config.enrichModels) {
+    return undefined;
+  }
+  const { llm } = ctx;
+  if (llm === undefined || typeof llm.resolveModelInfo !== "function") {
+    return undefined;
+  }
+  const original = llm.resolveModelInfo;
+  const decorated = async (
+    provider: string,
+    model: string,
+    signal?: AbortSignal
+  ): Promise<unknown> => {
+    const resolved: unknown = await Reflect.apply(original, llm, [
+      provider,
+      model,
+      signal,
+    ]);
+    // Our own routes carry the real metadata already, and an answer that is not
+    // a record has nothing to fill in.
+    if (isInternalRoute(provider) || !isRecord(resolved)) {
+      return resolved;
+    }
+    const spec = findModelSpecOn(catalogPlaneForRoute(provider), model);
+    if (spec === undefined) {
+      return resolved;
+    }
+    const out: Record<string, unknown> = { ...resolved };
+    if (
+      out.context === undefined &&
+      typeof spec.context_window === "number" &&
+      spec.context_window > 0
+    ) {
+      out.context = { contextWindow: spec.context_window };
+    }
+    if (out.reasoning === undefined && spec.reasoning === true) {
+      const map = thinkingLevelMapFor(spec);
+      if (map !== undefined) {
+        const efforts = effortsFromLevelMap(map);
+        // `dsh-llm` rejects a reasoning block with no efforts, so a model whose
+        // map leaves none is reported as non-reasoning rather than as an empty
+        // control the composer could not render.
+        if (efforts.length > 0) {
+          out.reasoning = { efforts };
+        }
+      }
+    }
+    return out;
+  };
+
+  try {
+    llm.resolveModelInfo = decorated;
+  } catch {
+    return undefined;
+  }
+  return () => {
+    if (llm.resolveModelInfo === decorated) {
+      llm.resolveModelInfo = original;
     }
   };
 };

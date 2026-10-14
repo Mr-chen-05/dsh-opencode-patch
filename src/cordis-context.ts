@@ -95,6 +95,16 @@ export interface CordisContext {
      * stays out of the picker.
      */
     listModels?: (provider: string) => Promise<unknown>;
+    /**
+     * One exact model's capabilities. What the model picker's Effort row reads:
+     * a route that reports no `reasoning` here shows no thinking-level control,
+     * which is why {@link decorateModelInfo} fills the gap for the plane routes.
+     */
+    resolveModelInfo?: (
+      provider: string,
+      model: string,
+      signal?: AbortSignal
+    ) => Promise<unknown>;
   };
   /**
    * A child context whose reads and writes of `name` resolve in a new scope.
