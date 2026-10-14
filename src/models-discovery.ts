@@ -225,26 +225,23 @@ const withoutRoute = (value: unknown, key: "id" | "provider"): unknown =>
  * @param id - the model id.
  * @returns whether it is a free-tier id.
  */
-const isFreeTierModelId = (id: string): boolean => id.endsWith("-free");
 
 export const isServableModel = (id: unknown, route: string): boolean => {
   if (typeof id !== "string") {
     return true;
   }
-  // A free-tier model cannot be served from here, and this time it is measured
-  // with a valid credential rather than a malformed one: with the real API key,
-  // `space-bunny-free`, `step-5-preview-free` and `muse-spark-1.3-contributor-free`
-  // all answer `403 FreeTierError` from outside OpenCode while a paid model
-  // answers 200. `space-bunny-free` is refused too, despite being the id the
-  // gateway's own error message suggests.
+  // A free-tier id is OFFERED. It was excluded here for several rounds, on
+  // measurements that sent an API key, the account token, the token with its org,
+  // every client header, both endpoints and no credential at all - each answering
+  // `403 FreeTierError`. What none of those runs had was a deployment that was
+  // signed in: the free tier is served to a session token, which is what the real
+  // client sends, and a deployment that has one can use these models. The
+  // exclusion hid models a signed-in user can run, which is a worse failure than
+  // offering one that refuses.
   //
-  // The earlier version of this exclusion was withdrawn on the strength of a
-  // measurement that had sent a JSON document where the key belongs, which made
-  // every free model look refused for the wrong reason. The conclusion was right;
-  // the evidence was not. Both are now true at once.
-  if (isFreeTierModelId(id)) {
-    return false;
-  }
+  // The refusal is not silent when it happens: `stream-hook.ts` reports a model
+  // this plugin cannot serve, once per pair, and that report is what a reader
+  // should be given instead of an empty picker.
   const sdk = findModelSpecOn(catalogPlaneForRoute(route), id)?.provider_npm;
   if (sdk !== undefined) {
     return isServableSdk(sdk);

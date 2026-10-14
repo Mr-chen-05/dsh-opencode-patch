@@ -346,7 +346,7 @@ describe("apply (plugin lifecycle)", () => {
         },
         llm: {
           listConfigurableProviders: () => [{ provider: "opencode" }],
-          listModels: async () => [{ id: "space-bunny-free" }],
+          listModels: async () => [{ id: "mistral-large-4" }],
           listProviders: () => [{ id: "opencode" }],
           stream: (options: unknown) => options,
         },
@@ -363,7 +363,7 @@ describe("apply (plugin lifecycle)", () => {
       }
       const call = (): unknown =>
         streamHandler?.(
-          { model: "space-bunny-free", provider: "opencode" },
+          { model: "mistral-large-4", provider: "opencode" },
           () => {
             // The hook's `next` is never reached for an unservable model.
           }
@@ -374,7 +374,7 @@ describe("apply (plugin lifecycle)", () => {
         String(args[0]).includes("cannot be served from here")
       );
       expect(mine).toHaveLength(1);
-      expect(String(mine[0]?.[0])).toContain("space-bunny-free");
+      expect(String(mine[0]?.[0])).toContain("mistral-large-4");
     } finally {
       spy.mockRestore();
     }
