@@ -34,6 +34,7 @@ import {
   PARENT_SESSION_HEADER,
   SESSION_AFFINITY_HEADER,
   SESSION_HEADER,
+  SESSION_ID_HEADER,
 } from "./session.ts";
 import { maybeInjectCoreTools } from "./tool-fallback.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
@@ -325,15 +326,32 @@ export const patchFetch = (
       }
     }
 
-    // 1. Session header: ALWAYS injected for OpenCode requests
+    // 1. Session headers: ALWAYS injected for OpenCode requests.
+    //
+    // There are FOUR, and they do not all carry the same value. Read from the
+    // client's own source (`packages/core/src/session/model-request.ts`):
+    //
+    //   x-opencode-session-id -> session.id   the session making THIS request
+    //   x-opencode-session    -> affinity     the id that groups them for cache
+    //   x-session-affinity    -> affinity
+    //   X-Session-Id          -> affinity
+    //
+    // where affinity is `parentID ?? fork.sessionID ?? id` (affinity.ts). So for a
+    // subagent the two differ by design: the child identifies itself in
+    // `session-id` while the cache grouping follows the parent. This plugin sent
+    // the child's id in all four, which put a subagent in its own cache group
+    // instead of its parent's - the opposite of the lineage the parent headers
+    // beside them describe.
     const sessionVal = resolveSessionHeader(
       state,
       headers,
       config.sessionIdEnv
     );
-    headers.set(SESSION_HEADER, sessionVal);
+    const affinity = state?.parentValue ?? sessionVal;
+    headers.set(SESSION_HEADER, affinity);
     headers.set("x-opencode-session-id", sessionVal);
-    headers.set(SESSION_AFFINITY_HEADER, sessionVal);
+    headers.set(SESSION_AFFINITY_HEADER, affinity);
+    headers.set(SESSION_ID_HEADER, affinity);
 
     // 1b. Parent session header: injected for subagents and child sessions
     if (state?.parentValue !== undefined) {

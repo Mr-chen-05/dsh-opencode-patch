@@ -596,9 +596,19 @@ describe("patchFetch", () => {
       }
     );
 
-    expect(headerOf(capture.init, SESSION_HEADER)).toBe(testSession);
+    // The four session headers are not one value. The client's own source
+    // (`packages/core/src/session/model-request.ts`) sends the CHILD's id in
+    // `x-opencode-session-id` and the affinity - `parentID ?? fork ?? id` - in
+    // the other three, so a subagent identifies itself while its cache grouping
+    // follows the parent. This plugin used the child's id for all four, which
+    // put a subagent in its own cache group; the assertions below are the
+    // distinction, not a restatement.
     expect(headerOf(capture.init, "x-opencode-session-id")).toBe(testSession);
-    expect(headerOf(capture.init, "x-session-affinity")).toBe(testSession);
+    expect(headerOf(capture.init, SESSION_HEADER)).toBe(testParentSession);
+    expect(headerOf(capture.init, "x-session-affinity")).toBe(
+      testParentSession
+    );
+    expect(headerOf(capture.init, "x-session-id")).toBe(testParentSession);
     expect(headerOf(capture.init, "x-opencode-parent-session-id")).toBe(
       testParentSession
     );

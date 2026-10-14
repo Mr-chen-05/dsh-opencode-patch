@@ -20,6 +20,16 @@ export const SESSION_HEADER = "x-opencode-session";
 /** Generic proxy session affinity header used by gateways and connection pools. */
 export const SESSION_AFFINITY_HEADER = "x-session-affinity";
 
+/**
+ * The fourth session header, and the one this plugin never sent.
+ *
+ * Captured from OpenCode 2.0.28 talking to a local server: it sends
+ * `x-opencode-session`, `x-opencode-session-id`, `x-session-affinity` AND
+ * `x-session-id`, all four carrying the same value on every request. This plugin
+ * has always sent three of them.
+ */
+export const SESSION_ID_HEADER = "x-session-id";
+
 /** Header carrying the derived OpenCode parent session id for subagents. */
 export const PARENT_SESSION_HEADER = "x-opencode-parent-session-id";
 
