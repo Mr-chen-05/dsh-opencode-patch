@@ -1079,4 +1079,95 @@ describe("settings-page: every remote gets a mount", () => {
     expect(mounted).toHaveLength(1);
     expect(mounted[0]?.package).toBe("dsh-opencode-patch");
   });
+
+  it("registers the meter when the mount settles, not on a service name that never appears", async () => {
+    const injected: { slot: string; inject?: unknown }[] = [];
+    const unmounts: (() => void)[] = [];
+    // The scope the host hands the inject callback: a child that already sees
+    // the three named services. Only `slots` matters here, because the injector
+    // the slot registration returns is not called until the Host renders it.
+    const scope = {
+      slots: {
+        inject: (slot: string) => {
+          injected.push({ slot });
+          return () => {};
+        },
+        register: (_entry: Record<string, unknown>) => () => {},
+      },
+    };
+    const ctx = {
+      effect: (fn: () => unknown) => {
+        const dispose = fn();
+        if (typeof dispose === "function") {
+          unmounts.push(dispose as () => void);
+        }
+        return dispose;
+      },
+      inject: (deps: string[], cb: (scope: unknown) => unknown) => {
+        // The scoped wait must NOT name the remote namespace: it is a child of
+        // the Host remote face, not a service, so naming it waits forever — the
+        // meter then only ever appeared through a ten-second timeout.
+        expect(deps).not.toContain("remote.opencodeGoUsage");
+        return cb(scope);
+      },
+      locale: { register: () => () => {} },
+      remote: {
+        $mount: async () => () => {},
+      },
+      slots: scope.slots,
+    };
+
+    apply(ctx as never);
+    // Both paths call `registerMeter`: the scoped inject when the three named
+    // services exist, and the mount's settlement. The second is a no-op, so the
+    // slot is registered exactly once however many paths reach it.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(injected.map((entry) => entry.slot)).toEqual([
+      "conversation.input.right",
+    ]);
+    expect(unmounts.length).toBeGreaterThan(0);
+    for (const unmount of unmounts) {
+      unmount();
+    }
+  });
+
+  it("registers the meter from the mount alone when the scoped inject never fires", async () => {
+    // The case the ten-second timeout used to cover. `ctx.inject` is present but
+    // its services never appear, so the ONLY way the meter can show up is the
+    // mount settling — which is what the timeout used to stand in for.
+    const injected: string[] = [];
+    const ctx = {
+      effect: (fn: () => unknown) => fn(),
+      // Registered, never called: the Host has no model directory to hand over.
+      inject: () => () => {},
+      locale: { register: () => () => {} },
+      remote: {
+        // A mount that resolves on a later macrotask, so the settlement is
+        // genuinely asynchronous rather than already done.
+        $mount: async () => {
+          await new Promise((resolve) => {
+            setTimeout(resolve, 0);
+          });
+          return () => {};
+        },
+      },
+      slots: {
+        inject: (slot: string) => {
+          injected.push(slot);
+          return () => {};
+        },
+        register: (_entry: Record<string, unknown>) => () => {},
+      },
+    };
+
+    apply(ctx as never);
+    // Not yet: the mount has not settled.
+    expect(injected).toEqual([]);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(injected).toEqual(["conversation.input.right"]);
+  });
 });

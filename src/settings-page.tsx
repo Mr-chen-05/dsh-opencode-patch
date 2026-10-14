@@ -142,18 +142,24 @@ export const unwrapRemote = async (result: unknown): Promise<unknown> => {
  * never runs and the surface simply renders nothing - indistinguishable from a
  * surface whose service answered nothing.
  *
+ * `ready` settles when the mount is DONE, which is the one observable fact a
+ * caller can wait on. Waiting on a service name instead does not work: the
+ * namespace the contribution installs (`remote.opencodeGoUsage`) is a child of
+ * the Host remote face, not a service a scoped `ctx.inject` resolves, so naming
+ * it waits forever and the meter only appeared through a ten-second timeout.
+ *
  * @param ctx - the settings context.
  * @param contribution - the remote's descriptors.
  * @param what - what will not render, named in the report.
- * @returns the disposer the effect gives back.
+ * @returns the disposer the effect gives back, and the mount's settlement.
  */
 const mountRemote = (
   ctx: ClientContext,
   contribution: unknown,
   what: string
-): (() => void) => {
+): { dispose: () => void; ready: Promise<void> } => {
   let dispose: (() => void) | undefined;
-  const mount = async (): Promise<void> => {
+  const ready = (async (): Promise<void> => {
     if (ctx.remote === undefined || typeof ctx.remote.$mount !== "function") {
       console.warn(
         `[dsh-opencode-patch] ${what}: the settings context has no remote to mount on`,
@@ -166,10 +172,12 @@ const mountRemote = (
     } catch (error) {
       console.warn(`[dsh-opencode-patch] ${what} did not mount`, error);
     }
-  };
-  void mount();
-  return () => {
-    dispose?.();
+  })();
+  return {
+    dispose: () => {
+      dispose?.();
+    },
+    ready,
   };
 };
 
@@ -384,15 +392,21 @@ export const apply = (ctx: ClientContext): void => {
   // Combining descriptors into one contribution registers the package ONCE and
   // allows `api-gateway` to install both namespaces (`opencodeGoUsage` and
   // `opencodeLogin`) together.
-  ctx.effect?.(
-    () =>
-      mountRemote(
-        ctx,
-        patchRemote,
-        "remotes; the meter and sign-in row will render nothing"
-      ),
-    "dsh-opencode-patch: remotes"
-  );
+  ctx.effect?.(() => {
+    const remotes = mountRemote(
+      ctx,
+      patchRemote,
+      "remotes; the meter and sign-in row will render nothing"
+    );
+    // The meter is registered when the mount is DONE, which is the fact the ten
+    // -second timeout used to stand in for. `registerMeter` is idempotent, so
+    // the scoped inject below reaching it first is fine and this is then a no-op.
+    void (async () => {
+      await remotes.ready;
+      registerMeter(ctx);
+    })();
+    return remotes.dispose;
+  }, "dsh-opencode-patch: remotes");
 
   // Resolve the scope first so the meter can read its trigger markers at inject
   // time. The injector still registers without one: the meter only needs the
@@ -522,35 +536,17 @@ export const apply = (ctx: ClientContext): void => {
   // caller declared the service — so the call threw
   // `cannot get property "remote.session" without inject`, which the try/catch
   // turned into "no directory" and the meter silently rendered nothing.
-  // `remote.opencodeGoUsage` belongs HERE and not in the top-level `inject`
-  // export. The two are not interchangeable: a name in `inject` is a hard gate
-  // that stops the whole plugin activating until it exists ("web boot: 1 entry
-  // did not activate: pending (waiting for service: ...)"), whereas this call is
-  // a scoped wait that simply runs its callback once the service appears. The
-  // mount above is an effect — registered synchronously, completed
-  // asynchronously — so this waits for it rather than deadlocking on it. Without
-  // the name here, cordis refuses the read outright:
-  // `cannot get property "remote.opencodeGoUsage" without inject`.
+  //
+  // `remote.opencodeGoUsage` is deliberately NOT in this list, and also not in
+  // the top-level `inject` export. The namespace the contribution installs is a
+  // child of the Host's remote face, not a service a scoped wait resolves, so
+  // naming it waits forever: the meter only ever mounted through the ten-second
+  // timeout that used to sit here, which is why the console reported
+  // "still waiting for remote.opencodeGoUsage after 10s". The effect above waits
+  // on the mount's own settlement instead, and the injector below reads the
+  // namespace lazily at render time, when it is there.
   if (typeof ctx.inject === "function") {
-    ctx.inject(
-      ["modelDirectories", "remote", "slots", "remote.opencodeGoUsage"],
-      registerMeter
-    );
-    // A scoped wait that never resolves is the last silent failure on this
-    // path, and the one that produces the exact symptom this meter has been
-    // reported with: a card that renders, no figures, and nothing anywhere to
-    // read. The wait is for the HOST's remote face, so if it has not appeared
-    // after a generous moment the console says which names are still missing -
-    // and the meter is registered anyway, so the read can report its own
-    // reason rather than the mount never happening at all.
-    const settle = setTimeout(() => {
-      console.warn(
-        "[dsh-opencode-patch] usage remote: still waiting for",
-        "remote.opencodeGoUsage after 10s; the meter mounts anyway so the read can say why"
-      );
-      registerMeter(ctx);
-    }, 10_000);
-    settle.unref?.();
+    ctx.inject(["modelDirectories", "remote", "slots"], registerMeter);
   } else {
     registerMeter(ctx);
   }
