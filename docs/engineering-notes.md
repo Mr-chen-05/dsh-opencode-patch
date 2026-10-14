@@ -447,3 +447,13 @@ Other deltas the comparison establishes, none of them acted on yet:
 - `User-Agent` is `opencode/<version>` in 1.19.0, and `opencode/<channel>/<version>/<client>` in 2.x. The plugin sends `opencode/1.19.0 ai-sdk/provider-utils/… runtime/bun/…`, which is neither.
 - Chat bodies use `max_tokens` in 1.19.0 and `max_completion_tokens` in 2.x.
 - `b3` is absent in **both** generations, and `traceparent` appears only under `experimental.openTelemetry` — so neither belongs in the plugin's request on the evidence available.
+
+## The two gaps the failed subagent left, answered directly
+
+It died without a closing message, so the four questions it was given were answered by hand instead. Two of them are settled.
+
+**`x-opencode-project` is not a hash — it is the git root's path.** `packages/core/src/project.ts:307-315` is `root.replace(/\.git\/?$/, "")` fed to `ID.make`, so the identifier is the working-copy root with the `.git` suffix stripped. A subproject or worktree does not get its own id: `project.ts:356-376` resolves through `repo.commonDirectory` and takes that store's cached id, so a worktree shares its main repository's — which is what "workspace project attribution" means. With no VCS at all the id is `ID.global` (`:348`, `:376`), and that is the case the plugin's current `"global"` actually matches. So for a real repository the plugin sends the wrong value, and the right one is a path rather than a digest.
+
+**`x-opencode-request` is a user-message id, and it can be supplied.** 1.19.0 sends `input.user.id` (`request.ts:194`), and the value is `input.messageID ?? MessageID.ascending()` (`session/prompt.ts:471` and `:657`) — so it is the id of the user's message, not of a turn, and the CLI accepts one from its caller rather than always minting one. The capture of the running client shows the shape as `msg_…`. That matters for this plugin: there is no message id in the turn store today, which is why the header is absent, and a host that carries one could supply it rather than the plugin inventing a value.
+
+Still open from that subagent's brief: the exact AI SDK wire body on 1.19.0's default path (`max_tokens` versus `max_completion_tokens`, `stream_options`, `store`, `prompt_cache_key`, `strict`) — the pinned AI SDK versions are not in this checkout and the earlier comparison flagged its own answer as read from a different version.
