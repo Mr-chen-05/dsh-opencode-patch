@@ -472,3 +472,11 @@ To make it data, four things together:
 4. tests assert the constant agrees with the data.
 
 Steps 1 and 2 alone change nothing, and step 3 without 1 or 2 moves a constant. They belong in one piece.
+
+## `x-opencode-request` cannot be sent from here, and it is a data problem
+
+1.19.0 sends it (`request.ts:194`) and 2.x dropped it. It is the user's message id — `input.user.id`, set from `input.messageID ?? MessageID.ascending()` (`session/prompt.ts:471`, `:657`) — so the CLI is happy to be handed one rather than minting it, and the running client shows the shape as `msg_…`.
+
+The plugin's turn state carries `model`, `parentValue`, `project`, `provider` and `value` (`src/turn-store.ts`), and none of them is a message id: `value` is the session's derived id, which is a different object from the message. The stream hook's `options` carries no message either — the adapter builds the body after the hook returns — so there is nothing at this layer to send, and inventing a value would be worse than omitting the header.
+
+**What it needs is not a code change but a datum**: the host exposing a per-turn message id in the turn state. The gateway itself reads this header as a metric (`packages/console/app/src/routes/zen/util/handler.ts:127-135`), not as an entitlement, so nothing functional is lost while it is absent — but a plugin that wanted to match 1.19.0's request byte for byte would need it.
