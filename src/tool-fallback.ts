@@ -21,22 +21,20 @@ export const DUMMY_READ_TOOL_ANTHROPIC = {
   description: "Read a file or directory from the local filesystem.",
   input_schema: {
     properties: {
-      path: {
-        description: "File or directory to read",
+      filePath: {
+        description: "The absolute path to the file or directory to read",
         type: "string",
       },
       offset: {
-        description:
-          "The line or directory entry to start reading from (1-based)",
+        description: "The line number to start reading from (1-indexed)",
         type: "number",
       },
       limit: {
-        description:
-          "The maximum number of lines or directory entries to read (defaults to and capped at 2000)",
+        description: "The maximum number of lines to read (defaults to 2000)",
         type: "number",
       },
     },
-    required: ["path"],
+    required: ["filePath"],
     type: "object",
   },
   name: "read",
@@ -48,22 +46,17 @@ export const DUMMY_BASH_TOOL_ANTHROPIC = {
   input_schema: {
     properties: {
       command: {
-        description: "Shell command string to execute",
+        description: "The command to execute",
         type: "string",
       },
       workdir: {
         description:
-          "Working directory to execute the command in. Defaults to the current working directory.",
+          "The working directory to run the command in. Defaults to the current directory. Use this instead of 'cd' commands.",
         type: "string",
       },
       timeout: {
-        description:
-          "Timeout in milliseconds. Set to 0 to disable the timeout.",
+        description: "Optional timeout in milliseconds",
         type: "number",
-      },
-      background: {
-        description: "Run the command in the background.",
-        type: "boolean",
       },
     },
     required: ["command"],
@@ -78,22 +71,20 @@ export const DUMMY_READ_TOOL = {
   name: "read",
   parameters: {
     properties: {
-      path: {
-        description: "File or directory to read",
+      filePath: {
+        description: "The absolute path to the file or directory to read",
         type: "string",
       },
       offset: {
-        description:
-          "The line or directory entry to start reading from (1-based)",
+        description: "The line number to start reading from (1-indexed)",
         type: "number",
       },
       limit: {
-        description:
-          "The maximum number of lines or directory entries to read (defaults to and capped at 2000)",
+        description: "The maximum number of lines to read (defaults to 2000)",
         type: "number",
       },
     },
-    required: ["path"],
+    required: ["filePath"],
     type: "object",
   },
   type: "function",
@@ -106,22 +97,17 @@ export const DUMMY_BASH_TOOL = {
   parameters: {
     properties: {
       command: {
-        description: "Shell command string to execute",
+        description: "The command to execute",
         type: "string",
       },
       workdir: {
         description:
-          "Working directory to execute the command in. Defaults to the current working directory.",
+          "The working directory to run the command in. Defaults to the current directory. Use this instead of 'cd' commands.",
         type: "string",
       },
       timeout: {
-        description:
-          "Timeout in milliseconds. Set to 0 to disable the timeout.",
+        description: "Optional timeout in milliseconds",
         type: "number",
-      },
-      background: {
-        description: "Run the command in the background.",
-        type: "boolean",
       },
     },
     required: ["command"],
@@ -138,22 +124,20 @@ export const DUMMY_READ_TOOL_FUNCTION = {
     name: "read",
     parameters: {
       properties: {
-        path: {
-          description: "File or directory to read",
+        filePath: {
+          description: "The absolute path to the file or directory to read",
           type: "string",
         },
         offset: {
-          description:
-            "The line or directory entry to start reading from (1-based)",
+          description: "The line number to start reading from (1-indexed)",
           type: "number",
         },
         limit: {
-          description:
-            "The maximum number of lines or directory entries to read (defaults to and capped at 2000)",
+          description: "The maximum number of lines to read (defaults to 2000)",
           type: "number",
         },
       },
-      required: ["path"],
+      required: ["filePath"],
       type: "object",
     },
   },
@@ -168,22 +152,17 @@ export const DUMMY_BASH_TOOL_FUNCTION = {
     parameters: {
       properties: {
         command: {
-          description: "Shell command string to execute",
+          description: "The command to execute",
           type: "string",
         },
         workdir: {
           description:
-            "Working directory to execute the command in. Defaults to the current working directory.",
+            "The working directory to run the command in. Defaults to the current directory. Use this instead of 'cd' commands.",
           type: "string",
         },
         timeout: {
-          description:
-            "Timeout in milliseconds. Set to 0 to disable the timeout.",
+          description: "Optional timeout in milliseconds",
           type: "number",
-        },
-        background: {
-          description: "Run the command in the background.",
-          type: "boolean",
         },
       },
       required: ["command"],

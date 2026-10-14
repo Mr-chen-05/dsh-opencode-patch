@@ -425,3 +425,25 @@ Evidence, all read:
 - `auth.json` is the **v1** store. v2 reads it once, in `20260805200742_import_legacy_credentials.ts:39`, and migrates `{type:"api",key}` to `{type:"key",key}` in SQLite; nothing writes `auth.json` at HEAD. So an `oc_sk_` value under `opencode` there is a pasted service-account key, not something a login produced.
 
 **What this means for the plugin is that there is nothing to add.** `login-session.ts` already refreshes exactly the pair that refreshes — it posts to `/auth/device/token` with `grant_type=refresh_token`, the same exchange the client uses — and a service-account key is static by design. Implementing a mint-or-refresh mechanism for `oc_sk_` would be implementing something that does not exist.
+
+## The tool schemas were fixed against the wrong generation, and are back
+
+Read from `git show v1.19.0:packages/opencode/src/tool/read.ts:28-36` and `tool/shell/prompt.ts:15-23`, against the 2.x files I had read:
+
+|  | 1.19.0 (what this plugin emulates) | 2.x (what I read) |
+| :-- | :-- | :-- |
+| `read` required key | **`filePath`** | `path` |
+| `read` offset/limit descriptions | "The line number to start reading from (1-indexed)" / "The maximum number of lines to read (defaults to 2000)" | "…directory entry…" / "…defaults to and capped at 2000" |
+| the shell tool's name | **`bash`** | `shell` |
+| shell parameters | `command`, `timeout`, `workdir` | `command`, `workdir`, `timeout`, **`background`** |
+| shell `timeout` description | "Optional timeout in milliseconds" | "Set to 0 to disable… defaults to 120000…" |
+
+So the round that "fixed the tool schemas" renamed `filePath` to `path` and added `background` — both correct for 2.x and wrong for the generation this plugin emulates. Reverted. This is the third time in this session that reading the `dev` branch produced a change the `v1.19.0` tag contradicts, after the session headers and the affinity split; the branch layout is the first thing to establish, not the last.
+
+Other deltas the comparison establishes, none of them acted on yet:
+
+- `x-opencode-request` **is** sent by 1.19.0 (the user message id) and was dropped in 2.x. This plugin sends neither, because the turn store holds no message id.
+- `x-session-affinity` and `X-Session-Id` are **not** sent for `opencode*` providers in 1.19.0 — they are the other branch, for relays. This plugin sends them on every claimed request.
+- `User-Agent` is `opencode/<version>` in 1.19.0, and `opencode/<channel>/<version>/<client>` in 2.x. The plugin sends `opencode/1.19.0 ai-sdk/provider-utils/… runtime/bun/…`, which is neither.
+- Chat bodies use `max_tokens` in 1.19.0 and `max_completion_tokens` in 2.x.
+- `b3` is absent in **both** generations, and `traceparent` appears only under `experimental.openTelemetry` — so neither belongs in the plugin's request on the evidence available.
