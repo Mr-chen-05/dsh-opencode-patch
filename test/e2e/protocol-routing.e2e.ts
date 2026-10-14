@@ -258,6 +258,8 @@ const freeTierClosed = (result: Probe): boolean =>
   result.summary.includes("FreeTierError");
 
 const accessDisabled = (result: Probe): boolean =>
+  result.status === 402 ||
+  result.summary.includes("Insufficient account funds") ||
   (result.status === 403 &&
     result.summary.includes("Model access is disabled")) ||
   result.status === 429 ||
