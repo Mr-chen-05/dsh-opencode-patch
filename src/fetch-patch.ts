@@ -364,8 +364,15 @@ export const patchFetch = (
     );
     headers.set("x-opencode-session-id", sessionVal);
     headers.set(SESSION_HEADER, sessionVal);
-    headers.set(SESSION_AFFINITY_HEADER, sessionVal);
-    headers.set(SESSION_ID_HEADER, sessionVal);
+    // The affinity pair belongs to the OTHER branch in 1.19.0: for a provider
+    // that does not start with `opencode` - a relay a deployment claimed by URL -
+    // the client sends `x-session-affinity` and `X-Session-Id`; for an OpenCode
+    // plane it sends `x-opencode-session` instead and nothing else. This plugin
+    // sent all three everywhere, which is neither generation's behaviour.
+    if (!(state?.provider ?? "").startsWith("opencode")) {
+      headers.set(SESSION_AFFINITY_HEADER, sessionVal);
+      headers.set(SESSION_ID_HEADER, sessionVal);
+    }
 
     // 1b. Parent session header: injected for subagents and child sessions
     if (state?.parentValue !== undefined) {

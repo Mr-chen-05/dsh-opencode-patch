@@ -15,6 +15,7 @@ import {
   DUMMY_BASH_TOOL,
   DUMMY_READ_TOOL,
   OPENCODE_UA,
+  SESSION_AFFINITY_HEADER,
   SESSION_HEADER,
   clearCapturedApiKeys,
   getCapturedApiKey,
@@ -601,18 +602,42 @@ describe("patchFetch", () => {
     // `x-opencode-session-id` and the affinity - `parentID ?? fork ?? id` - in
     // the other three, so a subagent identifies itself while its cache grouping
     // follows the parent. This plugin used the child's id for all four, which
-    // put a subagent in its own cache group; the assertions below are the
-    // distinction, not a restatement.
+    // put a subagent in its own cache group; the affinity pair belongs to the
+    // relay branch instead.
     expect(headerOf(capture.init, "x-opencode-session-id")).toBe(testSession);
     expect(headerOf(capture.init, SESSION_HEADER)).toBe(testSession);
-    expect(headerOf(capture.init, "x-session-affinity")).toBe(testSession);
-    expect(headerOf(capture.init, "x-session-id")).toBe(testSession);
+    expect(headerOf(capture.init, "x-session-affinity")).toBeNull();
+    expect(headerOf(capture.init, "x-session-id")).toBeNull();
     expect(headerOf(capture.init, "x-opencode-parent-session-id")).toBe(
       testParentSession
     );
     expect(headerOf(capture.init, "x-parent-session-id")).toBe(
       testParentSession
     );
+  });
+
+  it("sends the affinity pair for a relay and not for an OpenCode plane", async () => {
+    // The same split 1.19.0 makes, read from
+    // `packages/opencode/src/session/llm/request.ts:190-202`: for a provider that
+    // starts with `opencode` the client sends `x-opencode-session`; for anything
+    // else - a relay a deployment claimed by URL - it sends `x-session-affinity`
+    // and `X-Session-Id`. This plugin used to send all three everywhere, which is
+    // neither generation's behaviour.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const { capture, mockFetch } = createCaptureFetch();
+    const patched = patchFetch(mockFetch, als, resolveConfig());
+    const session = openCodeSessionIdFor("relay-turn");
+
+    await als.run({ provider: "my-relay", value: session }, async () => {
+      await patched("https://opencode.ai/zen/v1/chat/completions", {
+        headers: {},
+        method: "POST",
+      });
+    });
+
+    expect(headerOf(capture.init, "x-opencode-session-id")).toBe(session);
+    expect(headerOf(capture.init, SESSION_AFFINITY_HEADER)).toBe(session);
+    expect(headerOf(capture.init, "x-session-id")).toBe(session);
   });
 
   it("injects read and bash tools for free-tier /responses models", async () => {
