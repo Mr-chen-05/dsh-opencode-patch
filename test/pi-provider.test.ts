@@ -5,6 +5,7 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
 import { describe, expect, it } from "vitest";
 
+import { OPENCODE_PLANE_API } from "../src/catalog-data.ts";
 import type { CatalogModelSpec } from "../src/catalog-data.ts";
 import { OPENCODE_USER_AGENT } from "../src/identity.ts";
 import {
@@ -156,7 +157,7 @@ describe("pi-provider · the URL each protocol reaches", () => {
       "opencode",
       spec("gpt-5.4", "@ai-sdk/openai")
     );
-    expect(url).toBe("https://opencode.ai/zen/v1/responses");
+    expect(url).toBe(`${OPENCODE_PLANE_API.zen}/responses`);
   });
 
   it("sends a Messages model to the messages endpoint", async () => {
@@ -165,12 +166,12 @@ describe("pi-provider · the URL each protocol reaches", () => {
       spec("claude-opus-5", "@ai-sdk/anthropic")
     );
     // One level shorter than the others, because this SDK appends /v1/messages.
-    expect(url).toBe("https://opencode.ai/zen/v1/messages?beta=true");
+    expect(url).toBe(`${OPENCODE_PLANE_API.zen}/messages?beta=true`);
   });
 
   it("sends a model with no SDK to the completions endpoint", async () => {
     const { url } = await requestFor("opencode", spec("big-pickle"));
-    expect(url).toBe("https://opencode.ai/zen/v1/chat/completions");
+    expect(url).toBe(`${OPENCODE_PLANE_API.zen}/chat/completions`);
   });
 
   it("sends a Google model to the endpoint a hand-declared route cannot name", async () => {
@@ -179,7 +180,7 @@ describe("pi-provider · the URL each protocol reaches", () => {
       spec("gemini-3.8-flash", "@ai-sdk/google")
     );
     expect(url).toBe(
-      "https://opencode.ai/zen/v1/models/gemini-3.8-flash:streamGenerateContent?alt=sse"
+      `${OPENCODE_PLANE_API.zen}/models/gemini-3.8-flash:streamGenerateContent?alt=sse`
     );
   });
 
@@ -188,7 +189,7 @@ describe("pi-provider · the URL each protocol reaches", () => {
       "opencode-go",
       spec("deepseek-v4-flash", "@ai-sdk/openai")
     );
-    expect(url).toBe("https://opencode.ai/zen/go/v1/responses");
+    expect(url).toBe(`${OPENCODE_PLANE_API.go}/responses`);
   });
 });
 
@@ -218,10 +219,22 @@ describe("pi-provider · the tables themselves", () => {
     }
   });
 
-  it("names a base for every protocol it can route", () => {
+  it("takes every base from the catalog, so a move follows the data", () => {
+    // The base used to be a hard-coded `…/zen` string asserted here. The vendor
+    // moved `models.dev`'s provider entry to `…/inference/v1` and a deployment
+    // would have stayed on the older endpoint while its own catalog named the
+    // newer one - which is why the mount reads `OPENCODE_PLANE_API` now.
     for (const plane of ["opencode", "opencode-go"] as const) {
       for (const [protocol, base] of Object.entries(BASE_FOR_PROTOCOL[plane])) {
-        expect(base.startsWith("https://opencode.ai/zen"), protocol).toBe(true);
+        const declared =
+          OPENCODE_PLANE_API[plane === "opencode" ? "zen" : "go"];
+        // The Anthropic endpoint is the base without its version segment, so it
+        // is the one protocol whose base is deliberately SHORTER than declared.
+        const expected =
+          protocol === "anthropic-messages"
+            ? declared.replace(/\/v1$/, "")
+            : declared;
+        expect(base, protocol).toBe(expected);
       }
     }
   });

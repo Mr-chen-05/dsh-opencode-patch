@@ -103,9 +103,20 @@ let refreshPromise:
   | undefined;
 
 export interface ParsedCatalogs {
+  /**
+   * The endpoint each plane's provider declares, read from the catalog itself
+   * rather than assumed. `models.dev` puts it on the provider entry as `api`, and
+   * the client consumes exactly this field
+   * (`packages/core/src/models-dev.ts:107`, `settings: { baseURL: item.api }`).
+   */
+  api: { go: string; zen: string };
   go: CatalogModelSpec[];
   zen: CatalogModelSpec[];
 }
+
+/** The endpoint a provider entry declares, or `""` when it declares none. */
+const providerApiFor = (entry: unknown): string =>
+  isRecord(entry) && typeof entry.api === "string" ? entry.api : "";
 
 const extractSpecs = (
   modelsObj: Record<string, unknown>,
@@ -238,7 +249,7 @@ export const findModelSpec = (modelId: string): CatalogModelSpec | undefined =>
  */
 export const parseModelsDevCatalog = (data: unknown): ParsedCatalogs => {
   if (!isRecord(data)) {
-    return { go: [], zen: [] };
+    return { api: { go: "", zen: "" }, go: [], zen: [] };
   }
   const goObj =
     isRecord(data["opencode-go"]) && isRecord(data["opencode-go"].models)
@@ -250,6 +261,10 @@ export const parseModelsDevCatalog = (data: unknown): ParsedCatalogs => {
       : {};
 
   return {
+    api: {
+      go: providerApiFor(data["opencode-go"]),
+      zen: providerApiFor(data.opencode),
+    },
     go: extractSpecs(goObj, 1_000_000),
     zen: extractSpecs(zenObj, 1_000_000),
   };

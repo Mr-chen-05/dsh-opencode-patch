@@ -108,6 +108,28 @@ const forProvider = (
 ): CatalogModelSpec[] =>
   parsed[provider].filter((spec) => !isRetiredModel(provider, spec.id));
 
+/**
+ * Replace one exported object literal, by its `export const NAME` anchor.
+ *
+ * `splice` is array-shaped: it looks for `[` and ends at `];`. The plane export
+ * is an object, so it needs its own opener and terminator - and using the array
+ * one on it would have thrown rather than half-written the file.
+ */
+const spliceObject = (source: string, name: string, body: string): string => {
+  const anchorName = `export const ${name}: `;
+  const start = source.indexOf(anchorName);
+  if (start === -1) {
+    throw new Error(`could not find ${name} in ${basename(TARGET.pathname)}`);
+  }
+  const open = source.indexOf("{", start + anchorName.length);
+  const close = source.indexOf("\n};", open);
+  if (open === -1 || close === -1) {
+    throw new Error(`${name} is not an object literal`);
+  }
+  // `close` is the newline before `};`, so the literal ends two characters on.
+  return `${source.slice(0, open)}${body}${source.slice(close + 2)}`;
+};
+
 /** Replace one exported array literal, by its `export const NAME` anchor. */
 const splice = (source: string, name: string, body: string): string => {
   const anchor = `export const ${name}: readonly CatalogModelSpec[] = `;
@@ -124,10 +146,26 @@ const splice = (source: string, name: string, body: string): string => {
   return `${source.slice(0, open)}${body}${source.slice(close + 2)}`;
 };
 
+/**
+ * The plane-level export: the endpoint each plane's provider declares.
+ *
+ * The client consumes exactly this field (`models-dev.ts:107` lifts `item.api`
+ * into `settings.baseURL`), so the shim carries the same value and the mount
+ * reads it instead of hard-coding a family.
+ */
+const renderPlaneApi = (
+  parsed: ReturnType<typeof parseModelsDevCatalog>
+): string =>
+  `{
+  go: ${JSON.stringify(parsed.api.go)},
+  zen: ${JSON.stringify(parsed.api.zen)},
+}`;
+
 const payload = await readPayload();
 const parsed = parseModelsDevCatalog(JSON.parse(payload));
 const go = forProvider(parsed, "go");
 const zen = forProvider(parsed, "zen");
+const planeApi = renderPlaneApi(parsed);
 
 /** What the shim holds now, for the report. */
 const report = (
@@ -192,5 +230,6 @@ if (!shouldWrite) {
 let source = readFileSync(TARGET, "utf8");
 source = splice(source, "OPENCODE_GO_CATALOG", render(go));
 source = splice(source, "OPENCODE_ZEN_CATALOG", render(zen));
+source = spliceObject(source, "OPENCODE_PLANE_API", planeApi);
 writeFileSync(TARGET, source);
 console.log(`\nwrote ${basename(TARGET.pathname)}`);

@@ -1,3 +1,4 @@
+import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 /**
  * `responses-provider.ts` — the plugin registering the gateway's non-default
  * planes itself, so the user keeps their existing provider and key.
@@ -20,10 +21,9 @@
  * shape that used to be passed is the shape the stand-in refuses — so a
  * regression reintroduces a failure the test can name.
  */
-
-import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 import { describe, expect, it, vi } from "vitest";
 
+import { OPENCODE_PLANE_API } from "../src/catalog-data.ts";
 import { resolveConfig } from "../src/config.ts";
 import { readCredentialPoolRotator } from "../src/cordis-context.ts";
 import { name as pluginName } from "../src/identity.ts";
@@ -809,10 +809,10 @@ describe("responses-provider: the mount survives the host's own instance", () =>
     ).toBeGreaterThan(1);
     // Spot-check the two that differ, in the gateway's own terms.
     expect(providers["opencode-anthropic"]?.baseURL).toBe(
-      "https://opencode.ai/zen"
+      OPENCODE_PLANE_API.zen.replace(/\/v1$/, "")
     );
     expect(providers["opencode-responses"]?.baseURL).toBe(
-      "https://opencode.ai/zen/v1"
+      OPENCODE_PLANE_API.zen
     );
   });
 

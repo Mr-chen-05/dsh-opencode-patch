@@ -160,10 +160,13 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // replacing the whole set — so these counts are the cold-start picker, and a
     // silent drop here is a model nobody can pick. Regenerate with
     // `scripts/regenerate-catalog-shim.ts` rather than editing by hand.
-    expect(OPENCODE_ZEN_CATALOG.length).toBe(85);
+    expect(OPENCODE_ZEN_CATALOG.length).toBe(83);
     const freeModels = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free === true);
-    // Only the free tiers the gateway still serves.
-    expect(freeModels.length).toBe(12);
+    // Only the free tiers the gateway still serves. The count is the `is_free`
+    // flag the shim carries, NOT the `-free` suffix: `big-pickle` is flagged and
+    // is not suffixed, so a suffix rule would have missed it — which is a
+    // smaller version of why the suffix-based exclusion was withdrawn.
+    expect(freeModels.length).toBe(10);
 
     const ids = new Set(OPENCODE_ZEN_CATALOG.map((m) => m.id));
     expect(ids.has("muse-spark-1.3-contributor-free")).toBe(true);
@@ -415,15 +418,34 @@ describe("OpenCode Model Catalog & Enrichment", () => {
   });
 
   it("parseModelsDevCatalog handles malformed data gracefully", () => {
-    expect(parseModelsDevCatalog(null)).toEqual({ go: [], zen: [] });
-    expect(parseModelsDevCatalog({})).toEqual({ go: [], zen: [] });
-    expect(parseModelsDevCatalog({ "opencode-go": {} })).toEqual({
-      go: [],
-      zen: [],
-    });
+    // `api` is carried alongside the arrays and is empty when nothing declares it.
+    const empty = { api: { go: "", zen: "" }, go: [], zen: [] };
+    expect(parseModelsDevCatalog(null)).toEqual(empty);
+    expect(parseModelsDevCatalog({})).toEqual(empty);
+    expect(parseModelsDevCatalog({ "opencode-go": {} })).toEqual(empty);
     expect(
       parseModelsDevCatalog({ "opencode-go": { models: "invalid" } })
-    ).toEqual({ go: [], zen: [] });
+    ).toEqual(empty);
+  });
+
+  it("carries the endpoint each plane's provider declares", () => {
+    // The client reads exactly this field (models-dev.ts:107 lifts
+    // `item.api` into `settings.baseURL`), so the shim can carry the same value
+    // instead of the mount hard-coding it.
+    const parsed = parseModelsDevCatalog({
+      opencode: { api: "https://opencode.ai/zen/v1", models: {} },
+      "opencode-go": { api: "https://opencode.ai/zen/go/v1", models: {} },
+    });
+    expect(parsed.api).toEqual({
+      go: "https://opencode.ai/zen/go/v1",
+      zen: "https://opencode.ai/zen/v1",
+    });
+    // A provider with no `api` is empty rather than guessed.
+    const bare = parseModelsDevCatalog({
+      opencode: { models: {} },
+      "opencode-go": { models: {} },
+    });
+    expect(bare.api).toEqual({ go: "", zen: "" });
   });
 
   it("drops deprecated models from a refresh so they cannot return", () => {

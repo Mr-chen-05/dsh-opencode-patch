@@ -69,6 +69,16 @@ export const RETIRED_ZEN_MODEL_IDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Complete catalog of OpenCode Go subscription models from models.dev. */
+/**
+ * The endpoint each plane's provider declares, read from the catalog rather than
+ * assumed - the field the client itself consumes (`models-dev.ts:107`), so the
+ * mount can read this instead of hard-coding a family.
+ */
+export const OPENCODE_PLANE_API: Readonly<Record<"go" | "zen", string>> = {
+  go: "https://opencode.ai/inference/go/v1",
+  zen: "https://opencode.ai/inference/v1",
+};
+
 export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
   {
     context_window: 1_048_576,
@@ -471,19 +481,6 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
 /** Complete catalog of OpenCode Zen models (free tier & flagships) from models.dev. */
 export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
   {
-    context_window: 262_144,
-    cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
-    },
-    id: "ling-3.0-flash-fin-free",
-    input_modalities: ["text"],
-    is_free: true,
-    max_output_tokens: 32_768,
-    name: "Ling 3.0 Flash Fin Free",
-  },
-  {
     context_window: 1_050_000,
     cost: {
       cache_read: 0.25,
@@ -522,19 +519,6 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     max_output_tokens: 128_000,
     name: "GPT-5.4 Pro",
     provider_npm: "@ai-sdk/openai",
-  },
-  {
-    context_window: 262_144,
-    cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
-    },
-    id: "ling-3.1-flash-free",
-    input_modalities: ["text"],
-    is_free: true,
-    max_output_tokens: 32_768,
-    name: "Ling 3.1 Flash Free",
   },
   {
     context_window: 1_048_576,

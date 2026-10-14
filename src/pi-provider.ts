@@ -25,6 +25,7 @@
  */
 
 import type { CatalogModelSpec } from "./catalog-data.ts";
+import { OPENCODE_PLANE_API } from "./catalog-data.ts";
 import {
   ANTHROPIC_SDK,
   GOOGLE_SDK,
@@ -41,21 +42,58 @@ export type Plane = "opencode" | "opencode-go";
  * inferred: the Anthropic entry is deliberately one level shorter because that
  * SDK appends `/v1/messages` itself.
  */
+/**
+ * The endpoint each protocol's requests go to, per plane.
+ *
+ * The base comes from the catalog - the field the client itself consumes
+ * (`models-dev.ts:107` lifts the provider's `api` into `settings.baseURL`), and
+ * which the shim now carries as `OPENCODE_PLANE_API`. It was hard-coded here
+ * instead, and when the vendor moved `models.dev`'s provider entry to
+ * `…/inference/v1` the constant was left on `…/zen/v1`: a deployment would have
+ * kept using the older endpoint while its own catalog named the newer one.
+ *
+ * The Anthropic path differs from the others by design (`/messages` not `/chat/
+ * completions`), so only the suffix changes, and the suffix is per protocol
+ * rather than per model.
+ */
+const PLANE_BASE: Readonly<Record<Plane, string>> = {
+  opencode: OPENCODE_PLANE_API.zen,
+  "opencode-go": OPENCODE_PLANE_API.go,
+};
+
+/**
+ * The protocol's path on the plane's base, or `null` when it is the base itself.
+ *
+ * The catalog's `api` is the base INCLUDING the version segment - `…/zen/v1`,
+ * `…/inference/v1` - so the versioned protocols are the base with nothing added,
+ * and the Anthropic endpoint (`/messages`) is the base without that segment.
+ * Appending `/v1` to the new value produces `…/inference/v1/v1`, which is how
+ * this was found.
+ */
+const PROTOCOL_SUFFIX: Readonly<Record<string, string | null>> = {
+  "anthropic-messages": null,
+  "google-generative-ai": "",
+  "openai-completions": "",
+  "openai-responses": "",
+};
+
 export const BASE_FOR_PROTOCOL: Readonly<
   Record<Plane, Readonly<Record<string, string>>>
 > = {
-  opencode: {
-    "anthropic-messages": "https://opencode.ai/zen",
-    "google-generative-ai": "https://opencode.ai/zen/v1",
-    "openai-completions": "https://opencode.ai/zen/v1",
-    "openai-responses": "https://opencode.ai/zen/v1",
-  },
-  "opencode-go": {
-    "anthropic-messages": "https://opencode.ai/zen/go",
-    "openai-completions": "https://opencode.ai/zen/go/v1",
-    "openai-responses": "https://opencode.ai/zen/go/v1",
-  },
+  opencode: withPlaneBase("opencode"),
+  "opencode-go": withPlaneBase("opencode-go"),
 };
+
+/** Every protocol on one plane, sharing the plane's base. */
+function withPlaneBase(plane: Plane): Readonly<Record<string, string>> {
+  const base = PLANE_BASE[plane];
+  const out: Record<string, string> = {};
+  for (const [protocol, suffix] of Object.entries(PROTOCOL_SUFFIX)) {
+    out[protocol] =
+      suffix === null ? base.replace(/\/v1$/, "") : `${base}${suffix}`;
+  }
+  return out;
+}
 
 /**
  * The protocol each SDK names, for a provider built here.
