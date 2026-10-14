@@ -17,6 +17,7 @@ import {
   OPENCODE_ZEN_CATALOG,
   RETIRED_ZEN_MODEL_IDS,
   type CatalogModelSpec,
+  type ReasoningOptionSpec,
 } from "./catalog-data.ts";
 import { DEFAULT_GATEWAY_URLS } from "./config.ts";
 import { isRecord } from "./guards.ts";
@@ -118,6 +119,41 @@ export interface ParsedCatalogs {
 const providerApiFor = (entry: unknown): string =>
   isRecord(entry) && typeof entry.api === "string" ? entry.api : "";
 
+/**
+ * The thinking options a model declares, with unknown shapes dropped.
+ *
+ * A `type` is required because the options are discriminated by it; `values` and
+ * `min` are optional and only carried when they are the right kind. An entry
+ * that is not an object, or has no string `type`, is skipped rather than
+ * repaired.
+ *
+ * @param raw - `models.dev`'s `reasoning_options`.
+ * @returns the options, or `undefined` when there are none to carry.
+ */
+const sanitizeReasoningOptions = (
+  raw: unknown
+): ReasoningOptionSpec[] | undefined => {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+  const out: ReasoningOptionSpec[] = [];
+  for (const entry of raw) {
+    if (!isRecord(entry) || typeof entry.type !== "string") {
+      continue;
+    }
+    const values = Array.isArray(entry.values)
+      ? entry.values.filter((v): v is string => typeof v === "string")
+      : undefined;
+    const min = typeof entry.min === "number" ? entry.min : undefined;
+    out.push({
+      ...(min === undefined ? {} : { min }),
+      type: entry.type,
+      ...(values === undefined ? {} : { values }),
+    });
+  }
+  return out.length === 0 ? undefined : out;
+};
+
 const extractSpecs = (
   modelsObj: Record<string, unknown>,
   defaultContext = 1_000_000
@@ -170,6 +206,15 @@ const extractSpecs = (
     }
     const is_free =
       id.includes("free") || (cost?.input === 0 && cost?.output === 0);
+    // The thinking level: whether the model takes one, and which kinds it takes.
+    // Read here rather than derived, because the three shapes differ - effort
+    // with values, a token budget with a minimum, and a plain toggle - and a
+    // picker that guessed would offer a setting the model refuses.
+    const reasoning =
+      typeof rawModel.reasoning === "boolean" ? rawModel.reasoning : undefined;
+    const reasoning_options = sanitizeReasoningOptions(
+      rawModel.reasoning_options
+    );
     // models.dev sets `provider.npm` only as an override of the provider's
     // default SDK, so its PRESENCE is the signal: a model naming `@ai-sdk/openai`
     // is served on the Responses API, one naming nothing uses the default.
@@ -191,6 +236,8 @@ const extractSpecs = (
       max_output_tokens,
       name,
       ...(provider_npm === undefined ? {} : { provider_npm }),
+      ...(reasoning === undefined ? {} : { reasoning }),
+      ...(reasoning_options === undefined ? {} : { reasoning_options }),
     });
   }
   return results;

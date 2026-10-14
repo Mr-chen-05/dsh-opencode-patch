@@ -428,6 +428,53 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     ).toEqual(empty);
   });
 
+  it("carries each model's thinking level, in all three shapes", () => {
+    // models.dev describes the setting as `reasoning` plus `reasoning_options`,
+    // and the three shapes it uses differ: effort with values, a token budget
+    // with a minimum, and a plain toggle. The shim dropped both fields, so a
+    // picker built from it could offer no thinking level for any model - 117 of
+    // 122 Zen models declare one.
+    const parsed = parseModelsDevCatalog({
+      opencode: {
+        models: {
+          a: {
+            id: "a",
+            name: "A",
+            reasoning: true,
+            reasoning_options: [{ type: "effort", values: ["low", "high"] }],
+          },
+          b: {
+            id: "b",
+            name: "B",
+            reasoning: true,
+            reasoning_options: [{ type: "budget_tokens", min: 1024 }],
+          },
+          c: {
+            id: "c",
+            name: "C",
+            reasoning: true,
+            reasoning_options: [{ type: "toggle" }],
+          },
+          d: { id: "d", name: "D" },
+          e: { id: "e", name: "E", reasoning_options: [{ nope: 1 }, "junk"] },
+        },
+      },
+    });
+    const byId = new Map(parsed.zen.map((m) => [m.id, m]));
+    expect(byId.get("a")?.reasoning_options).toEqual([
+      { type: "effort", values: ["low", "high"] },
+    ]);
+    expect(byId.get("b")?.reasoning_options).toEqual([
+      { min: 1024, type: "budget_tokens" },
+    ]);
+    expect(byId.get("c")?.reasoning_options).toEqual([{ type: "toggle" }]);
+    // A model that declares nothing carries nothing, rather than a default.
+    expect(byId.get("d")?.reasoning).toBeUndefined();
+    expect(byId.get("d")?.reasoning_options).toBeUndefined();
+    // An option with no string `type` is dropped, not repaired.
+    expect(byId.get("e")?.reasoning_options).toBeUndefined();
+  });
+
   it("carries the endpoint each plane's provider declares", () => {
     // The client reads exactly this field (models-dev.ts:107 lifts
     // `item.api` into `settings.baseURL`), so the shim can carry the same value
