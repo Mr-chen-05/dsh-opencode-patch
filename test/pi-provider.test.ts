@@ -6,6 +6,7 @@ import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.l
 import { describe, expect, it } from "vitest";
 
 import type { CatalogModelSpec } from "../src/catalog-data.ts";
+import { OPENCODE_USER_AGENT } from "../src/identity.ts";
 import {
   BASE_FOR_PROTOCOL,
   piModelFor,
@@ -223,5 +224,16 @@ describe("pi-provider · the tables themselves", () => {
         expect(base.startsWith("https://opencode.ai/zen"), protocol).toBe(true);
       }
     }
+  });
+});
+
+describe("pi-provider · the User-Agent the stream hook sends", () => {
+  // 1.19.0's client sends `opencode/<version>` and nothing more -
+  // `packages/opencode/src/session/llm/request.ts:18`. The AI SDK stamps its own
+  // `ai-sdk/provider-utils/… runtime/bun/…` tail on a request it sends, which is
+  // a different transport's signature, not the client's; and 2.x changed the
+  // shape again to `opencode/<channel>/<version>/<client>`.
+  it("is the CLI's version and nothing else", () => {
+    expect(OPENCODE_USER_AGENT).toBe("opencode/1.19.0");
   });
 });

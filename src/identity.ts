@@ -34,8 +34,17 @@ export const inject = ["llm"];
  */
 export const OPENCODE_CLI_VERSION = "1.19.0";
 
-/** The User-Agent the stream hook sends: the CLI's own shape, verbatim. */
-export const OPENCODE_USER_AGENT = `opencode/${OPENCODE_CLI_VERSION} ai-sdk/provider-utils/4.0.40 runtime/bun/1.3.14`;
+/**
+ * The User-Agent the stream hook sends: the CLI's own shape, verbatim.
+ *
+ * `packages/opencode/src/session/llm/request.ts:18` is
+ * `opencode/${InstallationVersion}` and nothing more - no SDK, no runtime, no
+ * build. The `ai-sdk/provider-utils/… runtime/bun/…` tail this sent was the AI
+ * SDK's own User-Agent, which is what a DIFFERENT transport stamps on a request;
+ * it is not the client's, and 2.x changed the shape again to
+ * `opencode/<channel>/<version>/<client>` (`packages/core/src/app.ts:24`).
+ */
+export const OPENCODE_USER_AGENT = `opencode/${OPENCODE_CLI_VERSION}`;
 
 /** The User-Agent the plugin signs its own requests with. */
 export const OPENCODE_PATCH_USER_AGENT = `opencode/${OPENCODE_CLI_VERSION} dsh-opencode-patch`;
