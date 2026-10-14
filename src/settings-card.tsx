@@ -166,7 +166,13 @@ export const OpencodeCard: React.FC<CardProps> = (props: CardProps) => {
   };
 
   return (
-    <>
+    // The host's own font, named explicitly rather than inherited. A plugin card
+    // rendered into the settings page inherits from whatever wraps it, and what
+    // wraps it does not set the family - so the text fell back to the browser's
+    // default and read as a different typeface from the rest of the interface.
+    // The token is the host's; the fallback is `inherit`, which is what happened
+    // before, so naming it cannot make a correct container worse.
+    <div style={{ fontFamily: "var(--dsw-font-family, inherit)" }}>
       {/*
         The quota readout sits ABOVE the form and is deliberately NOT a floating
         card: this is a settings page, so it borrows the page's own row language
@@ -231,6 +237,6 @@ export const OpencodeCard: React.FC<CardProps> = (props: CardProps) => {
             : [control];
         })}
       </SettingsForm>
-    </>
+    </div>
   );
 };

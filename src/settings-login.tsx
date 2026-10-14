@@ -46,7 +46,9 @@ const rowStyle: React.CSSProperties = {
 };
 
 const codeStyle: React.CSSProperties = {
-  fontFamily: "var(--dsw-font-mono, monospace)",
+  // The host names its code face `--ds-font-family-code`; `--dsw-font-mono`
+  // does not exist, so the previous value silently fell back to `monospace`.
+  fontFamily: "var(--ds-font-family-code, var(--dsw-font-family, monospace))",
   fontSize: 16,
   letterSpacing: "0.08em",
 };
