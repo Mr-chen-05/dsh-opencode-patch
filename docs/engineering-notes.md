@@ -407,3 +407,21 @@ Precedence in `models-dev.ts:385-401`: file, then cache, then bundled snapshot, 
 **A per-model override exists and is named `provider.api` in 2.x**, not `api.url` as 1.x had it: `models-dev.ts:220` lifts `model.provider.api` into `Model.Info.settings.baseURL`. Neither `opencode` nor `opencode-go` sets one today.
 
 That is what the plugin should read, and it is why its own hard-coded `/zen/v1` is the older of the two live endpoints rather than a mistake about which one exists.
+
+## The auth-key-and-refresh-key premise does not hold, read out of the client
+
+A premise this work was asked to implement — that the Console key mints an API key on the fly and that an auth key is paired with a refresh key — is not supported by the client's source. What exists is two different things that look alike:
+
+- **The device-flow OAuth pair**, `access` + `refresh`, which is genuinely generated and refreshed. It is stored as `type: "oauth"`.
+- **The service-account API key**, a single static `oc_sk_<12 hex>_<32 chars>` string that a person creates in the Console and **pastes** into the client. No companion secret, and it is never refreshed.
+
+Evidence, all read:
+
+- The client does not mint it. The only non-doc occurrence of `oc_sk_` at HEAD is a consumer: `packages/console/app/src/lib/inference-proxy.ts:51`. The key-creation code that does exist mints the legacy format — `packages/console/core/src/key.ts:50-57`, `sk-` plus 64 random characters.
+- Minting the new format happens in the Console's migration destination, a separate deployment: `infra/console.ts:194-198` (`new sst.Linkable("ConsoleMigration", …)`) and `inference-proxy.ts:57`, which forwards new keys there.
+- Only OAuth credentials refresh: `packages/core/src/integration.ts:730` returns a non-oauth credential unchanged, so a `Credential.Key` is handed out as-is forever.
+- The device flow returns OAuth and never a key: `packages/core/src/plugin/provider/opencode.ts:618-631` builds `{ access, refresh, expires }`.
+- There is no second secret. No `oc_rk_`, no `refresh_key`; the one `refreshKey` symbol is an unrelated MCP cache key (`packages/core/src/mcp/oauth.ts:33`).
+- `auth.json` is the **v1** store. v2 reads it once, in `20260805200742_import_legacy_credentials.ts:39`, and migrates `{type:"api",key}` to `{type:"key",key}` in SQLite; nothing writes `auth.json` at HEAD. So an `oc_sk_` value under `opencode` there is a pasted service-account key, not something a login produced.
+
+**What this means for the plugin is that there is nothing to add.** `login-session.ts` already refreshes exactly the pair that refreshes — it posts to `/auth/device/token` with `grant_type=refresh_token`, the same exchange the client uses — and a service-account key is static by design. Implementing a mint-or-refresh mechanism for `oc_sk_` would be implementing something that does not exist.
