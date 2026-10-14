@@ -1044,12 +1044,18 @@ describe("settings-page: every remote gets a mount", () => {
   // remote and a remote with nothing to say look identical from the outside.
   // Nothing asserted which remotes the page mounts, so nothing noticed.
   it("mounts one per surface the card reads, and no surface is left out", async () => {
-    const mounted: { descriptors: { service: string }[] }[] = [];
+    const mounted: { package?: string; descriptors: { service: string }[] }[] =
+      [];
     const ctx = {
       effect: (fn: () => unknown) => fn(),
       remote: {
         $mount: async (contribution: unknown) => {
-          mounted.push(contribution as { descriptors: { service: string }[] });
+          mounted.push(
+            contribution as {
+              package?: string;
+              descriptors: { service: string }[];
+            }
+          );
           return () => {};
         },
       },
@@ -1062,15 +1068,15 @@ describe("settings-page: every remote gets a mount", () => {
       setTimeout(resolve, 0);
     });
 
-    // No sort: the order the effects run in is the order they are registered, and
-    // asserting both membership and length keeps this about WHICH surfaces are
-    // mounted rather than about the order someone happened to write them in.
-    const services = mounted.map(
-      (contribution) => contribution.descriptors[0]?.service
+    // The remotes mount under ONE package contribution so Typert does not reject
+    // a duplicate package registration, while descriptors for both services are carried.
+    const services = mounted.flatMap((contribution) =>
+      contribution.descriptors.map((d) => d.service)
     );
-    expect(services).toHaveLength(2);
     expect(services).toEqual(
       expect.arrayContaining(["opencodeGoUsage", "opencodeLogin"])
     );
+    expect(mounted).toHaveLength(1);
+    expect(mounted[0]?.package).toBe("dsh-opencode-patch");
   });
 });

@@ -99,7 +99,67 @@ interface ModelProfile {
   input: string[];
   maxTokens: number;
   name: string;
+  reasoningEfforts?: Record<string, string | null> | false;
 }
+
+const ALL_THINKING_LEVELS: ReadonlySet<string> = new Set([
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
+
+/**
+ * Derive the `reasoningEfforts` dictionary that `dsh-llm-pi-ai` expects in
+ * a model profile, from the model's catalog specification.
+ *
+ * `dsh-llm-pi-ai` in `resolveModelReasoning` checks `entry.reasoningEfforts`.
+ * Without it, it falls back to pi's installed catalog entry — which has no
+ * knowledge of OpenCode models, setting `reasoning: false` and leaving the
+ * model with no thinking levels in the DSH composer.
+ */
+export const reasoningEffortsFor = (
+  spec: CatalogModelSpec
+): Record<string, string | null> | undefined => {
+  if (spec.reasoning !== true) {
+    return undefined;
+  }
+  const options = spec.reasoning_options ?? [];
+  const effortOption = options.find(
+    (option) => option.type === "effort" && (option.values?.length ?? 0) > 0
+  );
+  if (effortOption?.values !== undefined) {
+    const efforts: Record<string, string | null> = { off: null };
+    for (const v of effortOption.values) {
+      if (v === "none" || v === "off") {
+        efforts.off = null;
+      } else if (ALL_THINKING_LEVELS.has(v)) {
+        efforts[v] = v;
+      }
+    }
+    const hasActive = Object.keys(efforts).some((k) => k !== "off");
+    if (hasActive) {
+      return efforts;
+    }
+  }
+  if (options.some((option) => option.type === "toggle")) {
+    return {
+      off: null,
+      low: "low",
+      medium: "medium",
+      high: "high",
+    };
+  }
+  // Model declares reasoning: true without explicit reasoning_options (e.g. minimax-m2.5, minimax-m2.7, minimax-m3 on Zen)
+  return {
+    off: null,
+    low: "low",
+    medium: "medium",
+    high: "high",
+  };
+};
 
 /**
  * Read a value that may be an array or any iterable as an array.
@@ -279,12 +339,14 @@ export const modelsForSdk = (
       continue;
     }
     seen.add(spec.id);
+    const reasoningEfforts = reasoningEffortsFor(spec);
     profiles.push({
       contextWindow: spec.context_window,
       id: spec.id,
       input: [...spec.input_modalities],
       maxTokens: spec.max_output_tokens,
       name: spec.name,
+      ...(reasoningEfforts === undefined ? {} : { reasoningEfforts }),
     });
   }
   return profiles;

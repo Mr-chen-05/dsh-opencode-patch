@@ -139,9 +139,14 @@ export const mergeDiscoveredModels = (
         continue;
       }
       seen.add(candidate.id);
+      const spec = findModelSpecOn(provider, candidate.id);
       merged.push({
         ...candidate,
-        inputModalities: sanitizeModalities(candidate.inputModalities),
+        contextWindow: candidate.contextWindow ?? spec?.context_window,
+        inputModalities: sanitizeModalities(
+          candidate.inputModalities ?? spec?.input_modalities
+        ),
+        maxTokens: candidate.maxTokens ?? spec?.max_output_tokens,
       });
     }
   }

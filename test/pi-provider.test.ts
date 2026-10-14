@@ -12,6 +12,7 @@ import {
   BASE_FOR_PROTOCOL,
   piModelFor,
   protocolFor,
+  thinkingLevelMapFor,
 } from "../src/pi-provider.ts";
 
 /**
@@ -302,5 +303,40 @@ describe("pi-provider · the object pi requires", () => {
     );
     expect(model.reasoning).toBe(false);
     expect(model.thinkingLevelMap).toBeUndefined();
+  });
+
+  it("provides standard thinking levels for models declaring reasoning: true with empty options", () => {
+    const map = thinkingLevelMapFor({
+      context_window: 204_800,
+      id: "minimax-m2.7",
+      input_modalities: ["text"],
+      max_output_tokens: 131_072,
+      name: "MiniMax-M2.7",
+      reasoning: true,
+      reasoning_options: [],
+    });
+    expect(map).toEqual({
+      off: null,
+      minimal: null,
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: null,
+      max: null,
+    });
+  });
+
+  it("provides toggle mapping for models with toggle reasoning option", () => {
+    const map = thinkingLevelMapFor({
+      context_window: 1_000_000,
+      id: "minimax-m3",
+      input_modalities: ["text", "image"],
+      max_output_tokens: 131_072,
+      name: "MiniMax-M3",
+      reasoning: true,
+      reasoning_options: [{ type: "toggle" }],
+    });
+    expect(map?.off).toBeNull();
+    expect(map?.high).toBe("on");
   });
 });

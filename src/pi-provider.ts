@@ -193,6 +193,9 @@ export const baseForProtocol = (
 export const thinkingLevelMapFor = (
   spec: CatalogModelSpec
 ): Partial<Record<string, string | null>> | undefined => {
+  if (spec.reasoning !== true) {
+    return undefined;
+  }
   const options = spec.reasoning_options ?? [];
   const levels = options.find(
     (option) => option.type === "effort" && (option.values?.length ?? 0) > 0
@@ -214,7 +217,14 @@ export const thinkingLevelMapFor = (
     }
     return map;
   }
-  return undefined;
+  // When a model declares reasoning: true without explicit reasoning_options
+  // (e.g. minimax-m2.5, minimax-m2.7, or minimax-m3 on Zen), offer standard
+  // thinking levels so DSH harness exposes the thinking controls.
+  const map: Record<string, string | null> = { off: null };
+  for (const level of ALL_THINKING_LEVELS) {
+    map[level] = ["low", "medium", "high"].includes(level) ? level : null;
+  }
+  return map;
 };
 
 /** pi's levels, in its own order, so the map is complete rather than partial. */

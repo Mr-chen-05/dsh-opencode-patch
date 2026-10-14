@@ -46,6 +46,18 @@ export const LEGACY_NS = "dsh-opencode";
 export const PKG = "dsh-opencode-patch";
 
 /**
+ * Combined remote contribution for the plugin.
+ *
+ * Joins `usageRemote` and `loginRemote` under the package name `PKG` so Typert
+ * registers the package once, allowing `api-gateway` to mount both namespaces
+ * (`opencodeGoUsage` and `opencodeLogin`) without a duplicate package collision.
+ */
+export const patchRemote = {
+  descriptors: [...usageRemote.descriptors, ...loginRemote.descriptors],
+  package: PKG,
+};
+
+/**
  * The scoped npm name — published from this same tree, and the one a new
  * install gets. It must answer to the SAME pages as `PKG` or the settings card
  * never appears for whoever installed the name we tell them to. The retired
@@ -361,19 +373,26 @@ export const apply = (ctx: ClientContext): void => {
     return noopDisposer;
   }, "dsh-opencode-patch: dictionaries");
 
-  // Both remotes mount the same way and fail the same way, so they share one
-  // effect: the optional chains that made an absent `remote` silent, the named
-  // report, and the disposer. The meter and the sign-in row were each written by
-  // hand once, which is how the second came to have no mount at all.
-  for (const [contribution, what] of [
-    [usageRemote, "usage remote; the meter will render nothing"],
-    [loginRemote, "login remote; the sign-in row will render nothing"],
-  ] as const) {
-    ctx.effect?.(
-      () => mountRemote(ctx, contribution, what),
-      `dsh-opencode-patch: ${what}`
-    );
-  }
+  // Both remotes mount as ONE contribution under the plugin's package name.
+  // Typert enforces unique package names per contribution (`dsh-typert-registry`:
+  // `if (this.packages.has(contribution.package)) throw new Error(...)`).
+  // Mounting `usageRemote` and `loginRemote` separately with the same package
+  // name ("dsh-opencode-patch") causes the second `$mount` call to throw
+  // `Remote package "dsh-opencode-patch" is already registered` — dropping the
+  // login remote completely.
+  //
+  // Combining descriptors into one contribution registers the package ONCE and
+  // allows `api-gateway` to install both namespaces (`opencodeGoUsage` and
+  // `opencodeLogin`) together.
+  ctx.effect?.(
+    () =>
+      mountRemote(
+        ctx,
+        patchRemote,
+        "remotes; the meter and sign-in row will render nothing"
+      ),
+    "dsh-opencode-patch: remotes"
+  );
 
   // Resolve the scope first so the meter can read its trigger markers at inject
   // time. The injector still registers without one: the meter only needs the

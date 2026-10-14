@@ -41,7 +41,10 @@ import {
 import type { CordisContext } from "../src/index.ts";
 import { orgFor, clearOrgs, setOrg } from "../src/org-cache.ts";
 import { baseForProtocol } from "../src/pi-provider.ts";
-import { loginTokenReader } from "../src/responses-provider.ts";
+import {
+  loginTokenReader,
+  reasoningEffortsFor,
+} from "../src/responses-provider.ts";
 import { createTokenStore } from "../src/token-store.ts";
 import { createCredentialsSeam, createOpencodeStore } from "./test-helpers.ts";
 
@@ -87,6 +90,69 @@ describe("responses-provider: the model list", () => {
     // The constant the whole split hangs off; a typo here would silently stop
     // redirecting every Responses model.
     expect(RESPONSES_SDK).toBe("@ai-sdk/openai");
+  });
+
+  it("derives reasoningEfforts for effort, toggle, and unelaborated models", () => {
+    expect(
+      reasoningEffortsFor({
+        context_window: 1000,
+        id: "effort-model",
+        input_modalities: ["text"],
+        max_output_tokens: 100,
+        name: "Effort",
+        reasoning: true,
+        reasoning_options: [{ type: "effort", values: ["low", "high", "max"] }],
+      })
+    ).toEqual({ off: null, low: "low", high: "high", max: "max" });
+
+    // Toggle models like minimax-m3 on Go plan
+    expect(
+      reasoningEffortsFor({
+        context_window: 1000,
+        id: "minimax-m3",
+        input_modalities: ["text"],
+        max_output_tokens: 100,
+        name: "MiniMax-M3",
+        reasoning: true,
+        reasoning_options: [{ type: "toggle" }],
+      })
+    ).toEqual({ off: null, low: "low", medium: "medium", high: "high" });
+
+    // Unelaborated reasoning models like minimax-m2.7
+    expect(
+      reasoningEffortsFor({
+        context_window: 1000,
+        id: "minimax-m2.7",
+        input_modalities: ["text"],
+        max_output_tokens: 100,
+        name: "MiniMax-M2.7",
+        reasoning: true,
+        reasoning_options: [],
+      })
+    ).toEqual({ off: null, low: "low", medium: "medium", high: "high" });
+
+    // Non-reasoning model
+    expect(
+      reasoningEffortsFor({
+        context_window: 1000,
+        id: "plain-model",
+        input_modalities: ["text"],
+        max_output_tokens: 100,
+        name: "Plain",
+      })
+    ).toBeUndefined();
+  });
+
+  it("carries reasoningEfforts into ModelProfile so llm-pi-ai exposes thinking levels", () => {
+    const anthropicModels = modelsForSdk("@ai-sdk/anthropic");
+    const m3 = anthropicModels.find((m) => m.id === "minimax-m3");
+    expect(m3).toBeDefined();
+    expect(m3?.reasoningEfforts).toEqual({
+      off: null,
+      low: "low",
+      medium: "medium",
+      high: "high",
+    });
   });
 });
 

@@ -164,6 +164,37 @@ describe("mergeDiscoveredModels", () => {
       },
     ]);
   });
+
+  it("enriches candidate rows missing contextWindow or maxTokens from the catalog spec", () => {
+    const merged = mergeDiscoveredModels(
+      [
+        {
+          id: "minimax-m3",
+          name: "MiniMax-M3",
+        },
+      ],
+      "go",
+      [
+        {
+          context_window: 1_000_000,
+          id: "minimax-m3",
+          input_modalities: ["text", "image"],
+          max_output_tokens: 131_072,
+          name: "MiniMax-M3",
+          provider_npm: "@ai-sdk/anthropic",
+          reasoning: true,
+        },
+      ]
+    );
+
+    expect(merged[0]).toEqual({
+      contextWindow: 1_000_000,
+      id: "minimax-m3",
+      inputModalities: ["text", "image"],
+      maxTokens: 131_072,
+      name: "MiniMax-M3",
+    });
+  });
 });
 
 describe("decorateModelDiscovery", () => {
