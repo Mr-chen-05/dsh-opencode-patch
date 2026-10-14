@@ -13,6 +13,7 @@
 import type { AsyncLocalStorage } from "node:async_hooks";
 
 import { DEFAULT_GATEWAY_URLS, type ResolvedPluginConfig } from "./config.ts";
+import { pairedEndpointUrl } from "./endpoint-pairing.ts";
 import { resolveOpencodeStoreKey } from "./go-discovery.ts";
 import {
   extractApiKeyFromHeaders,
@@ -50,10 +51,12 @@ import type { ActiveTurnState } from "./turn-store.ts";
  */
 const gatewayPlaneFor = (url: string): string => {
   const path = new URL(url).pathname;
-  if (/\/zen\/go\//u.test(path)) {
+  // Both endpoint families, because a credential's format decides which one a
+  // request belongs on and the plane is the same either way.
+  if (/\/(?:zen|inference)\/go\//u.test(path)) {
     return "opencode-go";
   }
-  if (/\/zen\//u.test(path)) {
+  if (/\/(?:zen|inference)\//u.test(path)) {
     return "opencode";
   }
   return "";
@@ -408,7 +411,19 @@ export const patchFetch = (
       }
     }
 
-    const response = await original.call(this, input, newInit);
+    // The credential's format decides which endpoint family it belongs to. A
+    // mismatched pair is refused in a way that reads like an entitlement fault,
+    // so the request is moved to the family its own credential names.
+    const wireCredential = headers
+      .get(wireHeader)
+      ?.replace(/^Bearer\s+/iu, "")
+      .trim();
+    const paired = pairedEndpointUrl(url, wireCredential);
+    const response = await original.call(
+      this,
+      paired === url ? input : paired,
+      newInit
+    );
 
     // One line per request the interceptor touched, so a run that misbehaves can
     // be read back instead of guessed at. Presence, never values: whether a

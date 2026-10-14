@@ -617,6 +617,26 @@ describe("patchFetch", () => {
     );
   });
 
+  it("moves a request onto the endpoint its credential's format belongs to", async () => {
+    // End to end through the patch, because the pairing is only real if the URL
+    // that reaches the transport changed. The installation's older key and the
+    // one OpenCode 2.x mints belong to different endpoint families, and sending
+    // one to the other family is refused as though it were an entitlement fault.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const { capture, mockFetch } = createCaptureFetch();
+    const patched = patchFetch(mockFetch, als, resolveConfig());
+    const NEW_KEY = "oc_sk_ac6304e0f930_Y6PcGUkm0zefzqlVLVTfJKnCkV5-iZuP";
+
+    await patched("https://opencode.ai/zen/v1/chat/completions", {
+      headers: { authorization: `Bearer ${NEW_KEY}` },
+      method: "POST",
+    });
+
+    expect(capture.url).toBe(
+      "https://opencode.ai/inference/v1/chat/completions"
+    );
+  });
+
   it("injects read and bash tools for free-tier /responses models", async () => {
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const { capture, mockFetch } = createCaptureFetch();

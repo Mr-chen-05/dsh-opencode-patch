@@ -136,7 +136,10 @@ describe("resolveConfig", () => {
 
   it("resolves the adaptivity knobs with blank-is-default semantics", () => {
     const defaults = resolveConfig({});
-    expect(defaults.gatewayUrls).toEqual(["opencode.ai/zen"]);
+    expect(defaults.gatewayUrls).toEqual([
+      "opencode.ai/zen",
+      "opencode.ai/inference",
+    ]);
     expect(defaults.originClient).toBe("cli");
     expect(defaults.injectProject).toBe(true);
     expect(defaults.freeModelMarker).toBe("free");
@@ -173,7 +176,10 @@ describe("resolveConfig", () => {
       sessionIdEnv: "",
       providers: ["", " "],
     });
-    expect(blank.gatewayUrls).toEqual(["opencode.ai/zen"]);
+    expect(blank.gatewayUrls).toEqual([
+      "opencode.ai/zen",
+      "opencode.ai/inference",
+    ]);
     expect(blank.originClient).toBe("cli");
     expect(blank.injectProject).toBe(true);
     expect(blank.freeModelMarker).toBe("free");
@@ -228,7 +234,7 @@ describe("Config schema", () => {
       debug: false,
       enrichModels: true,
       freeModelMarker: "free",
-      gatewayUrls: ["opencode.ai/zen"],
+      gatewayUrls: ["opencode.ai/zen", "opencode.ai/inference"],
       injectCoreTools: true,
       injectOriginHeaders: true,
       injectProject: true,

@@ -36,7 +36,18 @@ export {
  * turn is active. Configurable so mirrors, proxies, and self-hosted gateways
  * can be targeted without a code change.
  */
-export const DEFAULT_GATEWAY_URLS = ["opencode.ai/zen"];
+/**
+ * URL substrings marking gateway traffic.
+ *
+ * Both endpoint families: the older `zen` one and the `inference` one OpenCode
+ * 2.x's catalog names. A request on either belongs to this plugin, and the
+ * credential's format decides which of the two it is actually sent to - see
+ * `endpoint-pairing.ts`.
+ */
+export const DEFAULT_GATEWAY_URLS = [
+  "opencode.ai/zen",
+  "opencode.ai/inference",
+];
 
 /** Value restored into `x-opencode-client` by default. */
 export const DEFAULT_ORIGIN_CLIENT = "cli";
