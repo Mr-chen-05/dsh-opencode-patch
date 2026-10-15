@@ -861,6 +861,41 @@ describe("patchFetch", () => {
     expect(toolNamesOf(parseJsonBody(fullCap.init?.body))).toHaveLength(2);
   });
 
+  it("resolves a credential for the Zen free model that gets redirected to /responses", async () => {
+    // The reported symptom: a Go-plane free model works, Zen free models do not.
+    // `muse-spark-1.3-contributor-free` is the ONE Zen free model naming
+    // `@ai-sdk/openai`, so the stream hook redirects it to `opencode-responses` -
+    // a route the plugin mounts itself, which therefore carries pi's
+    // `Bearer unused` placeholder and depends on THIS injection to authenticate.
+    //
+    // A key captured from the user's own plane route, on the endpoint family the
+    // catalog now names.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const { capture, mockFetch } = createCaptureFetch();
+    const patched = patchFetch(mockFetch, als, resolveConfig());
+
+    recordCapturedApiKey("oc_sk_zen_key", "opencode");
+    // Read through `Headers`, because the patch hands the adapter a `Headers`
+    // instance rather than the plain object it was given.
+    const auth = (init?: RequestInit): string | null =>
+      headerOf(init, "authorization");
+
+    await als.run({ provider: "opencode", value: "ses_x" }, async () => {
+      await patched("https://opencode.ai/inference/v1/responses", {
+        body: JSON.stringify({ model: "muse-spark-1.3-contributor-free" }),
+        // The sentinel the mounted route declares; a placeholder must be
+        // replaced, never forwarded.
+        headers: { authorization: "Bearer unused" },
+        method: "POST",
+      });
+    });
+
+    // The captured Zen key reaches the wire, so the request authenticates rather
+    // than going out as `Bearer unused` - which is the 401 that reads as an
+    // invalid API key.
+    expect(auth(capture.init)).toBe("Bearer oc_sk_zen_key");
+  });
+
   it("captures API key from request headers on intercepted OpenCode requests", async () => {
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const { mockFetch } = createCaptureFetch();
