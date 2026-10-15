@@ -506,3 +506,11 @@ The helper warns in exactly two ways, and the console will carry one of them:
 - `[dsh-opencode-patch] <what> did not mount` followed by the thrown error — `ctx.remote.$mount` rejected.
 
 Neither line is visible in a screenshot, and which one it is decides the fix: the first is a wiring problem in this plugin, the second is the host refusing the contribution. Ask for the line rather than guessing, which is the mistake this file keeps recording.
+
+## pi ships its own stale `opencode` catalog, which is what a plane route answers from
+
+A deployment declares its own `opencode` / `opencode-go` routes and no `models` list, so `llm-pi-ai` resolves them from the catalog pi installs — `dist/providers/data/opencode.json`, keyed by API rather than by provider. That file is a DIFFERENT VINTAGE of models.dev, and the divergence is measured rather than assumed: pi says 272k for `gpt-5.4` and 200k for `claude-sonnet-4-5` where the vendor and our shim both say 1.05M and 1M, and it carries no `thinkingLevelMap` for the `budget_tokens` Claude models where models.dev declares a token minimum.
+
+So a plane route's adapter is a stale source, and decorating `resolveModelInfo` by filling only what it left BLANK let every stale value survive — which is what the surfaces then reported, and what read as "the thinking level and the context are still wrong". Our catalog is the fresher snapshot of the same data, so it is now authoritative for the fields it carries, and the efforts are derived by the same `thinkingLevelMapFor` the internal routes use.
+
+The dispatch path needed no second patch, which is worth knowing before reaching for one: every stale model names an SDK and is therefore redirected to an internal route carrying our fresh profile, and the models that stay on the plane route already agree with the catalog — verified by diffing all 82 Zen and 31 Go entries against pi's file.
