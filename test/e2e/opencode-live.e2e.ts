@@ -144,7 +144,12 @@ describe.skipIf(!LIVE || !ZEN_KEY)(
           ids.add(String(model.id));
         }
 
-        // The canonical free-tier rows are what a Zen user actually selects.
+        // The enrichment covers what the gateway LISTS, not what the picker
+        // offers. Zen's free tier is enumerated here because the gateway serves
+        // it in its own listing, and withheld there because it is measured to
+        // refuse from this plugin on every credential - `isServableModel` is the
+        // second half, and it is what keeps these out of the picker. Testing the
+        // first half through the second would make this case unfalsifiable.
         expect(ids.has("mimo-v2.6-flash-free")).toBe(true);
         expect(ids.has("muse-spark-1.3-contributor-free")).toBe(true);
 

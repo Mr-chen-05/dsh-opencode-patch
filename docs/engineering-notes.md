@@ -195,7 +195,7 @@ The false claim — that a session token, or the org, or a header unlocks the fr
 
 **One place had it right before any of this work started.** `docs/opencode-1.19-api.md` already said, at the bottom of its own list: _"The free tier is not reachable by adding a header. Measured: the org id and the key together still answer 403. Any plan that assumed a header fix is wrong."_ That sentence is what the exhaustive table later confirmed, and it was there the whole time — which is the uncomfortable half of this record: the answer was written down, and six other places said the opposite, and the six won for several rounds.
 
-A sweep that ends clean is worth as much as one that finds something, and this one ends with the boundary drawn: every remaining mention of the free tier says it is not served from here.
+A sweep that ends clean is worth as much as one that finds something, and this one ends with the boundary drawn: every remaining mention of the free tier says it is not served from here. **It did not, in fact, end clean.** Two bullets in `docs/credentials.md` - the measurements at the end of the bare-client section - still asserted the free tier is served and named `opencode/step-5-preview-free` as the proof, because the sweep matched the withdrawal paragraph and stopped at the file that contained it. They were withdrawn later, together with the table row in `docs/deep-dive.md` that said the same thing in a cell with no keywords for a grep to find. The lesson is the one the note above it already recorded and then did not follow: a claim in this file's subject area is not swept because a nearby paragraph was.
 
 ## A measurement of mine that was wrong, in the shape this file keeps describing
 
