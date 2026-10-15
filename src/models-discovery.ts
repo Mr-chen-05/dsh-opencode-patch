@@ -530,24 +530,37 @@ export const decorateModelInfo = (
       return resolved;
     }
     const out: Record<string, unknown> = { ...resolved };
-    if (
-      out.context === undefined &&
-      typeof spec.context_window === "number" &&
-      spec.context_window > 0
-    ) {
+    // Our catalog is the FRESHER VINTAGE of the same data, and the divergence is
+    // measured rather than assumed. pi ships an installed `opencode` catalog the
+    // plane routes fall back to, and it is a different snapshot of models.dev:
+    // it says 272k for `gpt-5.4` and 200k for `claude-sonnet-4-5` where the
+    // vendor and our shim both say 1.05M and 1M, and it carries no
+    // `thinkingLevelMap` for the `budget_tokens` Claude models where models.dev
+    // declares a token minimum.
+    //
+    // Filling only what the adapter left BLANK let every one of those stale
+    // values survive, which is what the surfaces then reported — so the fields
+    // our catalog carries are authoritative here rather than advisory.
+    if (typeof spec.context_window === "number" && spec.context_window > 0) {
       out.context = { contextWindow: spec.context_window };
     }
-    if (out.reasoning === undefined && spec.reasoning === true) {
-      const map = thinkingLevelMapFor(spec);
-      if (map !== undefined) {
-        const efforts = effortsFromLevelMap(map);
-        // `dsh-llm` rejects a reasoning block with no efforts, so a model whose
-        // map leaves none is reported as non-reasoning rather than as an empty
-        // control the composer could not render.
-        if (efforts.length > 0) {
-          out.reasoning = { efforts };
-        }
-      }
+    // The output cap is the same class of staleness, and a wrong one truncates
+    // rather than merely mis-reports.
+    if (
+      typeof spec.max_output_tokens === "number" &&
+      spec.max_output_tokens > 0
+    ) {
+      out.defaultMaxTokens = spec.max_output_tokens;
+    }
+    const map = thinkingLevelMapFor(spec);
+    const efforts = map === undefined ? [] : effortsFromLevelMap(map);
+    if (efforts.length > 0) {
+      out.reasoning = { efforts };
+    } else {
+      // The model takes no thinking level. Leaving the adapter's `reasoning`
+      // here would offer a control the model refuses — and for a model our
+      // catalog marks non-reasoning, that is exactly the stale shape.
+      delete out.reasoning;
     }
     return out;
   };

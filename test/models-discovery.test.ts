@@ -498,18 +498,68 @@ describe("models-discovery: the Effort row a model reports", () => {
     stop?.();
   });
 
-  it("keeps an adapter's own answer, and does not decorate what dispatch honours", async () => {
+  it("overrides a STALE adapter answer with the catalog's fresher vintage", async () => {
+    // The reason this overrides rather than fills. pi ships its own installed
+    // `opencode` catalog the plane routes fall back to, and it is an older
+    // snapshot of models.dev: gpt-5.4 at 272k where the vendor and our shim both
+    // say 1.05M, claude-sonnet-4-5 at 200k with no thinking map where models.dev
+    // declares 1M and a token minimum. Filling only what was BLANK let those
+    // stale values survive, and the surfaces reported them.
+    const stale = {
+      context: { contextWindow: 272_000 },
+      defaultMaxTokens: 64_000,
+      id: "gpt-5.4",
+      name: "GPT-5.4",
+      provider: "opencode",
+      // pi's stale map offers `medium`; ours says low/medium/high/xhigh.
+      reasoning: {
+        efforts: [
+          { id: "off", name: "Off" },
+          { id: "low", name: "Low" },
+          { id: "medium", name: "Medium" },
+        ],
+      },
+    };
+    const ctx = llmWith(() => stale) as never as CordisContext;
+    const stop = decorateModelInfo(ctx, enrichConfig);
+
+    const resolved = (await patched(ctx)("opencode", "gpt-5.4")) as {
+      context?: { contextWindow?: number };
+      defaultMaxTokens?: number;
+      reasoning?: { efforts: { id: string }[] };
+    };
+    // The window and the cap come from our catalog.
+    expect(resolved.context).toEqual({ contextWindow: 1_050_000 });
+    expect(resolved.defaultMaxTokens).toBe(128_000);
+    // And so do the levels: `off` is not offered and `xhigh` now is.
+    expect(resolved.reasoning?.efforts.map((e) => e.id)).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    // Everything the catalog does not decide is left as the adapter said it.
+    expect(resolved).toMatchObject({ id: "gpt-5.4", name: "GPT-5.4" });
+
+    stop?.();
+  });
+
+  it("leaves a model the catalog does not describe to its adapter", async () => {
+    // The other half of the authority argument: our catalog decides the fields
+    // IT carries, and a model it has never heard of is not ours to correct. A
+    // hand-declared model in a deployment's profile keeps whatever its adapter
+    // says, including a reasoning block this plugin knows nothing about.
     const own = {
       context: { contextWindow: 4096 },
-      id: "minimax-m3",
-      name: "MiniMax-M3",
+      id: "hand-declared-model",
+      name: "Hand Declared",
       provider: "opencode",
       reasoning: { efforts: [{ id: "high", name: "High" }] },
     };
     const ctx = llmWith(() => own) as never as CordisContext;
     const stop = decorateModelInfo(ctx, enrichConfig);
 
-    const resolved = await patched(ctx)("opencode", "minimax-m3");
+    const resolved = await patched(ctx)("opencode", "hand-declared-model");
     expect(resolved).toEqual(own);
 
     stop?.();
