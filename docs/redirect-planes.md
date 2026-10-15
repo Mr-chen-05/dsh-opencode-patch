@@ -11,7 +11,7 @@ A **plane** is one gateway base URL with its own catalog and its own credential.
 | Plane | Route id | Base URL | Credential | Models |
 | :-- | :-- | :-- | :-- | --: |
 | Zen (pay-as-you-go, free tier) | `opencode` | the `endpoint` family's | `OPENCODE_API_KEY` | 84 served / 122 listed |
-| Go (subscription) | `opencode-go` | the `endpoint` family's | `OPENCODE_GO_API_KEY` | 31 served / 36 listed |
+| Go (subscription) | `opencode-go` | the `endpoint` family's | `OPENCODE_GO_API_KEY` | 29 served / 36 listed |
 
 **There is no longer one base URL per plane to quote.** The gateway answers on two endpoint families and the `endpoint` setting picks one: `auto` follows the catalog, which today names `…/inference/v1` and `…/inference/go/v1`, and `legacy` pins the older `…/zen/v1` and `…/zen/go/v1`. Both are still served and they are entitled separately, which is why the choice is the user's rather than a migration. The dated measurement below was taken on the legacy family.
 
@@ -26,8 +26,8 @@ A **shape** is one wire protocol, named by the SDK a model declares in the catal
 | SDK in the catalog  | Protocol                | Zen |    Go |
 | :------------------ | :---------------------- | --: | ----: |
 | _(none)_            | `openai-completions`    |  27 |    18 |
-| `@ai-sdk/openai`    | `openai-responses`      |  30 | **6** |
-| `@ai-sdk/anthropic` | `anthropic-messages`    |  18 | **6** |
+| `@ai-sdk/openai`    | `openai-responses`      |  30 | **5** |
+| `@ai-sdk/anthropic` | `anthropic-messages`    |  18 | **5** |
 | `@ai-sdk/mistral`   | `mistral-conversations` |   1 |     — |
 | `@ai-sdk/google`    | `google-generative-ai`  |   8 | **1** |
 

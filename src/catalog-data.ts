@@ -289,21 +289,6 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
     ],
   },
   {
-    context_window: 204_800,
-    cost: {
-      cache_read: 0.06,
-      cache_write: 0.375,
-      input: 0.3,
-      output: 1.2,
-    },
-    id: "minimax-m2.7",
-    input_modalities: ["text"],
-    max_output_tokens: 131_072,
-    name: "MiniMax-M2.7",
-    provider_npm: "@ai-sdk/anthropic",
-    reasoning: true,
-  },
-  {
     context_window: 1_048_576,
     cost: {
       cache_read: 0.003625,
@@ -556,23 +541,6 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
     max_output_tokens: 262_144,
     name: "Kimi K2.7 Code",
     reasoning: true,
-  },
-  {
-    context_window: 500_000,
-    cost: {
-      cache_read: 0.5,
-      input: 2,
-      output: 6,
-    },
-    id: "grok-4.6",
-    input_modalities: ["text", "image"],
-    max_output_tokens: 500_000,
-    name: "Grok 4.6",
-    provider_npm: "@ai-sdk/openai",
-    reasoning: true,
-    reasoning_options: [
-      { type: "effort", values: ["low", "medium", "high", "xhigh"] },
-    ],
   },
   {
     context_window: 1_000_000,

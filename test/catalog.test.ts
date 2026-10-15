@@ -47,7 +47,7 @@ afterEach(() => {
 
 describe("OpenCode Model Catalog & Enrichment", () => {
   it("ships only active, priced models in the bundled Go shim", () => {
-    expect(OPENCODE_GO_CATALOG.length).toBe(31);
+    expect(OPENCODE_GO_CATALOG.length).toBe(29);
     for (const model of OPENCODE_GO_CATALOG) {
       expect(model.id.length).toBeGreaterThan(0);
       expect(model.name.length).toBeGreaterThan(0);
@@ -231,7 +231,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const responses = modelsForSdk("@ai-sdk/openai").map((m) => m.id);
     const anthropic = modelsForSdk("@ai-sdk/anthropic").map((m) => m.id);
     expect(responses.length).toBe(32);
-    expect(anthropic.length).toBe(22);
+    expect(anthropic.length).toBe(21);
     expect(responses.filter((id) => anthropic.includes(id))).toEqual([]);
     // The flagship of each plane is on the shim, so a cold start can serve it.
     expect(responses).toContain("muse-spark-1.3-contributor-free");

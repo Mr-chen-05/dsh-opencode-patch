@@ -177,15 +177,27 @@ describe("responses-routes: the SDK is read from the plane the request is on", (
    * Nothing else in the suite could see this: every other routing case reads the
    * same table the code reads, so a wrong PLANE looks exactly like a right one.
    */
-  const DIVERGENT = ["qwen3.8-max", "minimax-m2.7", "minimax-m3"];
+  // Derived, not listed. The ids this used to name were hard-coded, and the
+  // vendor deprecated `minimax-m2.7` on the Go plane - which made the case below
+  // fail on a model that was no longer there rather than on the property it was
+  // written to check. A computed set cannot go stale the same way: it is the
+  // models both planes currently carry, whose SDK the two planes disagree about.
+  const go = new Map(OPENCODE_GO_CATALOG.map((s) => [s.id, s.provider_npm]));
+  const zen = new Map(OPENCODE_ZEN_CATALOG.map((s) => [s.id, s.provider_npm]));
+  const DIVERGENT = [...go.keys()].filter(
+    (id) =>
+      zen.has(id) && go.get(id) !== undefined && go.get(id) !== zen.get(id)
+  );
+  // And the anti-vacuity guard it was always meant to be: if the planes ever stop
+  // disagreeing, the routing cases below stop proving anything.
+  expect(
+    DIVERGENT.length,
+    "no model's SDK differs between the planes any more"
+  ).toBeGreaterThan(0);
 
   it("has models whose SDK genuinely differs between the planes", () => {
     // If this ever stops being true the cases below stop proving anything, and
     // a silent skip would be worse than a failure.
-    const go = new Map(OPENCODE_GO_CATALOG.map((s) => [s.id, s.provider_npm]));
-    const zen = new Map(
-      OPENCODE_ZEN_CATALOG.map((s) => [s.id, s.provider_npm])
-    );
     for (const id of DIVERGENT) {
       expect(go.get(id), `${id} is no longer on the Go plane`).toBe(
         ANTHROPIC_SDK

@@ -80,8 +80,21 @@ const FALLBACK_CONTEXT_WINDOW = 1_000_000;
 /** @see FALLBACK_CONTEXT_WINDOW */
 const FALLBACK_MAX_OUTPUT_TOKENS = 131_072;
 
-/** Timeout for models.dev revalidation requests (8 seconds). */
-export const MODELS_DEV_TIMEOUT_MS = 8000;
+/**
+ * Timeout for models.dev revalidation requests.
+ *
+ * 8s was measured against the endpoint when it answered in ~200ms, and the
+ * vendor has since slowed to 7-12s for the same payload. The budget was tighter
+ * than the thing it budgets, so the freshness job - and every runtime revalidation
+ * - failed with a `TimeoutError` rather than with a content mismatch. Two CI runs
+ * on `catalog freshness` were this, not vendor churn.
+ *
+ * 30s is comfortably past the observed worst case while still bounded, because a
+ * revalidation that hangs is worse than one that fails: the shim ships with the
+ * bundled catalog, and the SWR refresh keeps serving it, so a slow answer costs
+ * a wait and a dead one costs a retry.
+ */
+export const MODELS_DEV_TIMEOUT_MS = 30_000;
 
 let activeGoCatalog = new Map<string, CatalogModelSpec>(
   OPENCODE_GO_CATALOG.filter((m) => !isRetiredModel("go", m.id)).map((m) => [
