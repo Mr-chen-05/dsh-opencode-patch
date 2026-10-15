@@ -160,13 +160,13 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // replacing the whole set — so these counts are the cold-start picker, and a
     // silent drop here is a model nobody can pick. Regenerate with
     // `scripts/regenerate-catalog-shim.ts` rather than editing by hand.
-    expect(OPENCODE_ZEN_CATALOG.length).toBe(83);
+    expect(OPENCODE_ZEN_CATALOG.length).toBe(84);
     const freeModels = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free === true);
     // Only the free tiers the gateway still serves. The count is the `is_free`
     // flag the shim carries, NOT the `-free` suffix: `big-pickle` is flagged and
     // is not suffixed, so a suffix rule would have missed it — which is a
     // smaller version of why the suffix-based exclusion was withdrawn.
-    expect(freeModels.length).toBe(10);
+    expect(freeModels.length).toBe(11);
 
     const ids = new Set(OPENCODE_ZEN_CATALOG.map((m) => m.id));
     expect(ids.has("muse-spark-1.3-contributor-free")).toBe(true);

@@ -1541,6 +1541,26 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     reasoning_options: [{ type: "effort", values: ["high", "max"] }],
   },
   {
+    context_window: 1_048_576,
+    cost: {
+      cache_read: 0,
+      input: 0,
+      output: 0,
+    },
+    id: "nemotron-3.5-super-vl-free",
+    input_modalities: ["text", "image"],
+    is_free: true,
+    max_output_tokens: 131_072,
+    name: "Nemotron 3.5 Super VL Free",
+    reasoning: true,
+    reasoning_options: [
+      {
+        type: "effort",
+        values: ["none", "minimal", "low", "medium", "high", "xhigh"],
+      },
+    ],
+  },
+  {
     context_window: 204_800,
     cost: {
       cache_read: 0.26,
