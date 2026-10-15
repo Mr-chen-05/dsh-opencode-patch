@@ -239,6 +239,9 @@ export const patchFetch = (
   config: ResolvedPluginConfig,
   hooks: FetchPatchHooks = {}
 ): typeof fetch => {
+  // One report per plane for the no-credential case, because this runs on every
+  // gateway request and the same missing credential would otherwise log on each.
+  const warnedNoCredential = new Set<string>();
   const patchedFetch = async function patchedFetch(
     this: unknown,
     input: RequestInfo | URL,
@@ -325,6 +328,36 @@ export const patchFetch = (
         ) {
           headers.set("authorization", `Bearer ${fallbackKey}`);
         }
+      } else if (plane.length > 0 && !warnedNoCredential.has(plane)) {
+        // No credential resolved for a gateway request, so the adapter's own
+        // placeholder is what goes out and the gateway answers 401 - which the
+        // user reads as "API key invalid" with nothing to act on. The message
+        // states what was COMPUTED and nothing it was not: which sources were
+        // consulted and what each answered, so the reader can tell a missing env
+        // var from a missing login from a disabled store read.
+        //
+        // This is the guard the tier bug needed. A mis-classified tier made a
+        // captured, working key invisible here, the request went out with the
+        // placeholder, and the only symptom was an auth error on a credential
+        // that was fine.
+        warnedNoCredential.add(plane);
+        const sources: string[] = [
+          `a key on the request: ${requestKey === undefined ? "none" : "present"}`,
+          `a key captured from a live request (policy ${config.keySource}): ${
+            captured === undefined ? "none" : "present"
+          }`,
+          `${plane === "opencode-go" ? "OPENCODE_GO_API_KEY" : "OPENCODE_API_KEY"}: ${
+            declared === undefined || declared.length === 0 ? "unset" : "set"
+          }`,
+          `a stored login: ${login === undefined ? "none" : "none resolved"}`,
+          `the installation's own store: ${
+            config.readOpencodeStore ? "read" : "not enabled"
+          }`,
+        ];
+        console.warn(
+          `[dsh-opencode-patch] no credential resolved for ${plane}; sending the adapter's placeholder, which the gateway answers with 401. Consulted: ${sources.join("; ")}.`,
+          "set a key on the route or its env var, or sign in through the settings card"
+        );
       }
     }
 

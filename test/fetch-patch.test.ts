@@ -85,6 +85,83 @@ describe("patchFetch", () => {
     }
   });
 
+  it("names the sources it consulted when no credential resolves", async () => {
+    // The guard for the tier bug. A mis-classified tier made a captured key
+    // invisible, the adapter's placeholder went out, and the only symptom was a
+    // 401 the user read as an invalid key on a credential that was fine. So the
+    // silence is replaced by a line that states what each source answered.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const warnings: unknown[][] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+    try {
+      const ok = vi.fn(async () =>
+        Response.json({ ok: true }, { status: 200 })
+      );
+      const patched = patchFetch(
+        ok as unknown as typeof fetch,
+        als,
+        resolveConfig(),
+        {}
+      );
+      // A gateway request with no credential anywhere: no key on the request, no
+      // captured key, no env var, no login, and the installation store off.
+      await patched("https://opencode.ai/inference/v1/chat/completions", {
+        body: JSON.stringify({ messages: [] }),
+        headers: {},
+        method: "POST",
+      });
+    } finally {
+      console.warn = original;
+    }
+
+    const line = warnings
+      .map((args) => args.map(String).join(" "))
+      .find((text) => text.includes("no credential resolved"));
+    expect(line, "the absence must be reported, not passed over").toBeDefined();
+    // It states what it consulted and what each answered, so a missing env var
+    // reads differently from a missing login.
+    expect(line).toContain("opencode");
+    expect(line).toContain("OPENCODE_API_KEY: unset");
+    expect(line).toContain(
+      "a key captured from a live request (policy auto): none"
+    );
+    expect(line).toContain("not enabled");
+  });
+
+  it("does not name the sources when a credential does resolve", async () => {
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const warnings: unknown[][] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+    try {
+      const ok = vi.fn(async () =>
+        Response.json({ ok: true }, { status: 200 })
+      );
+      const patched = patchFetch(
+        ok as unknown as typeof fetch,
+        als,
+        resolveConfig(),
+        {}
+      );
+      await patched("https://opencode.ai/inference/v1/chat/completions", {
+        body: JSON.stringify({ messages: [] }),
+        headers: { authorization: "Bearer oc_sk_a_real_key" },
+        method: "POST",
+      });
+    } finally {
+      console.warn = original;
+    }
+    const line = warnings
+      .map((args) => args.map(String).join(" "))
+      .find((text) => text.includes("no credential resolved"));
+    expect(line).toBeUndefined();
+  });
+
   it("does not report a status that is not about the credential", async () => {
     // 403 is the gateway's answer for a model the account has not enabled, and
     // rotating a working credential over that would move a deployment off a

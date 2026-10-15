@@ -69,10 +69,20 @@ export const tierForRequest = (
     }
   }
   if (typeof url === "string" && url.length > 0) {
-    if (url.includes("/zen/go") || url.includes("/go/v1")) {
+    // Both endpoint families, because the gateway answers on both and a request
+    // on either belongs to one of the two accounts. Matching only the legacy
+    // `zen` shape silently mis-classified every request on the newer
+    // `inference` family as `unknown`, which made a captured, working key
+    // invisible to the resolver and sent the adapter's `Bearer unused`
+    // placeholder instead — a 401 the user reads as an invalid API key.
+    if (
+      url.includes("/zen/go") ||
+      url.includes("/inference/go") ||
+      url.includes("/go/v1")
+    ) {
       return "go";
     }
-    if (url.includes("/zen/v1")) {
+    if (url.includes("/zen/v1") || url.includes("/inference/v1")) {
       return "zen";
     }
   }

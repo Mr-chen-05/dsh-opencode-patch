@@ -452,6 +452,42 @@ describe("OpenCode Go Usage", () => {
       ).toBe("zen");
     });
 
+    it("classifies both endpoint families, not just the legacy one", () => {
+      // The bug this exists for. The gateway answers on two families and the
+      // tier is read from the URL, but only the legacy `zen` shape was matched:
+      // `…/inference/v1` matched neither branch, so every Zen request on the
+      // newer family came back `unknown`. The resolver then dropped the tier
+      // from its captured-key lookup, the captured working key became invisible,
+      // and the adapter's `Bearer unused` placeholder went out — a 401 the user
+      // read as an invalid API key on a credential that was fine.
+      expect(
+        tierForRequest(
+          "https://opencode.ai/inference/go/v1/messages",
+          "opencode"
+        )
+      ).toBe("go");
+      expect(
+        tierForRequest(
+          "https://opencode.ai/inference/v1/chat/completions",
+          "opencode-go"
+        )
+      ).toBe("zen");
+      // And the legacy family still classifies, because both are still served.
+      expect(
+        tierForRequest(
+          "https://opencode.ai/zen/go/v1/chat/completions",
+          "opencode"
+        )
+      ).toBe("go");
+      expect(
+        tierForRequest("https://opencode.ai/zen/v1/messages", "opencode-go")
+      ).toBe("zen");
+      // An unrecognised host is still unknown rather than guessed.
+      expect(tierForRequest("https://example.test/v1/chat", "my-zen")).toBe(
+        "unknown"
+      );
+    });
+
     it("uses the provider id only when nothing else identifies the tier", () => {
       expect(tierForRequest(undefined, "opencode-go")).toBe("go");
       expect(tierForRequest(undefined, "opencode")).toBe("zen");
