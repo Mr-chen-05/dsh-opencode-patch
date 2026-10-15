@@ -413,19 +413,34 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
     );
   });
 
-  it("offers a free-tier model, because a signed-in deployment can run one", () => {
-    // This asserted the opposite for several rounds. The measurements behind the
-    // exclusion sent an API key, the account token, the token with its org, every
-    // client header, both endpoints and no credential at all - each answering
-    // `403 FreeTierError` - and not one of those runs was from a deployment that
-    // was signed in. The free tier is served to a session token, which is what the
-    // real client sends.
+  it("does not offer Zen's free tier, because it is measured to refuse here", () => {
+    // This asserted the opposite for several rounds, on a run that was never
+    // made: the exclusion was withdrawn because the free tier "is served to a
+    // session token, which is what the real client sends, and a deployment that
+    // has one can use these models". The run was then made - the machine's own
+    // session token, its active org, and every header captured from the real
+    // client - and a free-tier Zen model still answered 403 FreeTierError on both
+    // endpoints. The live e2e suite answers the same way under CI.
     //
-    // So the exclusion hid models a signed-in user can use, which is a worse
-    // failure than offering one that refuses: a refusal is reported per request by
-    // the stream hook, and a hidden model is reported nowhere.
-    expect(isServableModel("space-bunny-free", "opencode")).toBe(true);
-    expect(isServableModel("step-5-preview-free", "opencode")).toBe(true);
+    // So offering them filled the picker with rows that cannot work. A model that
+    // cannot be served is not the lesser failure; it is a refusal with nothing to
+    // act on.
+    expect(isServableModel("space-bunny-free", "opencode")).toBe(false);
+    expect(isServableModel("step-5-preview-free", "opencode")).toBe(false);
+    expect(isServableModel("muse-spark-1.3-contributor-free", "opencode")).toBe(
+      false
+    );
+  });
+
+  it("still offers the Go plane's free models, because Go has no free tier", () => {
+    // The Go plane gates nothing: `step-5-preview-free` and its neighbours are
+    // served by the subscription key exactly as the paid models are, which is why
+    // they keep working while Zen's equivalent rows do not. One plane's
+    // unservable tier must not hide another plane's servable models.
+    expect(isServableModel("step-5-preview-free", "opencode-go")).toBe(true);
+    expect(isServableModel("cat-jam-free", "opencode-go")).toBe(true);
+    // And a paid Zen model is untouched by the free-tier rule.
+    expect(isServableModel("deepseek-v4.1-flash", "opencode")).toBe(true);
   });
 });
 

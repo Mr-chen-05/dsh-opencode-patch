@@ -249,7 +249,30 @@ export const isServableModel = (id: unknown, route: string): boolean => {
   // The refusal is not silent when it happens: `stream-hook.ts` reports a model
   // this plugin cannot serve, once per pair, and that report is what a reader
   // should be given instead of an empty picker.
-  const sdk = findModelSpecOn(catalogPlaneForRoute(route), id)?.provider_npm;
+  const plane = catalogPlaneForRoute(route);
+  const spec = findModelSpecOn(plane, id);
+  // Zen's free tier is NOT servable from here, and this is measured rather than
+  // argued. With this machine's own session token, its active org and every
+  // header captured from the real client, a free-tier Zen model still answers
+  // `403 FreeTierError` on both endpoint families; the live e2e suite answers the
+  // same way under CI. The gate is not in the request — it is a fingerprint or a
+  // signature only the real client sends — so no credential this plugin can
+  // assemble clears it.
+  //
+  // This reverses an earlier decision, and that decision's own comment is what
+  // was wrong: it asserted the free tier "is served to a session token, which is
+  // what the real client sends, and a deployment that has one can use these
+  // models". The run that text describes was never made, and when it was made it
+  // did not hold. Offering a model that cannot be served is not the lesser
+  // failure — it is a refusal with nothing to act on, and it fills the picker
+  // with ten rows that 403.
+  //
+  // The Go plane has NO free tier to gate, so its free models are served by the
+  // subscription key exactly as its paid ones are, and stay offered.
+  if (plane === "zen" && spec?.is_free === true) {
+    return false;
+  }
+  const sdk = spec?.provider_npm;
   if (sdk !== undefined) {
     if (UNSERVED_PLANE_SDKS.has(`${route} + ${sdk}`)) {
       return false;
