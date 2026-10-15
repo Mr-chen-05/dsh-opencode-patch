@@ -23,7 +23,7 @@ import {
   findModelSpecOn,
 } from "./models-catalog.ts";
 import { isRouteRegistered, isServableModel } from "./models-discovery.ts";
-import { internalRouteFor } from "./responses-routes.ts";
+import { internalRouteFor, UNSERVED_PLANE_SDKS } from "./responses-routes.ts";
 import { recordTurnUsage } from "./session-cost.ts";
 import {
   fallbackSessionId,
@@ -146,10 +146,12 @@ export const createStreamHook = (
     // The message states the reason it COMPUTED and nothing it did not. An
     // earlier version blamed the Zen free tier for every unservable id, which was
     // wrong twice over: for an `opencode-go` request that plane has no free tier
-    // at all, and once the free-tier exclusion was withdrawn the only reason left
-    // is the shape. A diagnostic that asserts a cause it never checked is worse
-    // than none - it sends the reader to the wrong subsystem, which is exactly
-    // what it did.
+    // at all, and at the time the shape was the only reason left. Both halves are
+    // now computed - the shape AND the tier - because the exclusion was restored
+    // once it was measured that the free tier is not served from here on any
+    // credential this plugin can assemble. A diagnostic that asserts a cause it
+    // never checked is worse than none - it sends the reader to the wrong
+    // subsystem, which is exactly what it did.
     if (
       typeof options.model === "string" &&
       options.model.length > 0 &&
@@ -157,14 +159,26 @@ export const createStreamHook = (
       !warnedUnservable.has(`${providerKey}/${options.model}`)
     ) {
       warnedUnservable.add(`${providerKey}/${options.model}`);
-      const sdk = findModelSpecOn(
-        catalogPlaneForRoute(providerKey),
-        options.model
-      )?.provider_npm;
-      const why =
-        sdk === undefined
-          ? "it names no SDK this plane has a route for"
-          : `its catalog SDK \`${sdk}\` names a protocol this plane has no route for`;
+      const plane = catalogPlaneForRoute(providerKey);
+      const spec = findModelSpecOn(plane, options.model);
+      const sdk = spec?.provider_npm;
+      // Checked in the order the filter itself applies them, so the reason named
+      // is the one that actually decided it. Naming the shape for a model that
+      // was filtered on its tier sends the reader to the routing table for an
+      // entitlement problem.
+      let why: string;
+      if (plane === "zen" && spec?.is_free === true) {
+        why =
+          "it is a Zen free-tier id, and the free tier is not served from this " +
+          "plugin on any credential - measured with a session token, its org and " +
+          "every header the real client sends, a Zen -free model still answers 403";
+      } else if (sdk === undefined) {
+        why = "it names no SDK this plane has a route for";
+      } else if (UNSERVED_PLANE_SDKS.has(`${providerKey} + ${sdk}`)) {
+        why = `its catalog SDK \`${sdk}\` is not served on this plane`;
+      } else {
+        why = `its catalog SDK \`${sdk}\` names a protocol this plane has no route for`;
+      }
       console.warn(
         `[dsh-opencode-patch] ${providerKey}/${options.model} cannot be served: ${why}`,
         "the picker does not offer it for the same reason"

@@ -385,6 +385,71 @@ describe("apply (plugin lifecycle)", () => {
     }
   });
 
+  it("names the free tier when that is what filtered the model", () => {
+    // The reason is now COMPUTED from the same rule the filter applies, so a Zen
+    // free-tier id is reported as an entitlement problem rather than as a shape
+    // one. Naming the shape for a model filtered on its tier sends the reader to
+    // the routing table for something the routing table cannot fix.
+    let streamHandler:
+      | ((options: unknown, next: () => unknown) => unknown)
+      | undefined;
+    const warnings: unknown[][] = [];
+    const spy = vi
+      .spyOn(console, "warn")
+      .mockImplementation((...args: unknown[]) => {
+        warnings.push(args);
+      });
+    try {
+      const ctx = {
+        effect: (fn: () => unknown) => {
+          fn();
+        },
+        llm: {
+          listConfigurableProviders: () => [{ provider: "opencode" }],
+          listModels: async () => [{ id: "space-bunny-free" }],
+          listProviders: () => [{ id: "opencode" }],
+          stream: (options: unknown) => options,
+        },
+        on: (
+          _event: string,
+          handler: (options: unknown, next: () => unknown) => unknown
+        ) => {
+          streamHandler = handler;
+        },
+      };
+      apply(ctx as never);
+      if (typeof streamHandler !== "function") {
+        throw new TypeError("stream handler not registered");
+      }
+      streamHandler?.(
+        { model: "space-bunny-free", provider: "opencode" },
+        () => {
+          // `next` is never reached for an unservable model.
+        }
+      );
+      const mine = warnings.filter((args) =>
+        String(args[0]).includes("cannot be served:")
+      );
+      expect(mine).toHaveLength(1);
+      const message = String(mine[0]?.[0]);
+      // The tier, not the shape - and it does not claim a route problem.
+      expect(message).toContain("free tier");
+      expect(message).not.toContain("names no SDK");
+      // And the Go plane's free models are not reported at all.
+      streamHandler?.(
+        { model: "cat-jam-free", provider: "opencode-go" },
+        () => {
+          // Served: the Go plane has no free tier to gate.
+        }
+      );
+      expect(
+        warnings.filter((args) => String(args[0]).includes("cat-jam-free"))
+      ).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("hands a responses-format model to the responses route", async () => {
     // The gateway serves muse on /responses and everything else on
     // /chat/completions, and llm-pi-ai carries one `api` per route. So the call
