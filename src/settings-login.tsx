@@ -22,11 +22,24 @@ import type {
 } from "./login-contract.ts";
 import type { Translate } from "./settings-copy.ts";
 
+/**
+ * The planes a login can be written to.
+ *
+ * There are two authentication routes, one per gateway plane, and a grant is
+ * stored per plane. Both are offered because a deployment may hold a different
+ * account on each, and because the grant the row shows must be the one it
+ * describes.
+ */
+export const LOGIN_PLANES = ["opencode", "opencode-go"] as const;
+
+/** One plane a sign-in can be written to. */
+export type LoginPlane = (typeof LOGIN_PLANES)[number];
+
 /** The three remote calls a sign-in row makes. */
 export interface LoginRemoteCalls {
-  readonly begin: () => Promise<LoginChallenge>;
+  readonly begin: (plane: LoginPlane) => Promise<LoginChallenge>;
   readonly poll: () => Promise<LoginPollResult>;
-  readonly read: () => Promise<LoginState>;
+  readonly read: (plane: LoginPlane) => Promise<LoginState>;
 }
 
 /** What this row needs from the page. */
@@ -43,6 +56,12 @@ const rowStyle: React.CSSProperties = {
   display: "flex",
   gap: 8,
   justifyContent: "space-between",
+};
+
+const planeLabelStyle: React.CSSProperties = {
+  alignItems: "center",
+  display: "inline-flex",
+  gap: 4,
 };
 
 const codeStyle: React.CSSProperties = {
@@ -84,6 +103,7 @@ export const LoginSection: React.FC<LoginSectionProps> = (
   props: LoginSectionProps
 ) => {
   const { login, t } = props;
+  const [plane, setPlane] = useState<LoginPlane>("opencode");
   const [state, setState] = useState<LoginState>();
   const [challenge, setChallenge] = useState<LoginChallenge>();
   const [failure, setFailure] = useState<string>();
@@ -95,11 +115,11 @@ export const LoginSection: React.FC<LoginSectionProps> = (
       return;
     }
     try {
-      setState(await login.read());
+      setState(await login.read(plane));
     } catch (error) {
       console.warn("[dsh-opencode-patch] login state read failed", error);
     }
-  }, [login]);
+  }, [login, plane]);
 
   useEffect(() => {
     void refresh();
@@ -162,7 +182,7 @@ export const LoginSection: React.FC<LoginSectionProps> = (
     }
     setFailure(undefined);
     try {
-      setChallenge(await login.begin());
+      setChallenge(await login.begin(plane));
     } catch (error) {
       console.warn("[dsh-opencode-patch] login could not start", error);
       setFailure(error instanceof Error ? error.message : t("loginFailed"));
@@ -185,11 +205,41 @@ export const LoginSection: React.FC<LoginSectionProps> = (
       ? undefined
       : (challenge.verificationUriComplete ?? challenge.verificationUri);
 
+  // The plane this row is writing to and describing. Two radio inputs rather
+  // than a select, because it is two choices and the host's own primitives offer
+  // no radio: the row already styles its own button, and two labelled buttons
+  // keep the choice visible without a second component. The signed-in status is
+  // per plane, so switching re-reads - which is what `refresh` depending on
+  // `plane` does.
+  const onPlane = (next: LoginPlane): void => {
+    chasing.current = null;
+    setChallenge(undefined);
+    setFailure(undefined);
+    setPlane(next);
+  };
+
   return (
     <div style={{ display: "grid", gap: 8 }}>
       <div style={rowStyle}>
         <span>{t("loginTitle")}</span>
         <span>{statusOf(state, t)}</span>
+      </div>
+      <div style={rowStyle} role="group">
+        <span>{t("loginPlane")}</span>
+        {LOGIN_PLANES.map((option) => (
+          <label key={option} style={planeLabelStyle}>
+            <input
+              checked={plane === option}
+              name="dsh-opencode-login-plane"
+              onChange={() => {
+                onPlane(option);
+              }}
+              type="radio"
+              value={option}
+            />
+            {t(option === "opencode" ? "loginPlaneZen" : "loginPlaneGo")}
+          </label>
+        ))}
       </div>
       {challenge === undefined ? (
         <div style={rowStyle}>

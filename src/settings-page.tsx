@@ -114,10 +114,17 @@ export const loginCalls = (ctx: ClientContext): LoginRemoteCalls => {
     return remote;
   };
   return {
-    begin: async () =>
-      parseLoginChallenge(await unwrapRemote(service()?.begin?.())),
+    // The plane travels with the call. There are TWO authentication routes - one
+    // per gateway plane - and a login writes its grant to the plane it names, so
+    // a row that never said which one always signed in on Zen and could describe
+    // no other. A login signs an ACCOUNT in and either grant serves both planes
+    // (`login-credential.ts` falls back to the other plane), so choosing here is
+    // about which grant you are writing and reading, not about locking you out.
+    begin: async (plane: string) =>
+      parseLoginChallenge(await unwrapRemote(service()?.begin?.({ plane }))),
     poll: async () => parseLoginPoll(await unwrapRemote(service()?.poll?.())),
-    read: async () => parseLoginState(await unwrapRemote(service()?.state?.())),
+    read: async (plane: string) =>
+      parseLoginState(await unwrapRemote(service()?.state?.({ plane }))),
   };
 };
 

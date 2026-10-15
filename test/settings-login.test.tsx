@@ -48,6 +48,60 @@ describe("settings: the sign-in row", () => {
     expect(view.container.textContent).toContain(zh.loginAction);
   });
 
+  it("offers both planes, and signs in to the one that is selected", async () => {
+    // There are TWO authentication routes, one per gateway plane, and a grant is
+    // stored per plane. A row that never said which one always wrote to Zen - so
+    // a deployment living on Go could not sign in on the plane it uses, and
+    // could not see the grant it already had.
+    const begun: string[] = [];
+    const read: string[] = [];
+    const view = render(
+      <LoginSection
+        login={calls({
+          begin: (plane: string) => {
+            begun.push(plane);
+            return Promise.resolve({ userCode: "X" } as never);
+          },
+          read: (plane: string) => {
+            read.push(plane);
+            return Promise.resolve({ plane, signedIn: false } as never);
+          },
+        })}
+        t={t}
+      />
+    );
+
+    // Both planes are offered, and Zen - what the row always used - is the default.
+    expect(zh.loginPlaneZen).toBeTruthy();
+    expect(zh.loginPlaneGo).toBeTruthy();
+    const radios = [
+      ...view.container.querySelectorAll<HTMLInputElement>(
+        'input[type="radio"]'
+      ),
+    ];
+    expect(radios).toHaveLength(2);
+    const zen = radios[0] as HTMLInputElement;
+    const go = radios[1] as HTMLInputElement;
+    await waitFor(() => {
+      expect(zen.checked).toBe(true);
+      expect(go.checked).toBe(false);
+    });
+    // And it describes the plane it is showing.
+    await waitFor(() => {
+      expect(read).toContain("opencode");
+    });
+
+    // Choosing the other plane re-reads it and signs in THERE.
+    fireEvent.click(go);
+    await waitFor(() => {
+      expect(read).toContain("opencode-go");
+    });
+    fireEvent.click(view.container.querySelector('button[type="button"]')!);
+    await waitFor(() => {
+      expect(begun).toEqual(["opencode-go"]);
+    });
+  });
+
   it("names the account once one is stored", async () => {
     const view = render(
       <LoginSection
@@ -250,9 +304,13 @@ describe("settings: the calls the page hands the row", () => {
   it("unwraps each Remote result into the shape the row reads", async () => {
     const wired = loginCalls({ remote: { opencodeLogin: remote } } as never);
     expect(wired).toBeDefined();
-    await expect(wired?.read()).resolves.toMatchObject({ signedIn: false });
+    await expect(wired?.read("opencode")).resolves.toMatchObject({
+      signedIn: false,
+    });
     await expect(wired?.poll()).resolves.toEqual({ kind: "pending" });
-    await expect(wired?.begin()).resolves.toMatchObject({ userCode: "X" });
+    await expect(wired?.begin("opencode")).resolves.toMatchObject({
+      userCode: "X",
+    });
   });
 
   it("answers calls even when no login remote is mounted, so the row renders", () => {
@@ -267,7 +325,7 @@ describe("settings: the calls the page hands the row", () => {
     expect(typeof absent.poll).toBe("function");
     expect(typeof absent.read).toBe("function");
     // And the missing service still surfaces where a caller can see it.
-    return expect(absent.read()).rejects.toThrow(/did not answer/u);
+    return expect(absent.read("opencode")).rejects.toThrow(/did not answer/u);
   });
 
   it("sees a remote that mounts after the calls were built", async () => {
@@ -297,8 +355,8 @@ describe("settings: the calls the page hands the row", () => {
         return Promise.resolve({ error: "stub", ok: false });
       },
     };
-    await expect(built.read()).rejects.toThrow(/stub/u);
-    await expect(built.begin()).rejects.toThrow(/stub/u);
+    await expect(built.read("opencode")).rejects.toThrow(/stub/u);
+    await expect(built.begin("opencode")).rejects.toThrow(/stub/u);
     expect(asked).toEqual(["state", "begin"]);
   });
 

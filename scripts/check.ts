@@ -475,8 +475,15 @@ if (releaseYml.includes("scripts/publish-scoped.ts")) {
  * The margin is what matters, not the number: at 85 the bundle sat 526 bytes
  * under the line, which means the next honest edit trips a guard whose only
  * job is to notice a dependency.
+ *
+ * Raised 112 -> 116 KB when the sign-in row gained a plane selector. The login
+ * is per plane — two authentication routes, one grant each — and the row had no
+ * way to say which one it was writing or describing, so a deployment living on
+ * Go could not sign in on the plane it used. The growth is a radio group, its
+ * two localized labels, and the rationale for why a grant written on one plane
+ * still serves the other.
  */
-const CLIENT_BUDGET = 112 * 1024;
+const CLIENT_BUDGET = 116 * 1024;
 const clientPath = join(ROOT, "lib/client.js");
 if (existsSync(clientPath)) {
   const clientStat = statSync(clientPath);
