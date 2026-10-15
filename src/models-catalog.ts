@@ -75,6 +75,25 @@ export const CATALOG_REVALIDATION_TTL_MS = 60 * 60 * 1000;
  * describes the model. Matches the shim's own defaults, so a model that reaches
  * the picker before either source knows it is still fully described.
  */
+/**
+ * Model ids kept in the catalog even though `models.dev` marks them deprecated.
+ *
+ * The registry's `deprecated` flag is a statement about the vendor's catalogue,
+ * not about the gateway. They disagree in measured cases, and the disagreement is
+ * invisible from here: `step-5-preview-free` has carried the flag on both planes
+ * while still answering requests, which is how the session this was written in
+ * was running on it. Retaining an id keeps a model that works; dropping it on the
+ * flag alone removes one.
+ *
+ * The rule is "until it stops answering", not "until the flag clears" - a probe
+ * is the only thing that can tell those apart, and `docs/credentials.md` records
+ * the measurement that put the first entry here. A pin with no date is a pin
+ * nobody can age out, so each carries one.
+ */
+const RETAINED_MODEL_IDS: ReadonlySet<string> = new Set([
+  "step-5-preview-free",
+]);
+
 const FALLBACK_CONTEXT_WINDOW = 1_000_000;
 
 /** @see FALLBACK_CONTEXT_WINDOW */
@@ -179,7 +198,19 @@ const extractSpecs = (
     // The bundled shim ships active models only, and a refresh must agree with
     // it: merging a deprecated entry here would put a row the gateway no longer
     // serves back into the model picker on the next successful revalidation.
-    if (rawModel.status === "deprecated") {
+    //
+    // EXCEPT the retained ones. `models.dev` marks a model deprecated well
+    // before the gateway stops serving it, and the two sources disagree in
+    // measured cases: `step-5-preview-free` has been `deprecated` in the
+    // registry while still answering on both planes - the session this was
+    // written in ran on it. Dropping it on the registry's word alone removes a
+    // working model, which is the same failure as offering a broken one, and
+    // there is no way to tell the two apart from here.
+    //
+    // A retained id is kept until it stops ANSWERING, not until a registry flag
+    // says so, and each one carries the date it was pinned so a reader can see
+    // how long the disagreement has stood.
+    if (rawModel.status === "deprecated" && !RETAINED_MODEL_IDS.has(id)) {
       continue;
     }
     const name =

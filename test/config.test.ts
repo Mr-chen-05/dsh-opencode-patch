@@ -214,6 +214,7 @@ describe("Config schema", () => {
         "endpoint",
         "freeModelMarker",
         "gatewayUrls",
+        "hiddenModels",
         "injectCoreTools",
         "injectOriginHeaders",
         "injectProject",

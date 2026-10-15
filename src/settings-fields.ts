@@ -91,6 +91,12 @@ export const CONFIG_ONLY_FIELDS: readonly {
     reason: "URL substrings; only a mirror or relay needs to change them",
   },
   {
+    field: "hiddenModels",
+    reason:
+      "ids withheld from every listing; the counterpart to the retention rule, " +
+      "and a list of ids nobody should type into a settings form",
+  },
+  {
     field: "usageBaseURL",
     reason: "endpoint override; auto-discovered from the composition",
   },

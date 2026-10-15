@@ -112,6 +112,18 @@ export const DEFAULT_CREDENTIAL_POOL: CredentialPoolConfig = {
   zen: [],
 };
 
+/**
+ * Model ids withheld from every listing, whatever the catalog says about them.
+ *
+ * The counterpart to the retention list, and for the same reason: a model the
+ * catalog calls active is not necessarily one a user wants offered. A deprecated
+ * id the gateway still serves but that misfires for a given account - a privacy
+ * setting, a protocol it answers on only intermittently - belongs here rather
+ * than in the catalog, because the reason is the deployment's and not the
+ * vendor's.
+ */
+export const DEFAULT_HIDDEN_MODELS: readonly string[] = [];
+
 export const CONFIG_DEFAULTS = {
   credentialOrg: undefined as string | undefined,
   credentialPool: DEFAULT_CREDENTIAL_POOL,
@@ -119,6 +131,7 @@ export const CONFIG_DEFAULTS = {
   enrichModels: true,
   endpoint: DEFAULT_ENDPOINT_FAMILY,
   freeModelMarker: DEFAULT_FREE_MODEL_MARKER,
+  hiddenModels: DEFAULT_HIDDEN_MODELS,
   gatewayUrls: DEFAULT_GATEWAY_URLS,
   injectCoreTools: true,
   injectOriginHeaders: true,
@@ -142,6 +155,7 @@ export interface PluginConfig {
   enrichModels?: boolean;
   endpoint?: EndpointFamily;
   freeModelMarker?: string;
+  hiddenModels?: string[];
   gatewayUrls?: string[];
   injectCoreTools?: boolean;
   injectOriginHeaders?: boolean;
@@ -185,6 +199,8 @@ export interface ResolvedPluginConfig {
   endpoint: EndpointFamily;
   /** `*` when the core-tool fallback should run for every model. */
   freeModelMarker: string;
+  /** Ids withheld from every listing; empty unless the deployment names some. */
+  hiddenModels: string[];
   /** URL substrings marking gateway traffic; never empty after resolution. */
   gatewayUrls: string[];
   injectCoreTools: boolean;
@@ -279,6 +295,7 @@ export const resolveConfig = (
     endpoint: resolvedEndpoint(config.endpoint),
     freeModelMarker:
       readString(config.freeModelMarker) ?? CONFIG_DEFAULTS.freeModelMarker,
+    hiddenModels: readStringList(config.hiddenModels),
     gatewayUrls:
       gatewayUrls.length > 0 ? gatewayUrls : [...CONFIG_DEFAULTS.gatewayUrls],
     injectCoreTools: readBoolean(
@@ -397,6 +414,17 @@ export const Config = z.object({
     .volatile()
     .description(
       "Auto-inject read and bash tool schemas on free-tier requests."
+    ),
+  hiddenModels: z
+    .array(z.string())
+    .default([...CONFIG_DEFAULTS.hiddenModels])
+    .volatile()
+    .description(
+      "Model ids withheld from every listing, whatever the catalog says. The " +
+        "counterpart to the retention rule: a deprecated id the gateway still " +
+        "serves but that misfires for a given account - a privacy setting, a " +
+        "protocol it answers on only intermittently - belongs here rather than " +
+        "in the catalog, because the reason is the deployment's."
     ),
   freeModelMarker: z
     .string()

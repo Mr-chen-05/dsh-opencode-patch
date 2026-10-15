@@ -304,7 +304,7 @@ const installFetchPatch = (
     // and every live reload would stack another wrapper. Installed before the
     // stream hook is used, because the redirect asks it whether the route is
     // really registered.
-    const stopCatalogHiding = hideResponsesRoute(ctx);
+    const stopCatalogHiding = hideResponsesRoute(ctx, config);
     // Own the Responses route from here, so the user configures nothing: they
     // keep the `opencode` provider and key they already have. Best-effort — a
     // route declared in the profile still works if this cannot register.

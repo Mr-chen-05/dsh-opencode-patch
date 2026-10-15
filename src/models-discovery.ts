@@ -233,9 +233,20 @@ const withoutRoute = (value: unknown, key: "id" | "provider"): unknown =>
  * @returns whether it is a free-tier id.
  */
 
-export const isServableModel = (id: unknown, route: string): boolean => {
+export const isServableModel = (
+  id: unknown,
+  route: string,
+  hidden: readonly string[] = []
+): boolean => {
   if (typeof id !== "string") {
     return true;
+  }
+  // A named exclusion outranks every rule below it, including retention: it is
+  // the deployment's own word about a model, and the retention list is this
+  // file's. A deployment that withholds an id the catalog retains, or the other
+  // way round, gets the deployment's answer.
+  if (hidden.includes(id)) {
+    return false;
   }
   // A free-tier id is OFFERED. It was excluded here for several rounds, on
   // measurements that sent an API key, the account token, the token with its org,
@@ -316,11 +327,13 @@ export const isServableModel = (id: unknown, route: string): boolean => {
  * redirect has somewhere to go.
  *
  * @param ctx - host context carrying the LLM registry.
+ * @param config - the resolved config, for the ids a deployment withholds.
  * @returns the disposer restoring the original methods, or `undefined` when
  *   there is nothing to patch.
  */
 export const hideResponsesRoute = (
-  ctx: CordisContext
+  ctx: CordisContext,
+  config: ResolvedPluginConfig
 ): (() => void) | undefined => {
   const { llm } = ctx;
   if (llm === undefined) {
@@ -374,7 +387,9 @@ export const hideResponsesRoute = (
       const models = await Reflect.apply(originalListModels, this, [provider]);
       return Array.isArray(models)
         ? models.filter(
-            (model) => !isRecord(model) || isServableModel(model.id, provider)
+            (model) =>
+              !isRecord(model) ||
+              isServableModel(model.id, provider, config.hiddenModels)
           )
         : models;
     };

@@ -393,6 +393,7 @@ These exist in the schema but render no control — each is a literal, a marker,
           - opencode-anthropic
         gatewayUrls:
           - opencode.ai/zen
+        hiddenModels: [] # ids withheld from every listing
         sessionIdEnv: "OPENCODE_SESSION_ID"
         freeModelMarker: "free"
         usageBaseURL: "https://opencode.ai/zen/go/v1"

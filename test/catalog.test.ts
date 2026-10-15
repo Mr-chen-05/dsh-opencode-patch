@@ -46,8 +46,24 @@ afterEach(() => {
 });
 
 describe("OpenCode Model Catalog & Enrichment", () => {
+  it("retains a deprecated id the gateway still serves, on both planes", () => {
+    // The registry's deprecated flag is a statement about the vendor's
+    // catalogue, not the gateway, and the two disagree in measured cases:
+    // step-5-preview-free carried the flag on both planes while still answering,
+    // which is how the session this was written in was running on it. Dropping
+    // it on the flag alone removes a working model - the same failure as
+    // offering a broken one, and indistinguishable from here.
+    for (const catalog of [OPENCODE_ZEN_CATALOG, OPENCODE_GO_CATALOG]) {
+      expect(catalog.some((m) => m.id === "step-5-preview-free")).toBe(true);
+    }
+    // And a genuinely retired id still stays out.
+    for (const retired of RETIRED_ZEN_MODEL_IDS) {
+      expect(OPENCODE_ZEN_CATALOG.some((m) => m.id === retired)).toBe(false);
+    }
+  });
+
   it("ships only active, priced models in the bundled Go shim", () => {
-    expect(OPENCODE_GO_CATALOG.length).toBe(29);
+    expect(OPENCODE_GO_CATALOG.length).toBe(30);
     for (const model of OPENCODE_GO_CATALOG) {
       expect(model.id.length).toBeGreaterThan(0);
       expect(model.name.length).toBeGreaterThan(0);

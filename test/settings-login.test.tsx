@@ -326,7 +326,9 @@ describe("settings: the calls the page hands the row", () => {
     await expect(wired?.read("opencode")).resolves.toMatchObject({
       signedIn: false,
     });
-    await expect(wired?.poll()).resolves.toEqual({ kind: "pending" });
+    await expect(wired?.poll("flow-remote-test")).resolves.toEqual({
+      kind: "pending",
+    });
     await expect(wired?.begin("opencode")).resolves.toMatchObject({
       userCode: "X",
     });

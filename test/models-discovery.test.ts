@@ -311,7 +311,7 @@ describe("models-discovery: hiding the internal Responses route", () => {
     // REGISTERED provider, so filtering only the configurable directory would
     // leave the route on screen — `listProviders` is the one that matters.
     const { ctx } = hostWith();
-    const stop = hideResponsesRoute(ctx);
+    const stop = hideResponsesRoute(ctx, resolveConfig());
     expect(stop).toBeDefined();
 
     expect(ctx.llm?.listProviders?.()).toEqual([
@@ -327,7 +327,7 @@ describe("models-discovery: hiding the internal Responses route", () => {
     // listing the answer would always be no and the re-dispatch would never
     // happen — which is why the check reads the original.
     const { ctx } = hostWith();
-    const stop = hideResponsesRoute(ctx);
+    const stop = hideResponsesRoute(ctx, resolveConfig());
 
     expect(isRouteRegistered(RESPONSES_ROUTE)).toBe(true);
     expect(ctx.llm?.listProviders?.()).toHaveLength(1);
@@ -342,7 +342,7 @@ describe("models-discovery: hiding the internal Responses route", () => {
     // no route serves must not reach a listing they choose from. A model the
     // catalog does not know names no SDK, which is the route's own api.
     const { ctx, seen } = hostWith();
-    const stop = hideResponsesRoute(ctx);
+    const stop = hideResponsesRoute(ctx, resolveConfig());
 
     await expect(ctx.llm?.listModels?.(RESPONSES_ROUTE)).resolves.toEqual([]);
     await expect(ctx.llm?.listModels?.("opencode")).resolves.toEqual([
@@ -356,7 +356,7 @@ describe("models-discovery: hiding the internal Responses route", () => {
 
   it("degrades to a no-op when the Host exposes no listing at all", () => {
     const ctx = { llm: {} } as unknown as CordisContext;
-    expect(hideResponsesRoute(ctx)).toBeUndefined();
+    expect(hideResponsesRoute(ctx, resolveConfig())).toBeUndefined();
   });
 });
 
@@ -374,7 +374,7 @@ describe("models-discovery: the unfiltered registry keeps its receiver", () => {
       },
     };
     const ctx = { llm: registry } as unknown as CordisContext;
-    const stop = hideResponsesRoute(ctx);
+    const stop = hideResponsesRoute(ctx, resolveConfig());
     expect(stop).toBeTypeOf("function");
     expect(isRouteRegistered("opencode")).toBe(true);
     expect(isRouteRegistered("opencode-responses")).toBe(false);
@@ -402,6 +402,20 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
     // A model the catalog describes is answered by its SDK, and the id rule is
     // never consulted - so this cannot change what already worked.
     expect(isServableModel("gemini-3.1-pro", "opencode")).toBe(true);
+  });
+
+  it("withholds an id a deployment names, outranking every other rule", () => {
+    // The deployment's own word about a model beats every rule this file
+    // applies - including retention. A deprecated id the gateway still serves
+    // but that misfires for a given account belongs in `hiddenModels`, because
+    // the reason is the deployment's and not the vendor's.
+    expect(
+      isServableModel("deepseek-v4.1-flash", "opencode", [
+        "deepseek-v4.1-flash",
+      ])
+    ).toBe(false);
+    // And an empty list changes nothing.
+    expect(isServableModel("deepseek-v4.1-flash", "opencode", [])).toBe(true);
   });
 
   it("refuses a model whose plane + SDK combination is declared unserved", () => {
