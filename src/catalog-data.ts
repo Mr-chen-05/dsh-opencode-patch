@@ -1569,6 +1569,21 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     reasoning: true,
   },
   {
+    context_window: 200_000,
+    cost: {
+      cache_read: 0,
+      input: 0,
+      output: 0,
+    },
+    id: "deepseek-v4.1-flash-free",
+    input_modalities: ["text", "image"],
+    is_free: true,
+    max_output_tokens: 32_000,
+    name: "DeepSeek V4.1 Flash Free",
+    reasoning: true,
+    reasoning_options: [{ type: "effort", values: ["low", "high", "max"] }],
+  },
+  {
     context_window: 1_000_000,
     cost: {
       cache_read: 0.01,

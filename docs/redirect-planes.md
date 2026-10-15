@@ -10,7 +10,7 @@ A **plane** is one gateway base URL with its own catalog and its own credential.
 
 | Plane | Route id | Base URL | Credential | Models |
 | :-- | :-- | :-- | :-- | --: |
-| Zen (pay-as-you-go, free tier) | `opencode` | the `endpoint` family's | `OPENCODE_API_KEY` | 82 served / 120 listed |
+| Zen (pay-as-you-go, free tier) | `opencode` | the `endpoint` family's | `OPENCODE_API_KEY` | 83 served / 121 listed |
 | Go (subscription) | `opencode-go` | the `endpoint` family's | `OPENCODE_GO_API_KEY` | 31 served / 36 listed |
 
 **There is no longer one base URL per plane to quote.** The gateway answers on two endpoint families and the `endpoint` setting picks one: `auto` follows the catalog, which today names `…/inference/v1` and `…/inference/go/v1`, and `legacy` pins the older `…/zen/v1` and `…/zen/go/v1`. Both are still served and they are entitled separately, which is why the choice is the user's rather than a migration. The dated measurement below was taken on the legacy family.
@@ -25,13 +25,13 @@ A **shape** is one wire protocol, named by the SDK a model declares in the catal
 
 | SDK in the catalog  | Protocol                | Zen |    Go |
 | :------------------ | :---------------------- | --: | ----: |
-| _(none)_            | `openai-completions`    |  25 |    18 |
+| _(none)_            | `openai-completions`    |  26 |    18 |
 | `@ai-sdk/openai`    | `openai-responses`      |  30 | **6** |
 | `@ai-sdk/anthropic` | `anthropic-messages`    |  18 | **6** |
 | `@ai-sdk/mistral`   | `mistral-conversations` |   1 |     — |
 | `@ai-sdk/google`    | `google-generative-ai`  |   8 | **1** |
 
-**Absence is the signal, and it is a real one.** Both planes set a provider-level `npm` of `@ai-sdk/openai-compatible` in `models.dev`, and **no model declares it explicitly**: 0 of 82 on Zen, 0 of 18 on Go. A model that speaks the completions shape simply omits `provider.npm` and inherits it. So "no SDK" does not mean "unknown"; it means _the provider default_, which is the protocol the route was itself registered with.
+**Absence is the signal, and it is a real one.** Both planes set a provider-level `npm` of `@ai-sdk/openai-compatible` in `models.dev`, and **no model declares it explicitly**: 0 of 83 on Zen, 0 of 18 on Go. A model that speaks the completions shape simply omits `provider.npm` and inherits it. So "no SDK" does not mean "unknown"; it means _the provider default_, which is the protocol the route was itself registered with.
 
 That is why the servability check treats `undefined` as servable, and why `@ai-sdk/openai-compatible` is deliberately **not** in `PROTOCOL_FOR_SDK`: listing it would record the default as though it were an override. The coverage guard still covers the case where a model declares it explicitly. None do today, and if one did, the test would name it rather than drop the model.
 
