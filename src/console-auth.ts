@@ -182,7 +182,7 @@ export interface PendingAuthorization {
    * Poll once. `granted` carries the tokens; every other outcome says whether
    * to keep waiting, and `pending` is the answer a human has not approved yet.
    */
-  readonly poll: () => Promise<PollOutcome>;
+  readonly poll: (signal?: AbortSignal) => Promise<PollOutcome>;
 }
 
 /**
@@ -218,12 +218,14 @@ export class ConsoleAuthClient {
    */
   async #post(
     path: string,
-    body: Record<string, unknown>
+    body: Record<string, unknown>,
+    signal?: AbortSignal
   ): Promise<Record<string, unknown>> {
     const response = await this.#fetch(`${this.#baseUrl}${path}`, {
       body: JSON.stringify(body),
       headers: { "Content-Type": "application/json" },
       method: "POST",
+      ...(signal === undefined ? {} : { signal }),
     });
     const text = await response.text();
     let parsed: unknown;
@@ -245,13 +247,18 @@ export class ConsoleAuthClient {
    * below each pick the fields they know, and a shape this module did not expect
    * should fail at the caller rather than be narrowed into existence here.
    */
-  async #get(path: string, accessToken: string): Promise<unknown> {
+  async #get(
+    path: string,
+    accessToken: string,
+    signal?: AbortSignal
+  ): Promise<unknown> {
     const response = await this.#fetch(`${this.#baseUrl}${path}`, {
       headers: {
         Accept: "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
       method: "GET",
+      ...(signal === undefined ? {} : { signal }),
     });
     const text = await response.text();
     try {
@@ -276,8 +283,11 @@ export class ConsoleAuthClient {
    * @throws {Error} when the Console refuses the token or answers a shape
    * without an id or an email.
    */
-  async account(accessToken: string): Promise<ConsoleAccount> {
-    const raw = await this.#get("/api/user", accessToken);
+  async account(
+    accessToken: string,
+    signal?: AbortSignal
+  ): Promise<ConsoleAccount> {
+    const raw = await this.#get("/api/user", accessToken, signal);
     if (!isRecord(raw)) {
       throw new TypeError("the Console answered no account object");
     }
@@ -303,8 +313,11 @@ export class ConsoleAuthClient {
    * @throws {Error} when the Console refuses the token or answers a shape that
    * is not a list of `{ id, name }`.
    */
-  async orgs(accessToken: string): Promise<readonly ConsoleOrg[]> {
-    const raw = await this.#get("/api/orgs", accessToken);
+  async orgs(
+    accessToken: string,
+    signal?: AbortSignal
+  ): Promise<readonly ConsoleOrg[]> {
+    const raw = await this.#get("/api/orgs", accessToken, signal);
     if (!Array.isArray(raw)) {
       throw new TypeError("the Console answered no organization list");
     }
@@ -363,16 +376,20 @@ export class ConsoleAuthClient {
 
     return {
       authorization,
-      poll: () => this.#poll(authorization.deviceCode),
+      poll: (signal) => this.#poll(authorization.deviceCode, signal),
     };
   }
 
-  async #poll(deviceCode: string): Promise<PollOutcome> {
-    const raw = await this.#post("/auth/device/token", {
-      client_id: this.#clientId,
-      device_code: deviceCode,
-      grant_type: DEVICE_CODE_GRANT,
-    });
+  async #poll(deviceCode: string, signal?: AbortSignal): Promise<PollOutcome> {
+    const raw = await this.#post(
+      "/auth/device/token",
+      {
+        client_id: this.#clientId,
+        device_code: deviceCode,
+        grant_type: DEVICE_CODE_GRANT,
+      },
+      signal
+    );
     const record = raw;
     const accessToken = readString(record, "access_token");
     if (accessToken !== undefined) {

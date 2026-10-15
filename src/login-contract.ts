@@ -63,6 +63,8 @@ export interface LoginBeginQuery {
 
 /** The code a human approves, and where they approve it. */
 export interface LoginChallenge {
+  /** Opaque handle that keeps concurrent device flows separate. */
+  readonly flowId: string;
   /** The short code the human types, when the Console issues one. */
   readonly userCode: string;
   /** Absolute URL to open, resolved from the Console's relative answer. */
@@ -75,10 +77,27 @@ export interface LoginChallenge {
   readonly intervalSeconds: number;
 }
 
+/** Identify the device flow a poll or cancellation applies to. */
+export interface LoginPollQuery {
+  readonly flowId: string;
+}
+
+/** An acknowledgement that this device authorization has been abandoned. */
+export interface LoginCancelResult {
+  readonly kind: "cancelled";
+}
+
+/** Identify a failed start so a late acknowledgement cannot erase a newer flow. */
+export interface LoginCancelQuery {
+  readonly flowId: string;
+}
+
 /** Why a poll has not produced a login yet, or never will. */
 export interface LoginPollResult {
-  /** `pending` while a human has not approved; `failed` when they will not. */
-  readonly kind: "pending" | "failed" | "signed-in";
+  /** What the poll answered. `slow_down` remains pending at the increased rate. */
+  readonly kind: "pending" | "slow_down" | "failed" | "signed-in";
+  /** The interval in seconds to use for the next poll. */
+  readonly intervalSeconds?: number;
   /** What went wrong, for the failure case. */
   readonly detail?: string;
 }
@@ -174,11 +193,14 @@ export const parseLoginChallenge = (value: unknown): LoginChallenge => {
   if (!isRecord(value)) {
     throw new TypeError("Invalid login challenge: expected an object");
   }
+  const flowId = readString(value, "flowId");
   const userCode = readString(value, "userCode");
   const verificationUri = readString(value, "verificationUri");
   const expiresInSeconds = readNumber(value, "expiresInSeconds");
   const intervalSeconds = readNumber(value, "intervalSeconds");
   if (
+    flowId === undefined ||
+    flowId.length > 128 ||
     userCode === undefined ||
     verificationUri === undefined ||
     expiresInSeconds === undefined ||
@@ -186,8 +208,17 @@ export const parseLoginChallenge = (value: unknown): LoginChallenge => {
   ) {
     throw new TypeError("Invalid login challenge: missing a field to render");
   }
+  if (
+    !Number.isFinite(expiresInSeconds) ||
+    expiresInSeconds < 0 ||
+    !Number.isFinite(intervalSeconds) ||
+    intervalSeconds < 0
+  ) {
+    throw new TypeError("Invalid login challenge timing");
+  }
   return {
     expiresInSeconds,
+    flowId,
     intervalSeconds,
     userCode,
     verificationUri,
@@ -197,6 +228,38 @@ export const parseLoginChallenge = (value: unknown): LoginChallenge => {
           verificationUriComplete: readString(value, "verificationUriComplete"),
         }),
   };
+};
+
+/** Validate the opaque flow handle on a poll or cancellation request. */
+export const parseLoginPollQuery = (value: unknown): LoginPollQuery => {
+  if (!isRecord(value)) {
+    throw new TypeError("Invalid login poll query: expected an object");
+  }
+  const flowId = readString(value, "flowId");
+  if (flowId === undefined || flowId.length > 128) {
+    throw new TypeError("Invalid login poll query: missing flowId");
+  }
+  return { flowId };
+};
+
+/** Validate a flow cancellation. */
+export const parseLoginCancelQuery = (value: unknown): LoginCancelQuery => {
+  if (!isRecord(value)) {
+    throw new TypeError("Invalid login cancellation query: expected an object");
+  }
+  const flowId = readString(value, "flowId");
+  if (flowId === undefined || flowId.length > 128) {
+    throw new TypeError("Invalid login cancellation query: missing flowId");
+  }
+  return { flowId };
+};
+
+/** Validate the one cancellation acknowledgement. */
+export const parseLoginCancelResult = (value: unknown): LoginCancelResult => {
+  if (!isRecord(value) || value.kind !== "cancelled") {
+    throw new TypeError("Invalid login cancellation result");
+  }
+  return { kind: "cancelled" };
 };
 
 /**
@@ -211,12 +274,25 @@ export const parseLoginPoll = (value: unknown): LoginPollResult => {
     throw new TypeError("Invalid login poll: expected an object");
   }
   const kind = readString(value, "kind");
-  if (kind !== "pending" && kind !== "failed" && kind !== "signed-in") {
+  if (
+    kind !== "pending" &&
+    kind !== "slow_down" &&
+    kind !== "failed" &&
+    kind !== "signed-in"
+  ) {
     throw new TypeError(`Invalid login poll kind: ${String(value.kind)}`);
+  }
+  const intervalSeconds = readNumber(value, "intervalSeconds");
+  if (
+    intervalSeconds !== undefined &&
+    (!Number.isFinite(intervalSeconds) || intervalSeconds < 0)
+  ) {
+    throw new TypeError("Invalid login poll interval");
   }
   return {
     detail: readString(value, "detail"),
     kind,
+    ...(intervalSeconds === undefined ? {} : { intervalSeconds }),
   };
 };
 
@@ -241,6 +317,27 @@ const challengeCodec = {
   typeSymbol: "dsh-opencode-patch#LoginChallenge",
 };
 
+const pollQueryCodec = {
+  create: () => ({ parse: parseLoginPollQuery }),
+  mode: "strict" as const,
+  schema: { parse: parseLoginPollQuery },
+  typeSymbol: "dsh-opencode-patch#LoginPollQuery",
+};
+
+const cancelQueryCodec = {
+  create: () => ({ parse: parseLoginCancelQuery }),
+  mode: "strict" as const,
+  schema: { parse: parseLoginCancelQuery },
+  typeSymbol: "dsh-opencode-patch#LoginCancelQuery",
+};
+
+const cancelCodec = {
+  create: () => ({ parse: parseLoginCancelResult }),
+  mode: "strict" as const,
+  schema: { parse: parseLoginCancelResult },
+  typeSymbol: "dsh-opencode-patch#LoginCancelResult",
+};
+
 const pollCodec = {
   create: () => ({ parse: parseLoginPoll }),
   mode: "strict" as const,
@@ -254,7 +351,11 @@ declare module "@deepseek-ai/dsh-typert-protocol" {
       /** Start a device flow and answer the code a human approves. */
       begin: (query?: LoginBeginQuery) => Promise<RemoteResult<LoginChallenge>>;
       /** Ask whether the human has approved yet. */
-      poll: () => Promise<RemoteResult<LoginPollResult>>;
+      poll: (query: LoginPollQuery) => Promise<RemoteResult<LoginPollResult>>;
+      /** Cancel one in-flight device authorization. */
+      cancel: (
+        query: LoginCancelQuery
+      ) => Promise<RemoteResult<LoginCancelResult>>;
       /** What is stored now, without the credential. */
       state: (query?: LoginBeginQuery) => Promise<RemoteResult<LoginState>>;
     };
@@ -292,8 +393,31 @@ export const loginRemote: TypertRemoteContribution = {
       invocation: { kind: "direct" },
       method: "poll",
       namespace: "opencodeLogin",
-      parameters: [],
+      parameters: [
+        {
+          codec: pollQueryCodec,
+          name: "query",
+          source: "json",
+          wire: "query",
+        },
+      ],
       result: pollCodec,
+      service: "opencodeLogin",
+    },
+    {
+      id: "dsh-opencode-patch#opencodeLogin/cancel",
+      invocation: { kind: "direct" },
+      method: "cancel",
+      namespace: "opencodeLogin",
+      parameters: [
+        {
+          codec: cancelQueryCodec,
+          name: "query",
+          source: "json",
+          wire: "query",
+        },
+      ],
+      result: cancelCodec,
       service: "opencodeLogin",
     },
     {

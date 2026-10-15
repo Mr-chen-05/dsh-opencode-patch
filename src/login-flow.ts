@@ -35,13 +35,22 @@ import {
   type ConsoleOrg,
   type ConsoleTokens,
   type PendingAuthorization,
+  type PollOutcome,
 } from "./console-auth.ts";
 import type { StoredLogin, TokenStore } from "./token-store.ts";
 
 /** A login waiting on a human, and what happens once they approve. */
+export type LoginAttemptResult =
+  | { readonly kind: "pending" }
+  | { readonly kind: "slow_down" }
+  | { readonly kind: "signed-in"; readonly login: StoredLogin }
+  | { readonly detail: string; readonly kind: "failed" };
+
 export interface LoginAttempt {
   /** The code, the URL to open, and the poll the wait runs on. */
   readonly authorization: PendingAuthorization["authorization"];
+  /** Poll once; a pending answer returns immediately without another request. */
+  readonly poll: (signal?: AbortSignal) => Promise<LoginAttemptResult>;
   /**
    * Wait for the approval and store what the login learned.
    *
@@ -51,11 +60,85 @@ export interface LoginAttempt {
   readonly complete: (options?: {
     readonly deadlineMs?: number;
     readonly onWait?: (seconds: number) => void;
+    readonly signal?: AbortSignal;
   }) => Promise<
     | { readonly kind: "signed-in"; readonly login: StoredLogin }
     | { readonly detail: string; readonly kind: "failed" }
   >;
 }
+
+const pollFailure = (
+  failure: Extract<PollOutcome, { kind: "denied" | "expired" | "failed" }>
+): { readonly detail: string; readonly kind: "failed" } => ({
+  detail: failure.detail,
+  kind: "failed",
+});
+
+const storeGrantedLogin = async (
+  client: ConsoleAuthClient,
+  store: TokenStore,
+  tokens: ConsoleTokens,
+  signal?: AbortSignal
+): Promise<
+  | { readonly kind: "signed-in"; readonly login: StoredLogin }
+  | { readonly detail: string; readonly kind: "failed" }
+> => {
+  let owner: ConsoleAccount;
+  let orgs: readonly ConsoleOrg[];
+  try {
+    [owner, orgs] = await Promise.all([
+      client.account(tokens.accessToken, signal),
+      client.orgs(tokens.accessToken, signal),
+    ]);
+  } catch (error) {
+    if (signal?.aborted) {
+      return { detail: "login was cancelled", kind: "failed" };
+    }
+    return {
+      detail: `the Console issued a token but not its account: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      kind: "failed",
+    };
+  }
+
+  if (signal?.aborted) {
+    return { detail: "login was cancelled", kind: "failed" };
+  }
+  const login: StoredLogin = {
+    ...tokens,
+    orgId: orgs[0]?.id,
+    orgs,
+    owner,
+  };
+  await store.write(login);
+  return { kind: "signed-in", login };
+};
+
+const finalizeAwait = (
+  client: ConsoleAuthClient,
+  store: TokenStore,
+  outcome: Awaited<ReturnType<typeof awaitAuthorization>>
+): Promise<
+  | { readonly kind: "signed-in"; readonly login: StoredLogin }
+  | { readonly detail: string; readonly kind: "failed" }
+> => {
+  if ("error" in outcome) {
+    const failure = outcome.error;
+    if (
+      failure.kind === "denied" ||
+      failure.kind === "expired" ||
+      failure.kind === "failed"
+    ) {
+      return Promise.resolve(pollFailure(failure));
+    }
+    return Promise.resolve({
+      detail: `the approval did not arrive (${failure.kind})`,
+      kind: "failed",
+    });
+  }
+  return storeGrantedLogin(client, store, outcome.granted);
+};
 
 /** What {@link beginLogin} needs. */
 export interface LoginFlowInputs {
@@ -84,51 +167,33 @@ export const beginLogin = async (
 
   return {
     authorization: pending.authorization,
+    poll: async (signal) => {
+      const outcome = await pending.poll(signal);
+      if (outcome.kind === "pending" || outcome.kind === "slow_down") {
+        return { kind: outcome.kind };
+      }
+      if (outcome.kind !== "granted") {
+        return pollFailure(outcome);
+      }
+      return storeGrantedLogin(client, store, outcome.tokens, signal);
+    },
     complete: async (options = {}) => {
-      const outcome = await awaitAuthorization(pending, options);
-      if ("error" in outcome) {
-        const failure = outcome.error;
-        return {
-          detail:
-            failure.kind === "failed" ||
-            failure.kind === "denied" ||
-            failure.kind === "expired"
-              ? failure.detail
-              : `the approval did not arrive (${failure.kind})`,
-          kind: "failed",
-        };
+      const { signal, ...authorizationOptions } = options;
+      if (signal?.aborted) {
+        return { detail: "login was cancelled", kind: "failed" };
       }
-
-      const tokens = outcome.granted;
-      // The owner is read HERE, with the token that was just issued, because
-      // this is the only moment it is knowable. A failure here is a failed
-      // login rather than a token stored without its org: storing it would
-      // produce a credential that looks complete and cannot reach the free
-      // tier, which is worse than no credential at all.
-      let owner: ConsoleAccount;
-      let orgs: readonly ConsoleOrg[];
-      try {
-        [owner, orgs] = await Promise.all([
-          client.account(tokens.accessToken),
-          client.orgs(tokens.accessToken),
-        ]);
-      } catch (error) {
-        return {
-          detail: `the Console issued a token but not its account: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          kind: "failed",
-        };
-      }
-
-      const login: StoredLogin = {
-        ...tokens,
-        orgId: orgs[0]?.id,
-        orgs,
-        owner,
+      const cancellable: PendingAuthorization = {
+        authorization: pending.authorization,
+        poll: (pollSignal) => pending.poll(signal ?? pollSignal),
       };
-      await store.write(login);
-      return { kind: "signed-in", login };
+      const result = await awaitAuthorization(
+        cancellable,
+        authorizationOptions
+      );
+      if (signal?.aborted) {
+        return { detail: "login was cancelled", kind: "failed" };
+      }
+      return finalizeAwait(client, store, result);
     },
   };
 };

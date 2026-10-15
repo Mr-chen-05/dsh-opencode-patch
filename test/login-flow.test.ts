@@ -107,6 +107,19 @@ describe("login-flow: absent when a login cannot be kept", () => {
 });
 
 describe("login-flow: what a login learns before it stores anything", () => {
+  it("answers a pending poll after one request, without starting a wait", async () => {
+    const { client, paths } = consoleAnswering({
+      "/auth/device/token": {
+        error: "authorization_pending",
+        error_description: "still waiting",
+      },
+    });
+    const { credentials } = storeOver();
+    const attempt = await beginLogin({ client, store: storeFor(credentials) });
+    await expect(attempt?.poll()).resolves.toEqual({ kind: "pending" });
+    expect(paths).toEqual(["/auth/device/code", "/auth/device/token"]);
+  });
+
   it("reads the account and the orgs with the token it just obtained", async () => {
     const { client, paths } = consoleAnswering();
     const { credentials, records } = storeOver();

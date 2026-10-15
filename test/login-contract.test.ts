@@ -123,6 +123,7 @@ describe("login-contract: what a surface sends and shows", () => {
   it("refuses a challenge missing a field a surface must render", () => {
     const complete = {
       expiresInSeconds: 600,
+      flowId: "flow_abc123",
       intervalSeconds: 5,
       userCode: "HQFZ-NQPQ",
       verificationUri: "https://opencode.ai/console/device",
@@ -147,9 +148,43 @@ describe("login-contract: what a surface sends and shows", () => {
     expect(() =>
       parseLoginChallenge({ ...complete, intervalSeconds: undefined })
     ).toThrow(TypeError);
+    expect(() =>
+      parseLoginChallenge({ ...complete, expiresInSeconds: Number.NaN })
+    ).toThrow(TypeError);
+    // And the flow handle: a challenge with no id cannot be polled or cancelled.
+    expect(() =>
+      parseLoginChallenge({ ...complete, flowId: undefined })
+    ).toThrow(TypeError);
+    expect(() =>
+      parseLoginChallenge({ ...complete, intervalSeconds: -1 })
+    ).toThrow(TypeError);
   });
 
-  it("reads the three poll outcomes and refuses any other", () => {
+  it("reads pending and throttled polling outcomes, with a bounded interval", () => {
+    expect(parseLoginPoll({ kind: "pending" })).toEqual({
+      detail: undefined,
+      kind: "pending",
+    });
+    expect(parseLoginPoll({ intervalSeconds: 10, kind: "slow_down" })).toEqual({
+      detail: undefined,
+      intervalSeconds: 10,
+      kind: "slow_down",
+    });
+    expect(() =>
+      parseLoginPoll({ intervalSeconds: Number.NaN, kind: "slow_down" })
+    ).toThrow(TypeError);
+    expect(() =>
+      parseLoginPoll({
+        intervalSeconds: Number.POSITIVE_INFINITY,
+        kind: "pending",
+      })
+    ).toThrow(TypeError);
+    expect(() =>
+      parseLoginPoll({ intervalSeconds: -1, kind: "pending" })
+    ).toThrow(TypeError);
+  });
+
+  it("reads terminal poll outcomes and refuses any other", () => {
     expect(parseLoginPoll({ kind: "pending" })).toEqual({
       detail: undefined,
       kind: "pending",
@@ -175,14 +210,14 @@ describe("login-contract: the remote a surface mounts", () => {
     const methods = loginRemote.descriptors.map(
       (descriptor) => descriptor.method
     );
-    expect(methods.toSorted()).toEqual(["begin", "poll", "state"]);
+    expect(methods.toSorted()).toEqual(["begin", "cancel", "poll", "state"]);
     expect(loginRemote.package).toBe("dsh-opencode-patch");
     for (const descriptor of loginRemote.descriptors) {
       expect(descriptor.namespace).toBe("opencodeLogin");
       expect(descriptor.service).toBe("opencodeLogin");
     }
     // Nothing the surface can call answers with a token: the results are a
-    // challenge, a poll outcome and a state, in that order.
+    // challenge, a cancellation, a poll outcome and a state, in that order.
     expect(JSON.stringify(loginRemote)).not.toContain("accessToken");
   });
 });

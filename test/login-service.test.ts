@@ -99,8 +99,10 @@ describe("login-service: what a card can see", () => {
     const { fetch } = consoleFetch();
     const service = serviceOver(credentials, { fetch });
 
-    await service.begin();
-    await expect(service.poll()).resolves.toEqual({ kind: "signed-in" });
+    const challenge = await service.begin();
+    await expect(service.poll({ flowId: challenge.flowId })).resolves.toEqual({
+      kind: "signed-in",
+    });
 
     const state = await service.state();
     expect(state).toEqual({
@@ -120,8 +122,8 @@ describe("login-service: what a card can see", () => {
     const credentials = seam();
     const { fetch } = consoleFetch();
     const service = serviceOver(credentials, { fetch });
-    await service.begin({ plane: "opencode-go" });
-    await service.poll();
+    const challenge = await service.begin({ plane: "opencode-go" });
+    await service.poll({ flowId: challenge.flowId });
     // The Go plane has no grant of its own, so it reports nothing stored — a
     // login written to one plane is not a login for the other.
     await expect(service.state()).resolves.toMatchObject({ signedIn: false });
@@ -142,6 +144,7 @@ describe("login-service: the device flow a card drives", () => {
 
     expect(challenge).toEqual({
       expiresInSeconds: 600,
+      flowId: expect.any(String),
       intervalSeconds: 0,
       userCode: "HQFZ-NQPQ",
       verificationUri: "https://opencode.ai/console/device",
@@ -165,20 +168,138 @@ describe("login-service: the device flow a card drives", () => {
   it("reports a poll with no flow in progress rather than waiting", async () => {
     const { fetch } = consoleFetch();
     const service = serviceOver(seam(), { fetch });
-    await expect(service.poll()).resolves.toEqual({
+    await expect(service.poll({ flowId: "missing" })).resolves.toEqual({
       detail: "no login is in progress",
       kind: "failed",
     });
   });
 
-  it("reports a refusal as terminal, and a wait as pending", async () => {
+  it("reports pending without blocking or polling twice", async () => {
+    const { paths, fetch } = consoleFetch({
+      error: "authorization_pending",
+      error_description: "still waiting",
+    });
+    const service = serviceOver(seam(), { fetch });
+    const challenge = await service.begin();
+    const poll = service.poll({ flowId: challenge.flowId });
+    await expect(service.poll({ flowId: challenge.flowId })).resolves.toEqual({
+      intervalSeconds: 1,
+      kind: "pending",
+    });
+    await expect(poll).resolves.toEqual({
+      intervalSeconds: 1,
+      kind: "pending",
+    });
+    expect(paths.filter((path) => path === "/auth/device/token")).toHaveLength(
+      1
+    );
+  });
+
+  it("increases the returned interval when the Console says slow_down", async () => {
+    const { fetch } = consoleFetch({
+      error: "slow_down",
+      error_description: "poll less often",
+    });
+    const service = serviceOver(seam(), { fetch });
+    const challenge = await service.begin();
+    await expect(service.poll({ flowId: challenge.flowId })).resolves.toEqual({
+      intervalSeconds: 2,
+      kind: "slow_down",
+    });
+  });
+
+  it("does not send a poll after the device authorization expires", async () => {
+    vi.useFakeTimers();
+    try {
+      const { paths, fetch } = consoleFetch();
+      const service = serviceOver(seam(), { fetch });
+      const challenge = await service.begin();
+      await vi.advanceTimersByTimeAsync(600_000);
+      await expect(service.poll({ flowId: challenge.flowId })).resolves.toEqual(
+        {
+          detail: "the device code expired",
+          kind: "failed",
+        }
+      );
+      expect(
+        paths.filter((path) => path === "/auth/device/token")
+      ).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps concurrent device flows independent and cancels only one", async () => {
+    const { fetch } = consoleFetch();
+    const service = serviceOver(seam(), { fetch });
+    const [first, second] = await Promise.all([
+      service.begin(),
+      service.begin(),
+    ]);
+    expect(first.flowId).not.toBe(second.flowId);
+
+    // Synchronous: `cancel` marks the flow and answers at once, so the poll that
+    // follows observes the cancellation rather than racing it.
+    expect(service.cancel({ flowId: first.flowId })).toEqual({
+      kind: "cancelled",
+    });
+    await expect(service.poll({ flowId: first.flowId })).resolves.toMatchObject(
+      {
+        kind: "failed",
+      }
+    );
+    await expect(service.poll({ flowId: second.flowId })).resolves.toEqual({
+      kind: "signed-in",
+    });
+  });
+
+  it("aborts an in-flight poll on cancellation without storing the grant", async () => {
+    const requests: { path: string; signal: AbortSignal | undefined }[] = [];
+    const fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      const url = String(input);
+      const path = url.replace("https://opencode.ai/console", "");
+      requests.push({ path, signal: init?.signal ?? undefined });
+      if (path === "/auth/device/code") {
+        return Response.json(CODE_RESPONSE);
+      }
+      if (path === "/auth/device/token") {
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true }
+          );
+        });
+      }
+      return Response.json({ error: "unexpected" }, { status: 404 });
+    }) as unknown as typeof globalThis.fetch;
+    const credentials = seam();
+    const service = serviceOver(credentials, { fetch });
+    const challenge = await service.begin();
+    const polling = service.poll({ flowId: challenge.flowId });
+    expect(service.cancel({ flowId: challenge.flowId })).toEqual({
+      kind: "cancelled",
+    });
+    await expect(polling).resolves.toEqual({
+      detail: "login was cancelled",
+      kind: "failed",
+    });
+    expect(requests.map(({ path }) => path)).toEqual([
+      "/auth/device/code",
+      "/auth/device/token",
+    ]);
+    expect(requests[1]?.signal?.aborted).toBe(true);
+    await expect(service.state()).resolves.toMatchObject({ signedIn: false });
+  });
+
+  it("reports a refusal as terminal", async () => {
     const declined = consoleFetch({
       error: "access_denied",
       error_description: "the user said no",
     });
     const service = serviceOver(seam(), { fetch: declined.fetch });
-    await service.begin();
-    const outcome = await service.poll();
+    const challenge = await service.begin();
+    const outcome = await service.poll({ flowId: challenge.flowId });
     expect(outcome.kind).toBe("failed");
     expect(outcome.detail).toContain("no");
   });

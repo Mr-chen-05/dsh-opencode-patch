@@ -35,10 +35,11 @@ export const LOGIN_PLANES = ["opencode", "opencode-go"] as const;
 /** One plane a sign-in can be written to. */
 export type LoginPlane = (typeof LOGIN_PLANES)[number];
 
-/** The three remote calls a sign-in row makes. */
+/** The remote calls a sign-in row makes. */
 export interface LoginRemoteCalls {
   readonly begin: (plane: LoginPlane) => Promise<LoginChallenge>;
-  readonly poll: () => Promise<LoginPollResult>;
+  readonly cancel: (flowId: string) => Promise<void>;
+  readonly poll: (flowId: string) => Promise<LoginPollResult>;
   readonly read: (plane: LoginPlane) => Promise<LoginState>;
 }
 
@@ -107,8 +108,20 @@ export const LoginSection: React.FC<LoginSectionProps> = (
   const [state, setState] = useState<LoginState>();
   const [challenge, setChallenge] = useState<LoginChallenge>();
   const [failure, setFailure] = useState<string>();
+  const [starting, setStarting] = useState(false);
+  const [challengeReceivedAt, setChallengeReceivedAt] = useState<number>();
   /** The challenge the poll loop is chasing, so a replacement stops the old one. */
   const chasing = useRef<LoginChallenge | null>(null);
+  /** Invalidates a begin call that resolves after the row moved on or unmounted. */
+  const startGeneration = useRef(0);
+
+  useEffect(
+    () => () => {
+      startGeneration.current += 1;
+      chasing.current = null;
+    },
+    []
+  );
 
   const refresh = useCallback(async (): Promise<void> => {
     if (login === undefined) {
@@ -129,16 +142,37 @@ export const LoginSection: React.FC<LoginSectionProps> = (
   // on its own three ways — signed in, refused, or expired — so a page left open
   // does not ask forever.
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     if (challenge !== undefined && login !== undefined) {
       chasing.current = challenge;
-      const everyMs = Math.max(challenge.intervalSeconds, 1) * 1000;
-      const deadline = Date.now() + challenge.expiresInSeconds * 1000;
+      const expirySeconds =
+        Number.isFinite(challenge.expiresInSeconds) &&
+        challenge.expiresInSeconds >= 0
+          ? challenge.expiresInSeconds
+          : 600;
+      const deadline =
+        (challengeReceivedAt ?? Date.now()) + expirySeconds * 1000;
+      const schedule = (seconds: number | undefined): void => {
+        const intervalSeconds =
+          typeof seconds === "number" &&
+          Number.isFinite(seconds) &&
+          seconds >= 0
+            ? seconds
+            : 5;
+        const remainingMs = Math.max(deadline - Date.now(), 1);
+        const intervalMs = Math.max(intervalSeconds * 1000, 1000);
+        timer = setTimeout(
+          () => {
+            void tick();
+          },
+          Math.min(intervalMs, remainingMs)
+        );
+      };
       const tick = async (): Promise<void> => {
         if (chasing.current !== challenge) {
           return;
         }
-        if (Date.now() > deadline) {
+        if (Date.now() >= deadline) {
           chasing.current = null;
           setChallenge(undefined);
           setFailure(t("loginExpired"));
@@ -146,12 +180,19 @@ export const LoginSection: React.FC<LoginSectionProps> = (
         }
         let outcome: LoginPollResult;
         try {
-          outcome = await login.poll();
+          outcome = await login.poll(challenge.flowId);
         } catch (error) {
           console.warn("[dsh-opencode-patch] login poll failed", error);
+          if (chasing.current === challenge) {
+            schedule(challenge.intervalSeconds);
+          }
           return;
         }
-        if (outcome.kind === "pending") {
+        if (chasing.current !== challenge) {
+          return;
+        }
+        if (outcome.kind === "pending" || outcome.kind === "slow_down") {
+          schedule(outcome.intervalSeconds ?? challenge.intervalSeconds);
           return;
         }
         chasing.current = null;
@@ -163,29 +204,54 @@ export const LoginSection: React.FC<LoginSectionProps> = (
         }
         setFailure(outcome.detail ?? t("loginFailed"));
       };
-      timer = setInterval(() => {
-        void tick();
-      }, everyMs);
+      schedule(challenge.intervalSeconds);
     }
     // One return path: the effect's cleanup is the same whether or not a flow is
     // in flight, so the rule that wants consistency gets it.
     return () => {
       if (timer !== undefined) {
-        clearInterval(timer);
+        clearTimeout(timer);
+      }
+      if (challenge !== undefined) {
+        void (async () => {
+          try {
+            await login?.cancel(challenge.flowId);
+          } catch (error: unknown) {
+            console.warn(
+              "[dsh-opencode-patch] login cancellation failed",
+              error
+            );
+          }
+        })();
       }
     };
-  }, [challenge, login, refresh, t]);
+  }, [challenge, challengeReceivedAt, login, refresh, t]);
 
   const start = async (): Promise<void> => {
-    if (login === undefined) {
+    if (login === undefined || starting) {
       return;
     }
+    const generation = startGeneration.current + 1;
+    startGeneration.current = generation;
+    setStarting(true);
     setFailure(undefined);
     try {
-      setChallenge(await login.begin(plane));
+      const nextChallenge = await login.begin(plane);
+      if (generation !== startGeneration.current) {
+        await login.cancel(nextChallenge.flowId);
+        return;
+      }
+      setChallengeReceivedAt(Date.now());
+      setChallenge(nextChallenge);
     } catch (error) {
-      console.warn("[dsh-opencode-patch] login could not start", error);
-      setFailure(error instanceof Error ? error.message : t("loginFailed"));
+      if (generation === startGeneration.current) {
+        console.warn("[dsh-opencode-patch] login could not start", error);
+        setFailure(error instanceof Error ? error.message : t("loginFailed"));
+      }
+    } finally {
+      if (generation === startGeneration.current) {
+        setStarting(false);
+      }
     }
   };
 
@@ -212,8 +278,11 @@ export const LoginSection: React.FC<LoginSectionProps> = (
   // per plane, so switching re-reads - which is what `refresh` depending on
   // `plane` does.
   const onPlane = (next: LoginPlane): void => {
+    startGeneration.current += 1;
+    setStarting(false);
     chasing.current = null;
     setChallenge(undefined);
+    setChallengeReceivedAt(undefined);
     setFailure(undefined);
     setPlane(next);
   };
@@ -244,7 +313,12 @@ export const LoginSection: React.FC<LoginSectionProps> = (
       {challenge === undefined ? (
         <div style={rowStyle}>
           <span>{failure ?? ""}</span>
-          <button onClick={onStart} type="button">
+          <button
+            aria-busy={starting}
+            disabled={starting}
+            onClick={onStart}
+            type="button"
+          >
             {signedIn ? t("loginAgain") : t("loginAction")}
           </button>
         </div>

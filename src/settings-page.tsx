@@ -17,6 +17,7 @@ import {
 import { DEFAULT_PROVIDERS, readStringList } from "./config-values.ts";
 import { isRecord } from "./guards.ts";
 import {
+  parseLoginCancelResult,
   parseLoginChallenge,
   parseLoginPoll,
   parseLoginState,
@@ -122,7 +123,13 @@ export const loginCalls = (ctx: ClientContext): LoginRemoteCalls => {
     // about which grant you are writing and reading, not about locking you out.
     begin: async (plane: string) =>
       parseLoginChallenge(await unwrapRemote(service()?.begin?.({ plane }))),
-    poll: async () => parseLoginPoll(await unwrapRemote(service()?.poll?.())),
+    cancel: async (flowId: string) => {
+      parseLoginCancelResult(
+        await unwrapRemote(service()?.cancel?.({ flowId }))
+      );
+    },
+    poll: async (flowId: string) =>
+      parseLoginPoll(await unwrapRemote(service()?.poll?.({ flowId }))),
     read: async (plane: string) =>
       parseLoginState(await unwrapRemote(service()?.state?.({ plane }))),
   };
@@ -251,7 +258,8 @@ export interface ClientContext {
     // `value` the caller unwraps.
     opencodeLogin?: {
       begin: (query?: { plane?: string }) => Promise<unknown>;
-      poll: () => Promise<unknown>;
+      cancel: (query?: { flowId?: string }) => Promise<unknown>;
+      poll: (query?: { flowId?: string }) => Promise<unknown>;
       state: (query?: { plane?: string }) => Promise<unknown>;
     };
   };

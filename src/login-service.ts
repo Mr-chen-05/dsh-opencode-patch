@@ -33,7 +33,9 @@ import { isRecord } from "./guards.ts";
 import { name } from "./identity.ts";
 import type {
   LoginBeginQuery,
+  LoginCancelQuery,
   LoginChallenge,
+  LoginPollQuery,
   LoginPollResult,
   LoginState,
 } from "./login-contract.ts";
@@ -80,10 +82,37 @@ export interface LoginServiceOptions {
  * Mounted by the plugin's `apply` alongside the usage service, so a settings card
  * has something to call and the credential stays on the host.
  */
+interface ActiveLoginAttempt {
+  readonly attempt: LoginAttempt;
+  readonly controller: AbortController;
+  readonly expiresAt: number;
+  nextPollSeconds: number;
+  polling?: Promise<LoginPollResult>;
+}
+
+const MAX_LOGIN_ATTEMPTS = 32;
+
 export class LoginService extends TypertRemoteService {
   readonly #options: LoginServiceOptions;
-  /** The attempt a human is holding, if any. */
-  #attempt: LoginAttempt | undefined;
+  /** Each browser tab owns its own device authorization. */
+  readonly #attempts = new Map<string, ActiveLoginAttempt>();
+  readonly #starting = new Set<string>();
+
+  #expireAttempts(now = Date.now()): void {
+    for (const [flowId, current] of this.#attempts) {
+      if (now >= current.expiresAt) {
+        current.controller.abort();
+        this.#attempts.delete(flowId);
+      }
+    }
+  }
+
+  #forgetAttempt(flowId: string, current: ActiveLoginAttempt): void {
+    if (this.#attempts.get(flowId) === current) {
+      this.#attempts.delete(flowId);
+    }
+    current.controller.abort();
+  }
 
   constructor(ctx: unknown, options: LoginServiceOptions = {}) {
     if (!isRecord(ctx)) {
@@ -122,24 +151,46 @@ export class LoginService extends TypertRemoteService {
    */
   async begin(query?: LoginBeginQuery): Promise<LoginChallenge> {
     const plane = planeOf(query);
-    const store = this.#store(plane);
-    const attempt = await beginLogin({ client: this.#client(), store });
-    if (attempt === undefined) {
-      throw new Error(
-        "this composition mounts no credential service, so a login cannot be kept"
-      );
+    this.#expireAttempts();
+    if (this.#attempts.size + this.#starting.size >= MAX_LOGIN_ATTEMPTS) {
+      throw new Error("too many login flows are already in progress");
     }
-    this.#attempt = attempt;
-    const { authorization } = attempt;
-    return {
-      expiresInSeconds: authorization.expiresInSeconds,
-      intervalSeconds: authorization.intervalSeconds,
-      userCode: authorization.userCode,
-      verificationUri: authorization.verificationUri,
-      ...(authorization.verificationUriComplete === undefined
-        ? {}
-        : { verificationUriComplete: authorization.verificationUriComplete }),
-    };
+    const flowId = globalThis.crypto.randomUUID();
+    this.#starting.add(flowId);
+    try {
+      const store = this.#store(plane);
+      const attempt = await beginLogin({ client: this.#client(), store });
+      if (attempt === undefined) {
+        throw new Error(
+          "this composition mounts no credential service, so a login cannot be kept"
+        );
+      }
+      const { authorization } = attempt;
+      const active: ActiveLoginAttempt = {
+        attempt,
+        controller: new AbortController(),
+        expiresAt: Date.now() + authorization.expiresInSeconds * 1000,
+        nextPollSeconds: Math.max(authorization.intervalSeconds, 1),
+      };
+      this.#attempts.set(flowId, active);
+      if (Date.now() >= active.expiresAt) {
+        this.#forgetAttempt(flowId, active);
+        throw new Error("the device code expired before it could be shown");
+      }
+
+      return {
+        expiresInSeconds: authorization.expiresInSeconds,
+        flowId,
+        intervalSeconds: authorization.intervalSeconds,
+        userCode: authorization.userCode,
+        verificationUri: authorization.verificationUri,
+        ...(authorization.verificationUriComplete === undefined
+          ? {}
+          : { verificationUriComplete: authorization.verificationUriComplete }),
+      };
+    } finally {
+      this.#starting.delete(flowId);
+    }
   }
 
   /**
@@ -148,24 +199,80 @@ export class LoginService extends TypertRemoteService {
    * @returns `pending` while they have not, `signed-in` once the login is
    * stored, and `failed` with a reason when it never will be.
    */
-  async poll(): Promise<LoginPollResult> {
-    const attempt = this.#attempt;
-    if (attempt === undefined) {
+  async poll(query: LoginPollQuery): Promise<LoginPollResult> {
+    const { flowId } = query;
+    const current = this.#attempts.get(flowId);
+    if (current === undefined) {
       return { detail: "no login is in progress", kind: "failed" };
     }
-    const outcome = await attempt.complete();
+    if (Date.now() >= current.expiresAt) {
+      this.#forgetAttempt(flowId, current);
+      return { detail: "the device code expired", kind: "failed" };
+    }
+    this.#expireAttempts();
+    if (current.polling !== undefined) {
+      return current.polling;
+    }
+    const polling = this.#pollAttempt(flowId, current);
+    current.polling = polling;
+    try {
+      return await polling;
+    } finally {
+      if (current.polling === polling) {
+        current.polling = undefined;
+      }
+    }
+  }
+
+  async #pollAttempt(
+    flowId: string,
+    current: ActiveLoginAttempt
+  ): Promise<LoginPollResult> {
+    let outcome;
+    try {
+      outcome = await current.attempt.poll(current.controller.signal);
+    } catch (error) {
+      if (current.controller.signal.aborted) {
+        this.#forgetAttempt(flowId, current);
+        return { detail: "login was cancelled", kind: "failed" };
+      }
+      throw error;
+    }
+    // A cancellation during account/org reads must not commit a granted token.
+    if (
+      current.controller.signal.aborted ||
+      this.#attempts.get(flowId) !== current
+    ) {
+      this.#forgetAttempt(flowId, current);
+      return { detail: "login was cancelled", kind: "failed" };
+    }
+    if (outcome.kind === "pending") {
+      return {
+        intervalSeconds: current.nextPollSeconds,
+        kind: "pending",
+      };
+    }
+    if (outcome.kind === "slow_down") {
+      current.nextPollSeconds *= 2;
+      return {
+        intervalSeconds: current.nextPollSeconds,
+        kind: "slow_down",
+      };
+    }
+    this.#forgetAttempt(flowId, current);
     if (outcome.kind === "signed-in") {
-      // The attempt is spent: the flow it belongs to has produced a stored login.
-      this.#attempt = undefined;
       return { kind: "signed-in" };
     }
-    // A refusal is terminal, so the attempt is dropped; a wait is not, and the
-    // surface is expected to ask again.
-    if (!outcome.detail.includes("pending")) {
-      this.#attempt = undefined;
-      return { detail: outcome.detail, kind: "failed" };
+    return { detail: outcome.detail, kind: "failed" };
+  }
+
+  /** Cancel one flow without affecting logins in other windows. */
+  cancel(query: LoginCancelQuery): { readonly kind: "cancelled" } {
+    const current = this.#attempts.get(query.flowId);
+    if (current !== undefined) {
+      this.#forgetAttempt(query.flowId, current);
     }
-    return { kind: "pending" };
+    return { kind: "cancelled" };
   }
 
   /**
@@ -201,6 +308,7 @@ Object.defineProperty(LoginService.prototype, REMOTE_METHOD_DESCRIPTOR_KEY, {
     methods: Object.freeze([
       { invocation: { kind: "direct" }, method: "begin" },
       { invocation: { kind: "direct" }, method: "poll" },
+      { invocation: { kind: "direct" }, method: "cancel" },
       { invocation: { kind: "direct" }, method: "state" },
     ]),
     version: 1,

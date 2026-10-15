@@ -482,8 +482,13 @@ if (releaseYml.includes("scripts/publish-scoped.ts")) {
  * Go could not sign in on the plane it used. The growth is a radio group, its
  * two localized labels, and the rationale for why a grant written on one plane
  * still serves the other.
+ *
+ * Raised 116 -> 120 KB when the login row gained cancellation. A flow started
+ * from the card could only be abandoned by reloading the page, and the effect
+ * that owns the poll loop now cancels the flow it owns on the way out. The
+ * growth is the cancel call, its result type and the release path.
  */
-const CLIENT_BUDGET = 116 * 1024;
+const CLIENT_BUDGET = 120 * 1024;
 const clientPath = join(ROOT, "lib/client.js");
 if (existsSync(clientPath)) {
   const clientStat = statSync(clientPath);

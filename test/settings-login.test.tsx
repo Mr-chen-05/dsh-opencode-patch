@@ -21,12 +21,14 @@ const calls = (
   begin: () =>
     Promise.resolve({
       expiresInSeconds: 600,
+      flowId: "flow-test",
       intervalSeconds: 60,
       userCode: "HQFZ-NQPQ",
       verificationUri: "https://opencode.ai/console/device",
       verificationUriComplete:
         "https://opencode.ai/console/device?user_code=HQFZ-NQPQ",
     }),
+  cancel: () => Promise.resolve(),
   poll: () => Promise.resolve({ kind: "pending" }),
   read: () => Promise.resolve({ orgs: [], plane: "opencode", signedIn: false }),
   ...overrides,
@@ -190,6 +192,7 @@ describe("settings: the poll loop a sign-in runs", () => {
     );
     const poll = vi
       .fn()
+      .mockResolvedValueOnce({ intervalSeconds: 10, kind: "slow_down" })
       .mockResolvedValueOnce({ kind: "pending" })
       .mockResolvedValue({ kind: "signed-in" });
     const view = render(
@@ -198,11 +201,18 @@ describe("settings: the poll loop a sign-in runs", () => {
           begin: () =>
             Promise.resolve({
               expiresInSeconds: 600,
+              flowId: "flow-timer-test",
               intervalSeconds: 1,
               userCode: "HQFZ-NQPQ",
               verificationUri: "https://opencode.ai/console/device",
             }),
-          poll,
+          poll: async () => {
+            const result = await poll();
+            if (result.kind === "slow_down") {
+              return { ...result, intervalSeconds: 10 };
+            }
+            return result;
+          },
           read: () =>
             poll.mock.calls.length > 1
               ? Promise.resolve({
@@ -220,7 +230,11 @@ describe("settings: the poll loop a sign-in runs", () => {
     fireEvent.click(button);
     await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(1100);
+    expect(poll).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(poll).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(1100);
+    expect(poll).toHaveBeenCalledTimes(3);
     vi.useRealTimers();
     await waitFor(() => {
       expect(view.container.textContent).toContain("someone@example.com");
@@ -235,7 +249,8 @@ describe("settings: the poll loop a sign-in runs", () => {
           begin: () =>
             Promise.resolve({
               expiresInSeconds: 0,
-              intervalSeconds: 1,
+              flowId: "flow-expired-test",
+              intervalSeconds: 0,
               userCode: "HQFZ-NQPQ",
               verificationUri: "https://opencode.ai/console/device",
             }),
@@ -261,6 +276,7 @@ describe("settings: the poll loop a sign-in runs", () => {
           begin: () =>
             Promise.resolve({
               expiresInSeconds: 600,
+              flowId: "flow-timer-test",
               intervalSeconds: 1,
               userCode: "HQFZ-NQPQ",
               verificationUri: "https://opencode.ai/console/device",
@@ -288,11 +304,14 @@ describe("settings: the calls the page hands the row", () => {
         ok: true,
         value: {
           expiresInSeconds: 1,
+          flowId: "flow-remote-test",
           intervalSeconds: 1,
+
           userCode: "X",
           verificationUri: "https://x",
         },
       }),
+    cancel: () => Promise.resolve({ ok: true, value: { kind: "cancelled" } }),
     poll: () => Promise.resolve({ ok: true, value: { kind: "pending" } }),
     state: () =>
       Promise.resolve({
@@ -322,6 +341,7 @@ describe("settings: the calls the page hands the row", () => {
     const absent = loginCalls({ remote: {} } as never);
     expect(absent).toBeDefined();
     expect(typeof absent.begin).toBe("function");
+    expect(typeof absent.cancel).toBe("function");
     expect(typeof absent.poll).toBe("function");
     expect(typeof absent.read).toBe("function");
     // And the missing service still surfaces where a caller can see it.
@@ -346,6 +366,10 @@ describe("settings: the calls the page hands the row", () => {
         asked.push("begin");
         return Promise.resolve({ error: "stub", ok: false });
       },
+      cancel: () => {
+        asked.push("cancel");
+        return Promise.resolve({ error: "stub", ok: false });
+      },
       poll: () => {
         asked.push("poll");
         return Promise.resolve({ error: "stub", ok: false });
@@ -357,7 +381,8 @@ describe("settings: the calls the page hands the row", () => {
     };
     await expect(built.read("opencode")).rejects.toThrow(/stub/u);
     await expect(built.begin("opencode")).rejects.toThrow(/stub/u);
-    expect(asked).toEqual(["state", "begin"]);
+    await expect(built.poll("flow-x")).rejects.toThrow(/stub/u);
+    expect(asked).toEqual(["state", "begin", "poll"]);
   });
 
   it("turns a failed Remote result into a thrown reason", async () => {
