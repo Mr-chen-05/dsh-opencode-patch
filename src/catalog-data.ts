@@ -271,23 +271,6 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
   {
     context_window: 1_048_576,
     cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
-    },
-    id: "cat-jam-free",
-    input_modalities: ["text"],
-    is_free: true,
-    max_output_tokens: 131_072,
-    name: "Cat Jam Free",
-    reasoning: true,
-    reasoning_options: [
-      { type: "effort", values: ["low", "medium", "high", "xhigh", "max"] },
-    ],
-  },
-  {
-    context_window: 1_048_576,
-    cost: {
       cache_read: 0.03,
       cache_write: 0,
       input: 0.15,
@@ -427,6 +410,23 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
     reasoning: true,
     reasoning_options: [
       { type: "effort", values: ["minimal", "low", "medium", "high", "xhigh"] },
+    ],
+  },
+  {
+    context_window: 1_048_576,
+    cost: {
+      cache_read: 0,
+      input: 0,
+      output: 0,
+    },
+    id: "beam-free",
+    input_modalities: ["text"],
+    is_free: true,
+    max_output_tokens: 131_072,
+    name: "Beam Free",
+    reasoning: true,
+    reasoning_options: [
+      { type: "effort", values: ["low", "medium", "high", "xhigh", "max"] },
     ],
   },
   {
@@ -1025,23 +1025,6 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     ],
   },
   {
-    context_window: 1_048_576,
-    cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
-    },
-    id: "cat-jam-free",
-    input_modalities: ["text"],
-    is_free: true,
-    max_output_tokens: 131_072,
-    name: "Cat Jam Free",
-    reasoning: true,
-    reasoning_options: [
-      { type: "effort", values: ["low", "medium", "high", "xhigh", "max"] },
-    ],
-  },
-  {
     context_window: 128_000,
     cost: {
       cache_read: 0.175,
@@ -1616,6 +1599,23 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     name: "DeepSeek V4.1 Flash Free",
     reasoning: true,
     reasoning_options: [{ type: "effort", values: ["low", "high", "max"] }],
+  },
+  {
+    context_window: 1_048_576,
+    cost: {
+      cache_read: 0,
+      input: 0,
+      output: 0,
+    },
+    id: "beam-free",
+    input_modalities: ["text"],
+    is_free: true,
+    max_output_tokens: 131_072,
+    name: "Beam Free",
+    reasoning: true,
+    reasoning_options: [
+      { type: "effort", values: ["low", "medium", "high", "xhigh", "max"] },
+    ],
   },
   {
     context_window: 1_000_000,

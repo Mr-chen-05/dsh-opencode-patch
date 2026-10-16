@@ -436,14 +436,11 @@ describe("apply (plugin lifecycle)", () => {
       expect(message).toContain("free tier");
       expect(message).not.toContain("names no SDK");
       // And the Go plane's free models are not reported at all.
-      streamHandler?.(
-        { model: "cat-jam-free", provider: "opencode-go" },
-        () => {
-          // Served: the Go plane has no free tier to gate.
-        }
-      );
+      streamHandler?.({ model: "beam-free", provider: "opencode-go" }, () => {
+        // Served: the Go plane has no free tier to gate.
+      });
       expect(
-        warnings.filter((args) => String(args[0]).includes("cat-jam-free"))
+        warnings.filter((args) => String(args[0]).includes("beam-free"))
       ).toHaveLength(0);
     } finally {
       spy.mockRestore();

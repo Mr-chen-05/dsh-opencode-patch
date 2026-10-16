@@ -205,7 +205,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const ids = new Set(OPENCODE_ZEN_CATALOG.map((m) => m.id));
     expect(ids.has("muse-spark-1.3-contributor-free")).toBe(true);
     expect(ids.has("space-bunny-free")).toBe(true);
-    expect(ids.has("cat-jam-free")).toBe(true);
+    expect(ids.has("beam-free")).toBe(true);
     expect(ids.has("claude-sonnet-4-5")).toBe(true);
     expect(ids.has("gpt-5.4")).toBe(true);
     expect(ids.has("gemini-3.8-flash")).toBe(true);

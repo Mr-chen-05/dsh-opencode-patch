@@ -469,7 +469,7 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
     // they keep working while Zen's equivalent rows do not. One plane's
     // unservable tier must not hide another plane's servable models.
     expect(isServableModel("step-5-preview-free", "opencode-go")).toBe(true);
-    expect(isServableModel("cat-jam-free", "opencode-go")).toBe(true);
+    expect(isServableModel("beam-free", "opencode-go")).toBe(true);
     // And a paid Zen model is untouched by the free-tier rule.
     expect(isServableModel("deepseek-v4.1-flash", "opencode")).toBe(true);
   });
