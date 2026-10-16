@@ -67,3 +67,17 @@ updates:
       - dependency-name: "@earendil-works/pi-ai"
         update-types:
           - version-update:semver-major
+      # React stays at 18: the bundles this plugin ships are host-bound, so a
+      # major here is a coordinated move with the host rather than a bump - and
+      # it is not hypothetical: under react-dom 19 the settings suite fails
+      # (`reports a refusal, which is terminal`), which is what the react group
+      # PR demonstrated. Minors and patches inside 18 are welcome.
+      - dependency-name: react
+        update-types:
+          - version-update:semver-major
+      - dependency-name: react-dom
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@types/react"
+        update-types:
+          - version-update:semver-major
