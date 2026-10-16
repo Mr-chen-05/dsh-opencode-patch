@@ -412,7 +412,7 @@ Zen 路线上不出现任何 Go 的数字：根本不画圆环（没有可量的
 
 ## 📜 兼容性与验证
 
-**已在 DeepSeek Harness 0.2.0-rc.2（Node 24+）上验证**
+**已在 DeepSeek Harness 0.2.1-alpha.5（Node 24+）上验证**
 
 | 层面 | 目标 |
 | :-- | :-- |

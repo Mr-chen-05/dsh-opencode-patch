@@ -464,7 +464,7 @@ The pool holds API keys. An account login is a different credential — a sessio
 
 ## 📜 Compatibility & Verification
 
-**Verified on DeepSeek Harness 0.2.0-rc.2 (Node 24+)**
+**Verified on DeepSeek Harness 0.2.1-alpha.5 (Node 24+)**
 
 | Surface | Target |
 | :-- | :-- |
