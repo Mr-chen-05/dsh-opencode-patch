@@ -416,6 +416,48 @@ describe("settings-page: apply & slots", () => {
     });
   });
 
+  it("reports the namespace when cordis refuses the access rather than throwing", () => {
+    // The other half of the same guard. An undeclared namespace THROWS on
+    // property access, and an optional chain cannot catch it - which is the
+    // error the reporter's screenshot showed, and why the meter never appeared
+    // for a signed-in Go account.
+    let dockInjector: ((sessionId: unknown) => unknown) | undefined;
+    const ctx = {
+      effect: (fn: () => unknown) => fn(),
+      modelDirectories: {
+        directoryFor: () => ({ store: {} }),
+      },
+      inject: (_deps: string[], callback: (scope: unknown) => unknown) =>
+        callback(ctx),
+      remote: new Proxy(
+        {},
+        {
+          get: (_target, prop) => {
+            if (prop === "opencodeGoUsage") {
+              throw new TypeError(
+                'cannot get property "remote.opencodeGoUsage" without inject'
+              );
+            }
+          },
+        }
+      ),
+      slots: {
+        inject: (_name: string, fn: () => void) => fn(),
+        register: (entry: Record<string, unknown>) => {
+          if (entry.name === "conversation.input.right") {
+            dockInjector = entry.inject as (s: unknown) => unknown;
+          }
+        },
+      },
+    };
+
+    expect(() => apply(ctx as never)).not.toThrow();
+    // The entry still mounts, and the read says why rather than disappearing.
+    expect(dockInjector?.("session")).toMatchObject({
+      reason: expect.stringContaining("no usage service"),
+    });
+  });
+
   it("degrades to no meter when the model-directory service throws", () => {
     // `directoryFor` throws for a session it cannot resolve yet (a composer
     // rendered before its session is bound). The injector must swallow that

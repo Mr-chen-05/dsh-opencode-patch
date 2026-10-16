@@ -404,6 +404,20 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
     expect(isServableModel("gemini-3.1-pro", "opencode")).toBe(true);
   });
 
+  it("leaves an undeclared plane alone, so a Go-only deployment is not touched", () => {
+    // The plane overrides are keyed on what the deployment DECLARES. Naming
+    // `opencode-go` and not `opencode` means the Zen route keeps exactly the
+    // behaviour it had, which is the difference between augmenting a route and
+    // replacing the user's choice.
+    expect(isServableModel("deepseek-v4.1-flash", "opencode", [])).toBe(true);
+    // And a withhold on one plane says nothing about the other: the same id is
+    // still offered where it is not named, because the knob is a list of ids
+    // and not a per-plane decision.
+    expect(
+      isServableModel("deepseek-v4.1-flash", "opencode", ["big-pickle"])
+    ).toBe(true);
+  });
+
   it("withholds an id a deployment names, outranking every other rule", () => {
     // The deployment's own word about a model beats every rule this file
     // applies - including retention. A deprecated id the gateway still serves

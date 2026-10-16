@@ -102,7 +102,7 @@ export const loginCalls = (ctx: ClientContext): LoginRemoteCalls => {
   // and "no service" stop looking identical - and it is the opposite of the meter's
   // choice, which hides itself instead.
   const service = () => {
-    const remote = ctx.remote?.opencodeLogin;
+    const remote = remoteNamespace(ctx.remote, "opencodeLogin");
     if (remote === undefined) {
       // Say what the remote DOES expose - the list that distinguishes "the host
       // mounted no login service" from "this bundle is not the one that knows about
@@ -133,6 +133,45 @@ export const loginCalls = (ctx: ClientContext): LoginRemoteCalls => {
     read: async (plane: string) =>
       parseLoginState(await unwrapRemote(service()?.state?.({ plane }))),
   };
+};
+
+/**
+ * Read a namespace off the host's remote face, or `undefined` when it is absent.
+ *
+ * Cordis guards property access on a remote service by NAME. A namespace this
+ * bundle has not declared in `inject` throws
+ * `cannot get property "remote.opencodeLogin" without inject` rather than
+ * answering `undefined`, and an optional chain cannot catch a throw - which is
+ * the error the reporter's screenshot showed, and why neither the meter nor the
+ * sign-in row appeared. Declaring the names is not the answer either: a name in
+ * `inject` is a HARD gate that stops the whole plugin activating until it exists,
+ * which is what took the meter out once with "web boot: 1 entry did not activate".
+ *
+ * So the read is guarded, and the absence is reported by the caller that already
+ * handles a genuine "the host mounted none".
+ *
+ * @param remote - the host's remote face.
+ * @param namespace - the namespace to read.
+ * @returns the namespace's calls, or `undefined` when it is not reachable.
+ */
+const remoteNamespace = (
+  remote: unknown,
+  namespace: string
+):
+  | Record<string, ((query?: unknown) => Promise<unknown>) | undefined>
+  | undefined => {
+  try {
+    const face = (remote as Record<string, unknown> | undefined)?.[namespace];
+    if (face === undefined || face === null || typeof face !== "object") {
+      return undefined;
+    }
+    return face as Record<
+      string,
+      ((query?: unknown) => Promise<unknown>) | undefined
+    >;
+  } catch {
+    return undefined;
+  }
 };
 
 /** The value a Remote result carries, or a thrown failure. */
@@ -465,7 +504,8 @@ export const apply = (ctx: ClientContext): void => {
       // No Host usage service means no meter: it registers only when tracking is
       // on, and an unavailable state the user cannot act on is worse than
       // absence.
-      if (typeof meterScope.remote?.opencodeGoUsage?.read !== "function") {
+      const usage = remoteNamespace(meterScope.remote, "opencodeGoUsage");
+      if (typeof usage?.read !== "function") {
         return {
           reason: "no usage service: remote.opencodeGoUsage.read is missing",
         };
@@ -478,17 +518,16 @@ export const apply = (ctx: ClientContext): void => {
         directory,
         ...markers,
         readUsage: async (provider?: string, model?: string) => {
-          const res: unknown = await meterScope.remote?.opencodeGoUsage?.read?.(
-            {
-              ...(provider === undefined || provider.length === 0
-                ? {}
-                : { provider }),
-              ...(model === undefined || model.length === 0 ? {} : { model }),
-              ...(meterSessionId.length === 0
-                ? {}
-                : { sessionId: meterSessionId }),
-            }
-          );
+          const read = usage.read as (query?: unknown) => Promise<unknown>;
+          const res: unknown = await read({
+            ...(provider === undefined || provider.length === 0
+              ? {}
+              : { provider }),
+            ...(model === undefined || model.length === 0 ? {} : { model }),
+            ...(meterSessionId.length === 0
+              ? {}
+              : { sessionId: meterSessionId }),
+          });
           // Narrow `ok` to a boolean so the branch reads as truthiness; the lint
           // config rejects coercing an `unknown` in the condition.
           if (isRecord(res) && typeof res.ok === "boolean") {

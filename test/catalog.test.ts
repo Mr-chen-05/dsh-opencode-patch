@@ -46,6 +46,24 @@ afterEach(() => {
 });
 
 describe("OpenCode Model Catalog & Enrichment", () => {
+  it("keeps a retained id fully described, not merely present", () => {
+    // A retained row is offered to a user, so it has to carry what a picker
+    // renders. `step-5-preview-free` survives on the registry's deprecated flag,
+    // and its metadata survives with it - context, output cap, modalities and
+    // the thinking levels - because an id kept without its fields is a row that
+    // cannot be priced or reasoned about.
+    for (const catalog of [OPENCODE_ZEN_CATALOG, OPENCODE_GO_CATALOG]) {
+      const spec = catalog.find((m) => m.id === "step-5-preview-free");
+      expect(spec).toBeDefined();
+      expect(spec?.context_window).toBeGreaterThan(0);
+      expect(spec?.max_output_tokens).toBeGreaterThan(0);
+      expect(spec?.input_modalities.length).toBeGreaterThan(0);
+      expect(spec?.reasoning).toBe(true);
+      expect(spec?.reasoning_options?.length).toBeGreaterThan(0);
+      expect(spec?.name.length).toBeGreaterThan(0);
+    }
+  });
+
   it("retains a deprecated id the gateway still serves, on both planes", () => {
     // The registry's deprecated flag is a statement about the vendor's
     // catalogue, not the gateway, and the two disagree in measured cases:

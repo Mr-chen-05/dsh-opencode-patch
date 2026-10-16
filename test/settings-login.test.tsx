@@ -35,6 +35,42 @@ const calls = (
 });
 
 describe("settings: the sign-in row", () => {
+  it("cancels a flow it started, on the way out", async () => {
+    // A flow started from the card could only be abandoned by reloading the page.
+    // The contract and the service already had `cancel`; the effect that owns the
+    // poll loop now calls it on the way out.
+    const cancelled: string[] = [];
+    const view = render(
+      <LoginSection
+        login={calls({
+          begin: () =>
+            Promise.resolve({
+              expiresInSeconds: 600,
+              flowId: "flow-cancel-me",
+              intervalSeconds: 5,
+              userCode: "ABCD-EFGH",
+              verificationUri: "https://x",
+            }),
+          cancel: (flowId: string) => {
+            cancelled.push(flowId);
+            return Promise.resolve({ kind: "cancelled" });
+          },
+        })}
+        t={t}
+      />
+    );
+    const button = view.container.querySelector(
+      'button[type="button"]'
+    ) as HTMLButtonElement;
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(view.container.textContent).toContain("ABCD-EFGH");
+    });
+    // Unmounting is the abandonment path.
+    view.unmount();
+    expect(cancelled).toEqual(["flow-cancel-me"]);
+  });
+
   it("renders nothing when the host mounted no login service", () => {
     // The same rule the meter follows: no remote, no row — absence rather than
     // an empty shell that looks broken.
@@ -332,6 +368,46 @@ describe("settings: the calls the page hands the row", () => {
     await expect(wired?.begin("opencode")).resolves.toMatchObject({
       userCode: "X",
     });
+  });
+
+  it("reports rather than throws when cordis refuses the namespace access", () => {
+    // The error the reporter's screenshot showed, and why neither the meter nor
+    // the sign-in row appeared: cordis guards property access on a remote
+    // service by NAME, and an undeclared namespace THROWS
+    // `cannot get property "remote.opencodeLogin" without inject` rather than
+    // answering `undefined`. An optional chain cannot catch a throw, so the read
+    // is guarded and the absence is reported like any other.
+    const warnings: unknown[][] = [];
+    const spy = vi
+      .spyOn(console, "warn")
+      .mockImplementation((...args: unknown[]) => {
+        warnings.push(args);
+      });
+    try {
+      const throwing = new Proxy(
+        {},
+        {
+          get: (_target, prop) => {
+            if (prop === "opencodeLogin") {
+              throw new TypeError(
+                'cannot get property "remote.opencodeLogin" without inject'
+              );
+            }
+          },
+        }
+      );
+      const view = render(
+        <LoginSection login={loginCalls({ remote: throwing } as never)} t={t} />
+      );
+      // The row still renders, and says so rather than taking the page down.
+      expect(view.container.textContent).toContain(zh.loginSignedOut);
+      const line = warnings
+        .map((args) => args.map(String).join(" "))
+        .find((text) => text.includes("no opencodeLogin service"));
+      expect(line, "the guarded read must report, not throw").toBeDefined();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("answers calls even when no login remote is mounted, so the row renders", () => {
