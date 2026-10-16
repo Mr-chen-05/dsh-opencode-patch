@@ -34,6 +34,7 @@ import {
   internalRouteFor,
   isInternalRoute,
   isServableSdk,
+  PLANES,
   protocolFromModelId,
   UNSERVED_PLANE_SDKS,
 } from "./responses-routes.ts";
@@ -534,6 +535,11 @@ const effortsFromLevelMap = (
  * an adapter that knows the model keeps its own result - which is what dispatch
  * honours.
  *
+ * Only the adapters behind the plane ROUTES are wrapped - a foreign adapter in
+ * the same registry (another provider's) is not this plugin's to replace - and
+ * the original runs with the adapter as its receiver, because `resolveModel` and
+ * `prepareCall` are class methods that read `this`.
+ *
  * @param llm - the Host's LLM service.
  * @param config - the resolved config, for the ids a deployment withholds.
  * @returns the disposer restoring the original methods, or `undefined`.
@@ -557,6 +563,13 @@ export const decoratePlaneAdapters = (
     if (adapter === undefined || adapter === null) {
       continue;
     }
+    // Only the adapters behind THIS plugin's plane routes: the fill exists for
+    // the routes a deployment declares without a `models` list, whose adapter
+    // falls back to pi's installed catalog. Another provider's adapter is not
+    // this plugin's to replace.
+    if (!(route in PLANES)) {
+      continue;
+    }
     // The plane comes from the ROUTE, so a Go model is filled from the Go
     // catalog and a Zen one from Zen's - the same rule `findModelSpecOn` applies.
     const plane = catalogPlaneForRoute(route);
@@ -570,13 +583,14 @@ export const decoratePlaneAdapters = (
         model: string,
         signal?: AbortSignal
       ): Promise<unknown> => {
-        const answered: unknown = await (
-          original as (
-            p: string,
-            m: string,
-            s?: AbortSignal
-          ) => Promise<unknown>
-        )(provider, model, signal);
+        // The original with the adapter as its receiver: both methods are class
+        // methods that read `this` (pi-ai's open with `this.current()`), and a
+        // detached call fails the provider's whole catalog load.
+        const answered: unknown = await Reflect.apply(original, adapter, [
+          provider,
+          model,
+          signal,
+        ]);
         if (config.hiddenModels.includes(model)) {
           return answered;
         }

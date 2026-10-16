@@ -534,3 +534,16 @@ The fix is therefore not a mount: it is a route whose adapter the plugin itself 
 `check.ts` asserts the refresh push carries the PAT by looking for the token URL as a literal, and the literal carries the workflow's own placeholders. Written plainly (`"…${GH_TOKEN}…"`), `no-template-curly-in-string` flags it; written with escapes (`"…\${GH_TOKEN}…"`), `no-useless-escape` flags every escape instead — a plain string has no spelling this oxlint accepts. A regex literal is not an escape hatch either: `prefer-includes` rejects a pattern that is a static string. The one spelling both rules accept is a template literal with `\${`: there the backslash is the documented way to write a literal placeholder, and neither rule applies.
 
 The red run that followed was the verification's fault, not the lint's. The check was run as `pnpm run check | grep …`, and a pipeline reports its last command's exit status, so a failing check read as success and the commit went out red. `pnpm run check; echo exit=$?` — or `set -o pipefail` — is the form that cannot lie.
+
+## A wrapped method must keep its receiver, and a foreign adapter is not ours to wrap
+
+`decoratePlaneAdapters` extracts `adapter[method]`, replaces it, and calls the extracted original. The first version called that original DETACHED, `original(provider, model, signal)`, which is only safe while every adapter's methods are closures. The registry holds class instances instead: pi-ai's `resolveModel` and `prepareCall` both open with `this.current()`, and Command Code's reads `this.currentCatalogState()`. With a detached call `this` is `undefined`, so `session/modelCatalog` answered seven failures - the six pi-ai groups (`opencode-go`, `antigravity`, `nvidia`, `workbuddy`, `opencode`, `minimax-cn`) with `Cannot read properties of undefined (reading 'current')`, and `commandcode` with `…('currentCatalogState')` - and the picker showed one failed group per provider with nothing selectable.
+
+Two properties decided the blast radius, and both pointed the same way:
+
+- **The suite could not see it.** The mock adapters are plain objects of arrow functions, so the extracted call behaved exactly like the method; an arrow cannot fail when the receiver is lost, and the suite stayed green while every class-based adapter answered "Cannot read properties of undefined".
+- **The loop wrapped every adapter in the registry.** `catalogPlaneForRoute` answers a plane for ANY route (defaulting to Zen), so nothing excluded foreign adapters - which is how our wrapper reached a third-party adapter, Command Code's.
+
+The fix is `Reflect.apply(original, adapter, [provider, model, signal])`, the idiom `decorateModelInfo` already used for the service method, plus a `route in PLANES` gate on the loop. The shared pi-ai adapter still receives the wrap through its plane routes, so the fill keeps applying to its models on every route; an adapter behind no plane route keeps its own methods. The regressions are two cases that fail on the previous code: a class-based adapter whose method reads `this`, and a foreign route that must stay unwrapped.
+
+Measured on the running deployment after the rebuild: `session/modelCatalog` answers with every group populated and `failures: []`.

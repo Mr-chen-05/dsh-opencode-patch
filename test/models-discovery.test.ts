@@ -592,6 +592,58 @@ describe("models-discovery: the adapter behind a plane route", () => {
     expect(llm.adapters.get("opencode-go")?.adapter.resolveModel).toBe(before);
   });
 
+  it("calls the original on the adapter, because it is a class method that reads `this`", async () => {
+    // The registry holds CLASS instances, not bags of arrows: pi-ai's real
+    // `resolveModel` opens with `this.current()`. A wrapper that calls the
+    // extracted method detached fails the provider's entire catalog load with
+    // "Cannot read properties of undefined", which is the live symptom this
+    // case exists for.
+    class Adapter {
+      calls = 0;
+      async resolveModel(provider: string, model: string): Promise<unknown> {
+        this.calls += 1;
+        return { id: model, provider };
+      }
+    }
+    const adapter = new Adapter();
+    const llm = { adapters: new Map([["opencode-go", { adapter }]]) };
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({ enrichModels: true })
+    );
+
+    const resolved = (await resolveOn(llm as never, "opencode-go")(
+      "opencode-go",
+      "step-5-preview-free"
+    )) as { context?: { contextWindow?: number } };
+
+    // It ran ON the instance - the counter lives on `this` - and the wrapper
+    // still filled the context pi does not carry.
+    expect(adapter.calls).toBe(1);
+    expect(resolved.context?.contextWindow).toBeGreaterThan(0);
+
+    stop?.();
+  });
+
+  it("leaves another provider's adapter alone", () => {
+    // Only the plane routes' adapters are this plugin's to replace; a foreign
+    // adapter in the same registry keeps its methods, and the stand-down says
+    // so by restoring nothing.
+    const foreign: Record<string, unknown> = {
+      resolveModel: async () => ({}),
+    };
+    const llm = { adapters: new Map([["commandcode", { adapter: foreign }]]) };
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({ enrichModels: true })
+    );
+
+    expect(llm.adapters.get("commandcode")?.adapter.resolveModel).toBe(
+      foreign.resolveModel
+    );
+    expect(stop).toBeUndefined();
+  });
+
   it("withholds an id a deployment names, whatever the adapter answered", async () => {
     const llm = llmWithAdapters(() => ({}));
     const stop = decoratePlaneAdapters(
