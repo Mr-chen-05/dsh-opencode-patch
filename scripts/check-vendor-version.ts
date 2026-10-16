@@ -8,14 +8,21 @@
  *
  * Two things are checked, and they fail for different reasons:
  *
- *  1. the constant, read from `src/identity.ts`, against the published CLI;
- *  2. every other literal `opencode/<version>` in the tree, against the
- *     constant - a copy that drifts from the constant is stale even when the
- *     constant is current.
+ *  1. the constant, read from `src/identity.ts`, against the published CLI -
+ *     `latest`, which is the 1.x line this plugin claims;
+ *  2. every other copy in the tree, against the constant - a copy that drifts
+ *     from the constant is stale even when the constant is current.
+ *
+ * The copy scan reads two forms, because a copy is not always prefixed: the
+ * `opencode/<version>` literal, and a bare (or `v`-prefixed) literal of the
+ * constant's own series - a comment, a tag reference.
  *
  * The first version of this script only scanned for literals, which meant it
  * could not see the constant at all: the whole point was invisible to it. It
  * passed while the constant said 1.18.33, and only a control run showed it.
+ * The second version only scanned `opencode/<version>`, which meant a bare copy
+ * was invisible to it: it passed while three e2e comments were two patches
+ * stale.
  */
 
 import { readdir, readFile } from "node:fs/promises";
@@ -31,11 +38,15 @@ const CONSTANT_FILE = "src/identity.ts";
 /** A literal that names the CLI. */
 const LITERAL = /\bopencode\/(\d+\.\d+\.\d+)\b/g;
 
+/** A bare (or `v`-prefixed) literal of the pinned series: the form above cannot see it. */
+const bareLiteral = (series: string): RegExp =>
+  new RegExp(String.raw`(?<!opencode/)\bv?(${series}\.\d+)\b`, "g");
+
 /** Every literal version found, and the files that say it. */
-const literals = async (): Promise<Map<string, string[]>> => {
+const literals = async (pattern: RegExp): Promise<Map<string, string[]>> => {
   const found = new Map<string, string[]>();
   const record = (path: string, text: string): void => {
-    for (const match of text.matchAll(LITERAL)) {
+    for (const match of text.matchAll(pattern)) {
       const version = match[1] ?? "";
       found.set(version, [...(found.get(version) ?? []), path]);
     }
@@ -67,8 +78,13 @@ const main = async (): Promise<void> => {
     );
   }
 
-  const copies = await literals();
-  const disagree = [...copies].filter(([version]) => version !== pinned);
+  const copies = await literals(LITERAL);
+  const series = pinned.split(".").slice(0, 2).join("\\.");
+  const mentions = await literals(bareLiteral(series));
+  const disagree = [
+    ...[...copies].filter(([version]) => version !== pinned),
+    ...[...mentions].filter(([version]) => version !== pinned),
+  ];
   if (disagree.length > 0) {
     const detail = disagree
       .map(([version, files]) => `  ${version} in ${files.join(", ")}`)
@@ -87,12 +103,15 @@ const main = async (): Promise<void> => {
     throw new Error("the registry response carried no version");
   }
   if (pinned !== published) {
+    const files = [
+      ...new Set([...copies.values(), ...mentions.values()].flat()),
+    ];
     throw new Error(
-      `pinned opencode/${pinned}, published opencode/${published} - bump OPENCODE_CLI_VERSION, and the ${copies.size > 0 ? [...copies.values()].flat().join(", ") : "docs"}`
+      `pinned opencode/${pinned}, published opencode/${published} - bump OPENCODE_CLI_VERSION, and the ${files.length > 0 ? files.join(", ") : "docs"}`
     );
   }
   process.stdout.write(
-    `ok   opencode/${pinned} is the published version, and ${[...copies.values()].flat().length} copy/copies agree\n`
+    `ok   opencode/${pinned} is the published version, and ${[...copies.values()].flat().length} copy/copies and ${[...mentions.values()].flat().length} bare mention/mentions agree\n`
   );
 };
 
