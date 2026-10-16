@@ -8,11 +8,11 @@ OpenCode serves its models on **four different API shapes**, and which one a mod
 
 | API shape | Wire endpoint | Which models | Signal in the catalog |
 | :-- | :-- | :-- | :-- |
-| OpenAI **Chat Completions** | `POST /zen/v1/chat/completions` | **the default**: 27 of 84 | the model names **no** SDK |
-| OpenAI **Responses** | `POST /zen/v1/responses` | 30 of 84 | `@ai-sdk/openai` |
-| Anthropic **Messages** | `POST /zen/v1/messages` | 18 of 84 | `@ai-sdk/anthropic` |
-| Google **Generative AI** | `POST /zen/v1/models/<id>:streamGenerateContent` | 8 of 84 | `@ai-sdk/google` |
-| Mistral **Conversations** | `POST /zen/v1/chat/completions` | 1 of 84 | `@ai-sdk/mistral` |
+| OpenAI **Chat Completions** | `POST /zen/v1/chat/completions` | **the default**: 29 of 86 | the model names **no** SDK |
+| OpenAI **Responses** | `POST /zen/v1/responses` | 30 of 86 | `@ai-sdk/openai` |
+| Anthropic **Messages** | `POST /zen/v1/messages` | 18 of 86 | `@ai-sdk/anthropic` |
+| Google **Generative AI** | `POST /zen/v1/models/<id>:streamGenerateContent` | 8 of 86 | `@ai-sdk/google` |
+| Mistral **Conversations** | `POST /zen/v1/chat/completions` | 1 of 86 | `@ai-sdk/mistral` |
 
 Counts are the shipped catalog. They are asserted against this table by `catalog.test.ts`, because a count written into prose does not regenerate with the data it counts.
 

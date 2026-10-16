@@ -100,8 +100,8 @@ export const RETIRED_ZEN_MODEL_IDS: ReadonlySet<string> = new Set([
  * mount can read this instead of hard-coding a family.
  */
 export const OPENCODE_PLANE_API: Readonly<Record<"go" | "zen", string>> = {
-  go: "https://opencode.ai/inference/go/v1",
-  zen: "https://opencode.ai/inference/v1",
+  go: "https://opencode.ai/inference/go/openai/v1",
+  zen: "https://opencode.ai/inference/openai/v1",
 };
 
 export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
@@ -1241,6 +1241,23 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     ],
   },
   {
+    context_window: 262_144,
+    cost: {
+      cache_read: 0,
+      input: 0,
+      output: 0,
+    },
+    id: "ll-alpha-free",
+    input_modalities: ["text"],
+    is_free: true,
+    max_output_tokens: 65_536,
+    name: "LL Alpha Free",
+    reasoning: true,
+    reasoning_options: [
+      { type: "effort", values: ["low", "medium", "high", "xhigh", "max"] },
+    ],
+  },
+  {
     context_window: 1_000_000,
     cost: {
       cache_read: 1,
@@ -1441,6 +1458,21 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     reasoning_options: [
       { type: "effort", values: ["none", "low", "medium", "high", "xhigh"] },
     ],
+  },
+  {
+    context_window: 200_000,
+    cost: {
+      cache_read: 0,
+      input: 0,
+      output: 0,
+    },
+    id: "glm-5.3-flash-free",
+    input_modalities: ["text", "image"],
+    is_free: true,
+    max_output_tokens: 32_000,
+    name: "GLM-5.3-Flash Free",
+    reasoning: true,
+    reasoning_options: [{ type: "effort", values: ["low", "high", "max"] }],
   },
   {
     context_window: 1_000_000,
