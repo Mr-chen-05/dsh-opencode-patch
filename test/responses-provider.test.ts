@@ -967,6 +967,54 @@ describe("responses-provider: the mount survives the host's own instance", () =>
     });
   });
 
+  it("drops a registration whose routes are ALL taken, instead of dying on it", async () => {
+    // The sibling case taken to the end of its range: every route the wrapper
+    // declares is already served by the time it registers, so the forward
+    // drops the whole list rather than letting the registry's all-or-nothing
+    // throw take the mount down. It still answers with a handle-shaped value —
+    // the wrapper stores what `registerAdapter` returned and may call
+    // `replace` on it later — and the mount stands down with nothing to
+    // withdraw rather than half-registering.
+    const routes: string[] = [];
+    const host = createHost({
+      onPlugin: (config) => {
+        routes.push(
+          ...Object.keys(
+            (config as { providers: Record<string, unknown> }).providers
+          )
+        );
+        for (const route of routes) {
+          host.adapters.set(route, { id: route, name: route });
+        }
+      },
+    });
+    // Pre-declared so the Gemini bridge stays out of this case's way: its
+    // registration is its own, and this case is about the wrapper's.
+    host.adapters.set(GOOGLE_INTERNAL_ROUTE, {
+      id: GOOGLE_INTERNAL_ROUTE,
+      name: GOOGLE_INTERNAL_ROUTE,
+    });
+
+    const stop = await registerResponsesProvider(host.ctx);
+
+    // The setup really did take every route — without this, the case could
+    // pass by exercising nothing.
+    expect(routes.length).toBeGreaterThan(0);
+    for (const route of routes) {
+      expect(host.adapters.has(route)).toBe(true);
+    }
+    // Nothing new landed: no route was re-registered behind its owner's back.
+    expect(host.observables.adapters).toEqual([]);
+    for (const route of routes) {
+      expect(host.adapters.get(route)).toEqual({ id: route, name: route });
+    }
+    // The mount reported the stand-down, and handed back nothing to withdraw.
+    expect(host.observables.infos).toContain(
+      "[dsh-opencode-patch] the mount registered no route; internal routes stay unregistered"
+    );
+    expect(stop).toBeUndefined();
+  });
+
   it("isolates both the authorization and the settings seam", async () => {
     const host = createHost();
     await registerResponsesProvider(host.ctx);
