@@ -19,24 +19,19 @@ jobs:
       # token don't trigger downstream workflows, so the `release` job
       # would never fire. Secret: RELEASE_PLEASE_TOKEN, fine-grained PAT
       # with Contents + Pull requests read/write on this repo.
+      #
+      # Manifest mode, not release-type alone: the latest-release lookup
+      # only considers the last 250 merge commits, and this repo sits
+      # further than that from its last release, so the lookup finds
+      # nothing and the fallback scan re-reads a `Release-As: 1.0.0` commit
+      # from 2026-10-09 (it proposed a downgrade). The manifest pins the
+      # base version; the release SHA is then resolved by exact version,
+      # which the window cannot hide. What the changelog shows, and in what
+      # order, lives in release-please-config.json: visible — what a user
+      # gets (features, fixes, performance) plus documentation; hidden —
+      # the maintenance noise (chores, CI, tests, build, refactors).
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
-          release-type: node
-          # What the generated CHANGELOG shows, and in what order. Visible:
-          # what a USER gets (features, fixes, performance) plus documentation.
-          # Hidden: the maintenance noise (chores, CI, tests, build, refactors)
-          # that a reader of a release note has no use for — it stays in the
-          # commit log, which is where a maintainer looks for it.
-          changelog-sections: |
-            [
-              { "type": "feat", "section": "Features" },
-              { "type": "fix", "section": "Fixes" },
-              { "type": "perf", "section": "Performance" },
-              { "type": "docs", "section": "Documentation" },
-              { "type": "refactor", "section": "Refactors", "hidden": true },
-              { "type": "test", "section": "Tests", "hidden": true },
-              { "type": "build", "section": "Build", "hidden": true },
-              { "type": "ci", "section": "CI", "hidden": true },
-              { "type": "chore", "section": "Chores", "hidden": true }
-            ]
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
