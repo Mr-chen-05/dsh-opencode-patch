@@ -512,6 +512,127 @@ const effortsFromLevelMap = (
   }));
 
 /**
+ * Wrap the ADAPTERS behind the plane routes, so a model our catalog carries but
+ * pi's installed catalog does not is still resolvable at dispatch.
+ *
+ * This is the seam the `modelOverrides` attempt missed. `buildModelCatalog` reads
+ * the public `ctx.llm.resolveModelInfo`, which this plugin decorates, so the
+ * picker shows the right context and levels for every catalogued model. But
+ * `prepareCall` reads `registration.adapter.prepareCall` - the adapter itself -
+ * and the plane routes' adapter resolves its models from pi's installed catalog.
+ * `step-5-preview-free` has no `provider.npm`, so it stays on the route the user
+ * selected, and pi ships no `step-5` entry on either plane: the adapter reports no
+ * reasoning at all, and a saved effort then fails validation.
+ *
+ * A `modelOverrides` entry cannot fix this - it only DESCRIBES ids
+ * `defaults.has(id)`, and `entries` comes from `defaults.values()`, so an id pi
+ * has never heard of is rejected in strict validation and never served anyway.
+ *
+ * The registry keeps its adapters in a public `Map`, so the registration is
+ * wrapped in place: nothing is re-registered, the user's profile is untouched, and
+ * the route keeps the adapter it always had. Only MISSING answers are filled, so
+ * an adapter that knows the model keeps its own result - which is what dispatch
+ * honours.
+ *
+ * @param llm - the Host's LLM service.
+ * @param config - the resolved config, for the ids a deployment withholds.
+ * @returns the disposer restoring the original methods, or `undefined`.
+ */
+export const decoratePlaneAdapters = (
+  llm: CordisContext["llm"],
+  config: ResolvedPluginConfig
+): (() => void) | undefined => {
+  // The registry's own map. Reached structurally rather than through a typed
+  // handle because the service exposes it as a field, not a method.
+  const registry = (llm ?? {}) as {
+    adapters?: Map<string, { adapter: Record<string, unknown> }>;
+  };
+  const { adapters } = registry;
+  if (!(adapters instanceof Map)) {
+    return undefined;
+  }
+  const restored: (() => void)[] = [];
+  for (const [route, registration] of adapters) {
+    const adapter = registration?.adapter;
+    if (adapter === undefined || adapter === null) {
+      continue;
+    }
+    // The plane comes from the ROUTE, so a Go model is filled from the Go
+    // catalog and a Zen one from Zen's - the same rule `findModelSpecOn` applies.
+    const plane = catalogPlaneForRoute(route);
+    for (const method of ["resolveModel", "prepareCall"] as const) {
+      const original = adapter[method];
+      if (typeof original !== "function") {
+        continue;
+      }
+      const wrapped = async (
+        provider: string,
+        model: string,
+        signal?: AbortSignal
+      ): Promise<unknown> => {
+        const answered: unknown = await (
+          original as (
+            p: string,
+            m: string,
+            s?: AbortSignal
+          ) => Promise<unknown>
+        )(provider, model, signal);
+        if (config.hiddenModels.includes(model)) {
+          return answered;
+        }
+        const spec = findModelSpecOn(plane, model);
+        if (spec === undefined) {
+          return answered;
+        }
+        // Only what the adapter left BLANK. An adapter that answers keeps its
+        // answer, because that is what dispatch will honour.
+        const record = isRecord(answered) ? answered : {};
+        // The same pair the picker reads: `thinkingLevelMapFor` decides which
+        // levels exist, `effortsFromLevelMap` renders them, so a level offered
+        // here is a level the composer shows.
+        const map = thinkingLevelMapFor(spec);
+        const supports =
+          map === undefined ? undefined : effortsFromLevelMap(map);
+        return {
+          ...record,
+          ...(record.provider === undefined ? { provider } : {}),
+          ...(record.id === undefined ? { id: model } : {}),
+          ...(record.name === undefined ? { name: spec.name } : {}),
+          ...(record.inputModalities === undefined
+            ? { inputModalities: [...spec.input_modalities] }
+            : {}),
+          ...(record.context === undefined && spec.context_window > 0
+            ? { context: { contextWindow: spec.context_window } }
+            : {}),
+          ...(record.defaultMaxTokens === undefined &&
+          spec.max_output_tokens > 0
+            ? { defaultMaxTokens: spec.max_output_tokens }
+            : {}),
+          ...(record.reasoning === undefined &&
+          supports !== undefined &&
+          supports.length > 0
+            ? { reasoning: { efforts: supports } }
+            : {}),
+        };
+      };
+      adapter[method] = wrapped;
+      restored.push(() => {
+        adapter[method] = original;
+      });
+    }
+  }
+  if (restored.length === 0) {
+    return undefined;
+  }
+  return () => {
+    for (const undo of restored.toReversed()) {
+      undo();
+    }
+  };
+};
+
+/**
+ * Wrap the Host's `resolveModelInfo` so a plane route's model reports the/**
  * Wrap the Host's `resolveModelInfo` so a plane route's model reports the
  * thinking level the catalog declares and the context window it names.
  *

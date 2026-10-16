@@ -23,7 +23,10 @@ import {
   type CordisContext,
   type CatalogModelSpec,
 } from "../src/index.ts";
-import { isServableModel } from "../src/models-discovery.ts";
+import {
+  decoratePlaneAdapters,
+  isServableModel,
+} from "../src/models-discovery.ts";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -478,6 +481,143 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
  * from what comes back, so a plane route whose adapter reports no `reasoning`
  * shows the model with NO Effort row at all. These cases are that surface.
  */
+describe("models-discovery: the adapter behind a plane route", () => {
+  /**
+   * A Host LLM service whose registry holds one adapter per route, as the real
+   * registry does - `adapters` is a public `Map` keyed by route id.
+   */
+  const llmWithAdapters = (
+    answer: (provider: string, model: string) => unknown
+  ): { adapters: Map<string, { adapter: Record<string, unknown> }> } => {
+    const adapters = new Map<string, { adapter: Record<string, unknown> }>();
+    for (const route of ["opencode", "opencode-go"]) {
+      const adapter: Record<string, unknown> = {
+        resolveModel: async (provider: string, model: string) =>
+          answer(provider, model),
+      };
+      adapters.set(route, { adapter });
+    }
+    return { adapters };
+  };
+
+  /** The adapter one route holds, with `resolveModel` typed for the call. */
+  const resolveOn = (
+    llm: { adapters: Map<string, { adapter: Record<string, unknown> }> },
+    route: string
+  ): ((provider: string, model: string) => Promise<unknown>) => {
+    const adapter = llm.adapters.get(route)?.adapter;
+    const fn = adapter?.resolveModel;
+    if (typeof fn !== "function") {
+      throw new TypeError(`no resolveModel on ${route}`);
+    }
+    return fn as (provider: string, model: string) => Promise<unknown>;
+  };
+
+  it("fills what the adapter left blank, so dispatch sees the model's reasoning", async () => {
+    // The seam the modelOverrides attempt missed. `prepareCall` reads the
+    // ADAPTER, not the public resolveModelInfo, and the plane route's adapter
+    // resolves from pi's installed catalog - which carries no step-5 entry on
+    // either plane. So it answers nothing about the model, and a saved effort
+    // then fails validation with UNSUPPORTED_REASONING_EFFORT.
+    const llm = llmWithAdapters(() => ({}));
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({ enrichModels: true })
+    );
+
+    // The adapter answers an EMPTY record, exactly as pi's does for a model it
+    // does not carry.
+    const resolved = (await resolveOn(llm, "opencode-go")(
+      "opencode-go",
+      "step-5-preview-free"
+    )) as {
+      id?: string;
+      name?: string;
+      context?: { contextWindow?: number };
+      defaultMaxTokens?: number;
+      reasoning?: { efforts: { id: string }[] };
+    };
+
+    // Everything dispatch validates against, filled from our catalog.
+    expect(resolved.id).toBe("step-5-preview-free");
+    expect(resolved.name).toBeTruthy();
+    expect(resolved.context?.contextWindow).toBeGreaterThan(0);
+    expect(resolved.defaultMaxTokens).toBeGreaterThan(0);
+    // And the levels the composer offers - so a saved `high` resolves rather
+    // than being rejected.
+    expect(resolved.reasoning?.efforts.map((e) => e.id)).toEqual([
+      "low",
+      "medium",
+      "high",
+    ]);
+
+    stop?.();
+  });
+
+  it("keeps an adapter's own answer, because that is what dispatch honours", async () => {
+    // A COMPLETE answer, because the wrapper fills only what is absent and an
+    // identity field it adds is not it overriding anything.
+    const own = {
+      context: { contextWindow: 999 },
+      defaultMaxTokens: 12345,
+      id: "step-5-preview-free",
+      inputModalities: ["text"],
+      name: "Its Own Name",
+      provider: "opencode",
+      reasoning: { efforts: [{ id: "high", name: "High" }] },
+    };
+    const llm = llmWithAdapters(() => own);
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({ enrichModels: true })
+    );
+    const resolved = await resolveOn(llm, "opencode")(
+      "opencode",
+      "step-5-preview-free"
+    );
+    expect(resolved).toEqual(own);
+    stop?.();
+  });
+
+  it("restores the adapter's own methods on dispose", () => {
+    const llm = llmWithAdapters(() => ({}));
+    const before = llm.adapters.get("opencode-go")?.adapter.resolveModel;
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({ enrichModels: true })
+    );
+    const after = llm.adapters.get("opencode-go")?.adapter.resolveModel;
+    expect(after).not.toBe(before);
+    stop?.();
+    expect(llm.adapters.get("opencode-go")?.adapter.resolveModel).toBe(before);
+  });
+
+  it("withholds an id a deployment names, whatever the adapter answered", async () => {
+    const llm = llmWithAdapters(() => ({}));
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({
+        enrichModels: true,
+        hiddenModels: ["step-5-preview-free"],
+      })
+    );
+    const resolved = (await resolveOn(llm, "opencode-go")(
+      "opencode-go",
+      "step-5-preview-free"
+    )) as { reasoning?: unknown };
+    // The deployment's word beats the catalog's.
+    expect(resolved.reasoning).toBeUndefined();
+    stop?.();
+  });
+
+  it("stands down when the host exposes no adapter registry", () => {
+    expect(decoratePlaneAdapters({} as never, resolveConfig())).toBeUndefined();
+    expect(
+      decoratePlaneAdapters(undefined as never, resolveConfig())
+    ).toBeUndefined();
+  });
+});
+
 describe("models-discovery: the Effort row a model reports", () => {
   /** A minimal Host `llm` service whose `resolveModelInfo` answers per route. */
   const llmWith = (answer: (provider: string, model: string) => unknown) => ({

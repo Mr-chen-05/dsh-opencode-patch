@@ -48,6 +48,7 @@ import {
 import {
   decorateModelDiscovery,
   decorateModelInfo,
+  decoratePlaneAdapters,
   hideResponsesRoute,
 } from "./models-discovery.ts";
 import { orgFor, setOrg } from "./org-cache.ts";
@@ -299,6 +300,10 @@ const installFetchPatch = (
     // reads. Same effect and same reason: it replaces a Host method, so it has
     // to live on this fiber to be undone on reload rather than stacked.
     const stopModelInfoDecoration = decorateModelInfo(ctx, config);
+    // And the adapters themselves, which is where dispatch reads a model from.
+    // The picker's answer and the dispatched call must come from one place, and
+    // this is the half that `resolveModelInfo` cannot reach.
+    const stopAdapterDecoration = decoratePlaneAdapters(ctx.llm, config);
     // Same reasoning for the listing patch: it replaces Host methods, so it must
     // be tied to this fiber. Called OUTSIDE an effect it would never be undone,
     // and every live reload would stack another wrapper. Installed before the
@@ -342,6 +347,7 @@ const installFetchPatch = (
       stopCatalogHiding?.();
       stopDiscoveryDecoration?.();
       stopModelInfoDecoration?.();
+      stopAdapterDecoration?.();
       if (globalThis.fetch === patched) {
         globalThis.fetch = originalFetch;
       }

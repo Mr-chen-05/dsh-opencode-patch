@@ -170,6 +170,7 @@ export {
 export {
   decorateModelDiscovery,
   decorateModelInfo,
+  decoratePlaneAdapters,
   hideResponsesRoute,
   isRouteRegistered,
   mergeDiscoveredModels,
