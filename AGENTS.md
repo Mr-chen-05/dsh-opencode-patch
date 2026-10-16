@@ -74,6 +74,7 @@ Web client bundle (`lib/client.js`): `src/settings-page.tsx` (entry, wiring only
 
 ```sh
 vp test run            # unit suite
+pnpm run test:mock     # gateway mock suite: offline, no key, runs in CI
 vp test run --coverage # with the coverage ratchet (95/90/93/95)
 vp check               # format, lint, types
 vp fmt --write         # rewrite formatting

@@ -40,6 +40,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run check
       - run: pnpm run test
+      # The zen/go compatibility matrix, offline: `test/mock/` boots a Vite
+      # server that answers the gateway's endpoints in their own wire formats
+      # and refuses a request whose shape its endpoint does not accept.
+      # Deterministic and secretless, so unlike the e2e job it gates every
+      # push and every PR.
+      - run: pnpm run test:mock
       - run: pnpm run build
       - run: node --experimental-strip-types scripts/check.ts
       # Coverage as its own step, not folded into `test`: the ratchet only means

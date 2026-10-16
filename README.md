@@ -473,7 +473,7 @@ The pool holds API keys. An account login is a different credential — a sessio
 | **Routes claimed** | `opencode`, `opencode-go`, `opencode-responses`, `opencode-anthropic` |
 | **Gateways** | `opencode.ai/zen/v1` (`/responses`, `/chat/completions`, `/messages`, `:streamGenerateContent`), `zen/go/v1` (`/chat/completions`) |
 | **Supported models** | `claude-sonnet-4-5`, `gpt-5.4`, `gemini-3.8-flash`, `deepseek-v4.1-flash`, `muse-spark-1.3-contributor-free`, `qwen3.8-flash` |
-| **Verification gate** | `vp check` clean, **266** deterministic tests green, full schema validation, consumer install + load ([`scripts/check.ts`](./scripts/check.ts)) |
+| **Verification gate** | `vp check` clean, **955** deterministic tests green (unit + offline gateway mock), full schema validation, consumer install + load ([`scripts/check.ts`](./scripts/check.ts)) |
 
 ---
 

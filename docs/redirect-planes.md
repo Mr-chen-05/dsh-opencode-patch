@@ -13,7 +13,7 @@ A **plane** is one gateway base URL with its own catalog and its own credential.
 | Zen (pay-as-you-go, free tier) | `opencode` | the `endpoint` family's | `OPENCODE_API_KEY` | 86 served / 124 listed |
 | Go (subscription) | `opencode-go` | the `endpoint` family's | `OPENCODE_GO_API_KEY` | 30 served / 37 listed |
 
-**There is no longer one base URL per plane to quote.** The gateway answers on two endpoint families and the `endpoint` setting picks one: `auto` follows the catalog, which today names `…/inference/v1` and `…/inference/go/v1`, and `legacy` pins the older `…/zen/v1` and `…/zen/go/v1`. Both are still served and they are entitled separately, which is why the choice is the user's rather than a migration. The dated measurement below was taken on the legacy family.
+**There is no longer one base URL per plane to quote.** The gateway answers on two endpoint families and the `endpoint` setting picks one: `auto` follows the catalog, which today names `…/inference/openai/v1` and `…/inference/go/openai/v1`, and `legacy` pins the older `…/zen/v1` and `…/zen/go/v1`. Both are still served and they are entitled separately, which is why the choice is the user's rather than a migration. The dated measurement below was taken on the legacy family.
 
 A plane is a property of the **account and the base URL**, never of a model. The same model id can exist on both planes and be served on a different shape in each.
 
@@ -73,6 +73,7 @@ These are the rules a correct implementation satisfies. Each one has a test in �
 | `catalog.test.ts` · plane × SDK coverage | I1 | the catalog contains a (plane, SDK) pair with no route |
 | `responses-routes.test.ts` · route table | I2, I3 | a route's plane or protocol is ambiguous, or the table names a base that is not its plane's |
 | `protocol-routing.e2e.ts` · live probe | I1, I3 | a protocol is declared routable without a path and an auth convention that were really sent, on either plane |
+| `test/mock/*.mock.ts` · offline gateway | §9's shape table | a plane × protocol × family sends a path, query or wire header its endpoint would refuse, or the mock answers a request the vendor would refuse |
 | coverage ratchet | — | a new route is added without a test that mounts it |
 
 ## 6. Refactor (done)
@@ -87,7 +88,8 @@ The gap was structural, not a missing branch: **the plane was not part of a rout
 
 ## 7. Verification
 
-- The four guards in §5. The plane × SDK case was written first and **failed against the code as it was** - `opencode-go + @ai-sdk/openai` and `+ @ai-sdk/anthropic` - then passed once the Go routes landed, which is what makes it a check rather than a restatement.
+- The §5 guards. The plane × SDK case was written first and **failed against the code as it was** - `opencode-go + @ai-sdk/openai` and `+ @ai-sdk/anthropic` - then passed once the Go routes landed, which is what makes it a check rather than a restatement.
+- `pnpm run test:mock` — the offline gateway mock (`test/mock/`): a Vite dev server that answers every endpoint in its own wire format and refuses a request whose shape its endpoint does not accept — an unknown path, a model sent to an endpoint that cannot speak its format, a missing session header, a placeholder credential. It drives the real path (pi's protocol implementation → `patchFetch` → the mock) across both planes, all four protocols and both endpoint families, so §9's table is exercised rather than quoted. No key and no network, so it gates every push.
 - `pnpm run test:e2e` with keys present. The probe now takes the plane, and one case sends a real request to the Go base with the Go credential, asserting only that the gateway PARSED the model - any answer but 404 or 500 - so the case does not bet on an entitlement.
 - The Zen plane compared before and after: route ids, mounted model ids and base URLs must be byte-identical.
 
@@ -133,7 +135,7 @@ Measured 2026-10-10 by building one with pi's own protocol implementations and i
 | `anthropic-messages` | `…/{family}/messages?beta=true` | `x-api-key` |
 | `google-generative-ai` | `…/{family}/models/<id>:streamGenerateContent?alt=sse` | `x-goog-api-key` |
 
-`{family}` is `zen` on the legacy endpoint and `inference` on the modern one; the paths are the same on both. **The base URL is per protocol, not per plane.** The Anthropic SDK appends its own `/v1/messages`, so its base is one level shorter than the others: the family root against `<family>/v1`. That is not derivable from the protocol name; it is a property of each SDK, and pi's own `opencode` provider records it per model.
+`{family}` stands for the family root from §1 — `…/zen/v1` on the legacy endpoint, `…/inference/openai/v1` on the modern one — and the paths are the same on both. **The base URL is per protocol, not per plane.** The Anthropic SDK appends its own `/v1/messages`, so its base is one level shorter than the others — the family root without its `/v1`. That is not derivable from the protocol name; it is a property of each SDK, and pi's own `opencode` provider records it per model.
 
 **The Google path is the one a hand-declared route cannot reach.** Its protocol name is not in the wrapper's three-entry table, so no route may name it; a self-built provider dispatches to it without any special case.
 
