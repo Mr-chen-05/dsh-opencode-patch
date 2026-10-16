@@ -373,7 +373,9 @@ if (/^\s*tags-ignore:\s*\[?\s*"?v\*\.\*\.\*"?/m.test(ci)) {
    way, with no checks until a human approved the run. The push therefore has
    to carry the PAT, which makes the actor the PAT's owner. */
 if (
-  ci.includes("x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git")
+  ci.includes(
+    `x-access-token:\${GH_TOKEN}@github.com/\${GITHUB_REPOSITORY}.git`
+  )
 ) {
   ok("the refresh push carries the PAT, so the refresh PR gets CI");
 } else {
