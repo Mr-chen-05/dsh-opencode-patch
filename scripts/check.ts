@@ -367,6 +367,23 @@ if (/^\s*tags-ignore:\s*\[?\s*"?v\*\.\*\.\*"?/m.test(ci)) {
   );
 }
 
+/* The nightly refresh must arrive with CI on it. A branch pushed with the
+   checkout credential is attributed to github-actions[bot], and GitHub parks
+   the pull_request run in action_required - the first refresh arrived that
+   way, with no checks until a human approved the run. The push therefore has
+   to carry the PAT, which makes the actor the PAT's owner. */
+if (
+  ci.includes("x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git")
+) {
+  ok("the refresh push carries the PAT, so the refresh PR gets CI");
+} else {
+  fail(
+    "the nightly refresh pushes through the checkout credential; the " +
+      "pull_request run then lands in action_required and the refresh gets " +
+      "no CI until someone approves the run by hand"
+  );
+}
+
 if (/^\s*id-token:\s*write/m.test(release)) {
   ok("release.yml grants id-token: write for OIDC trusted publishing");
 } else {
