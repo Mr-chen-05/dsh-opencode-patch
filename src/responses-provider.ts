@@ -37,6 +37,9 @@
  * @module dsh-opencode-patch/responses-provider
  */
 
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+
 import { DEFAULT_USAGE_KEY_ENV, type ResolvedPluginConfig } from "./config.ts";
 import {
   type CordisContext,
@@ -239,40 +242,157 @@ const loaderEntries = (ctx: unknown): unknown[] => {
 };
 
 /**
+ * The plugin behind a loader entry that never kept the import result.
+ *
+ * One loader generation stores the raw module on the entry (`moduleNamespace`);
+ * the other hands the import result straight to the registry and keeps only the
+ * fiber, so the two pieces needed to mount it again are read off that fiber:
+ * the registry's resolved callback on the fiber's runtime, and the
+ * registry-normalized `inject`. `Inject.resolve` maps an already-normalized
+ * `{ service: null }` onto itself, so the synthesized record mounts exactly as
+ * the module namespace would.
+ *
+ * The `inject` is required, not cosmetic: it is what lets the plugin's first
+ * `ctx.<service>` property access resolve at all, so an entry whose fiber
+ * carries none is reported as unusable rather than mounted into a crash.
+ *
+ * @param entry - the loader entry whose `options.name` matched the package.
+ * @returns the mountable record, or `undefined` when the fiber carries none.
+ */
+const pluginFromFiber = (
+  entry: Record<string, unknown>
+): Record<string, unknown> | undefined => {
+  const { fiber } = entry;
+  if (!isRecord(fiber)) {
+    return undefined;
+  }
+  const { runtime } = fiber;
+  if (!isRecord(runtime) || !isFunctionLike(runtime.callback)) {
+    return undefined;
+  }
+  if (!isRecord(fiber.inject)) {
+    return undefined;
+  }
+  return { apply: runtime.callback, inject: fiber.inject };
+};
+
+/**
+ * The loader entry the composition loaded the host plugin under.
+ *
+ * @param ctx - host context carrying the loader.
+ * @returns the entry, or `undefined` when no entry names the package.
+ */
+const piAiEntry = (ctx: unknown): Record<string, unknown> | undefined => {
+  const entry = loaderEntries(ctx).find(
+    (candidate) =>
+      isRecord(candidate) &&
+      isRecord(candidate.options) &&
+      candidate.options.name === PI_AI_PACKAGE
+  );
+  return isRecord(entry) ? entry : undefined;
+};
+
+/**
  * The host's already-loaded `llm-pi-ai`, asked of the loader rather than guessed
  * from the filesystem.
  *
- * The loader imported the plugin in the first place, so its entry carries the
- * raw import result. That is the only way to reach the plugin which does not
- * encode a package-manager layout — this repository deliberately does not depend
- * on `llm-pi-ai`, because doing so drags in roughly a thousand lockfile lines
- * and makes pnpm refuse the install over ignored build scripts.
+ * The loader imported the plugin in the first place, so its entry carries — or
+ * carried — the raw import result. That is the only way to reach the plugin
+ * which does not encode a package-manager layout — this repository deliberately
+ * does not depend on `llm-pi-ai`, because doing so drags in roughly a thousand
+ * lockfile lines and makes pnpm refuse the install over ignored build scripts.
  *
- * `unwrapExports` is the loader's own normalization, so a default-export or
- * CJS-interop shape needs no second guess here.
+ * Two loader generations answer differently and both are in the wild, so both
+ * shapes are read here: one keeps the raw module on the entry, and one keeps
+ * only the fiber ({@link pluginFromFiber} reconstructs that). `unwrapExports`
+ * is the loader's own normalization, so a default-export or CJS-interop shape
+ * needs no second guess.
  *
  * @param ctx - host context carrying the loader.
  * @returns the plugin, or `undefined` when no entry carries a usable one.
  */
 export const loadPiAi = (ctx: unknown): Record<string, unknown> | undefined => {
   const loader = loaderOf(ctx);
-  const entry = loaderEntries(ctx).find(
-    (candidate) =>
-      isRecord(candidate) &&
-      isRecord(candidate.options) &&
-      candidate.options.name === PI_AI_PACKAGE &&
-      candidate.moduleNamespace !== undefined
-  );
-  if (!isRecord(entry) || entry.moduleNamespace === undefined) {
+  const entry = piAiEntry(ctx);
+  if (entry === undefined) {
     return undefined;
   }
-  const unwrapped =
-    loader !== undefined && isFunctionLike(loader.unwrapExports)
-      ? Reflect.apply(loader.unwrapExports, loader, [entry.moduleNamespace])
-      : entry.moduleNamespace;
-  return isRecord(unwrapped) && isFunctionLike(unwrapped.apply)
-    ? unwrapped
-    : undefined;
+  if (entry.moduleNamespace !== undefined) {
+    const unwrapped =
+      loader !== undefined && isFunctionLike(loader.unwrapExports)
+        ? Reflect.apply(loader.unwrapExports, loader, [entry.moduleNamespace])
+        : entry.moduleNamespace;
+    return isRecord(unwrapped) && isFunctionLike(unwrapped.apply)
+      ? unwrapped
+      : undefined;
+  }
+  return pluginFromFiber(entry);
+};
+
+/**
+ * The raw module namespace, for the one thing a fiber cannot carry.
+ *
+ * The Google bridge constructs the wrapper's own `PiAiAdapter`, and the class
+ * lives on the module namespace — which one loader generation keeps on its
+ * entry and the other drops entirely ({@link pluginFromFiber} reads the rest
+ * off the fiber). The registry's runtime record does not keep it either: it
+ * holds `{ name, callback, fibers, Config }` and nothing else.
+ *
+ * The module is still reachable, because it is the SAME module: the loader
+ * resolved the entry's own name against the context's base URL, so resolving
+ * that name from the same base reaches the same file, and Node's module cache
+ * hands back the namespace the loader already executed. Nothing is imported
+ * twice and nothing is guessed from a package-manager layout.
+ *
+ * @param ctx - host context carrying the loader and its base URL.
+ * @returns the namespace, or `undefined` when no entry names the package or
+ *   the module cannot be resolved from the base URL.
+ */
+export const loadPiAiModule = async (
+  ctx: unknown
+): Promise<Record<string, unknown> | undefined> => {
+  if (piAiEntry(ctx) === undefined) {
+    return undefined;
+  }
+  const base = isRecord(ctx) ? ctx.baseUrl : undefined;
+  if (typeof base !== "string" || base.length === 0) {
+    return undefined;
+  }
+  try {
+    // The base URL is the directory the loader resolves bare specifiers
+    // against, so the sibling file only anchors `createRequire` to that
+    // directory; it is never read.
+    const resolve = createRequire(new URL("noop.js", base));
+    const namespace: unknown = await import(
+      pathToFileURL(resolve.resolve(PI_AI_PACKAGE)).href
+    );
+    return isRecord(namespace) ? namespace : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The host record the GOOGLE BRIDGE needs: one carrying `PiAiAdapter`.
+ *
+ * {@link loadPiAi} answers the MOUNT's question — a callback and an inject —
+ * and on the fiber-only loader generation that record carries no classes. The
+ * bridge builds its adapter from the module's own class, so when the entry
+ * kept no namespace the module is asked directly ({@link loadPiAiModule});
+ * when even that fails the mount's record is handed back, and the bridge
+ * stands down rather than inventing an adapter.
+ *
+ * @param ctx - host context carrying the loader.
+ * @returns the best available host record, or `undefined` when there is none.
+ */
+export const loadPiAiAdapterHost = async (
+  ctx: unknown
+): Promise<Record<string, unknown> | undefined> => {
+  const host = loadPiAi(ctx);
+  if (isRecord(host) && isFunctionLike(host.PiAiAdapter)) {
+    return host;
+  }
+  return (await loadPiAiModule(ctx)) ?? host;
 };
 
 /**
@@ -410,14 +530,38 @@ const planeSource = (plane: string, ctx: unknown) =>
     ? { apiKeyEnv: DEFAULT_USAGE_KEY_ENV, catalog: getLiveGoCatalog() }
     : { apiKeyEnv: inheritedCredentialRef(ctx), catalog: getLiveZenCatalog() };
 
+/**
+ * The route names the registry actually holds, read from its raw map.
+ *
+ * The map, not `listProviders()`: that method is Remote-decorated, and the
+ * decorated view under-reports — measured, the map held `opencode-responses`
+ * while `listProviders()` did not list it, which is what let a mount try to
+ * register it a second time. A host that stops exposing the map falls back to
+ * the decorated list, which is still better than assuming nothing is declared.
+ *
+ * @param llm - the `llm` service.
+ * @returns the route names, or `undefined` when no raw map is readable.
+ */
+const adapterRoutes = (llm: unknown): Set<string> | undefined => {
+  if (!isRecord(llm)) {
+    return undefined;
+  }
+  const raw: unknown = llm.adapters;
+  return raw instanceof Map ? new Set([...raw.keys()].map(String)) : undefined;
+};
+
 /** The routes the host already serves, so a declared one is never overridden. */
-const declaredRoutes = (llm: CordisContext["llm"]): Set<unknown> => {
+const declaredRoutes = (llm: CordisContext["llm"]): Set<string> => {
+  const fromMap = adapterRoutes(llm);
+  if (fromMap !== undefined) {
+    return fromMap;
+  }
   const listed = llm?.listProviders?.();
   return new Set(
     Array.isArray(listed)
-      ? listed
-          .filter((route) => isRecord(route))
-          .map((route) => (isRecord(route) ? route.id : undefined))
+      ? listed.flatMap((route) =>
+          isRecord(route) && typeof route.id === "string" ? [route.id] : []
+        )
       : []
   );
 };
@@ -438,12 +582,36 @@ const releaseRegistration = (handle: unknown): void => {
 };
 
 /**
+ * A handle-shaped no-op, for a forwarded registration reduced to nothing.
+ *
+ * The mounted wrapper stores whatever `registerAdapter` returns and may call
+ * `replace` on it later, so the shape has to match a real handle; withdrawal
+ * stays with the real handle's own disposer.
+ */
+const NOOP_HANDLE: (() => void) & { replace: () => void } = Object.assign(
+  () => {
+    // Nothing was registered, so there is nothing to withdraw.
+  },
+  {
+    replace: (): void => {
+      // Nothing was registered, so there is nothing to replace.
+    },
+  }
+);
+
+/**
  * A view of the real `llm` service for the mounted instance.
  *
  * `registerAdapter` is forwarded — bound to the real service, so the child fiber
  * owns what it registers — and every handle it returns is captured, which is
  * what lets {@link registerResponsesProvider}'s disposer withdraw the routes
  * deterministically rather than relying on the fiber's own unwind.
+ *
+ * The forward re-checks the routes against the raw adapter map first. The
+ * registry's registration is all-or-nothing — one already-registered route
+ * makes it throw before any of the others land — so a route something else
+ * serves is dropped here and the rest of the mount survives. That map is the
+ * same authority {@link declaredRoutes} reads, so the two views agree.
  *
  * The two publishing calls are answered locally, which is what keeps a second
  * instance from colliding with the host's own directory and discovery
@@ -465,8 +633,17 @@ const llmFacade = (real: unknown, captured: unknown[]): unknown => {
           return register;
         }
         return (routes: readonly string[], adapter: unknown) => {
+          // Registration is all-or-nothing: one route that is already taken
+          // would kill every route travelling with it. The taken ones are
+          // dropped up front; a list that empties that way is "nothing new",
+          // not a withdrawal.
+          const listed = adapterRoutes(source) ?? new Set<string>();
+          const owned = routes.filter((route) => !listed.has(route));
+          if (owned.length === 0) {
+            return NOOP_HANDLE;
+          }
           const handle: unknown = Reflect.apply(register, source, [
-            routes,
+            owned,
             adapter,
           ]);
           captured.push(handle);
@@ -665,11 +842,19 @@ export const registerResponsesProvider = async (
         // so a deployment cannot end up sending to two families at once.
         endpoint: config?.endpoint,
         ctx,
-        host: loadPiAi(ctx),
+        host: await loadPiAiAdapterHost(ctx),
         // The bridge reads the RAW catalog, not the config-shaped profile:
         // its pi models carry this catalog's cost, so pi's own usage
         // accounting lands the right numbers without our meter's help.
-        llm: { registerAdapter: llm.registerAdapter },
+        // `registerAdapter` is a prototype method of the real `llm` service —
+        // handing the detached function over loses the service, and the
+        // registration then reads `this.ctx` off the box it arrived in and dies
+        // on the first boot that reaches this line at all. Bound to `llm`, the
+        // call lands exactly where the documented `ctx.llm.registerAdapter(…)`
+        // idiom puts it: on the service the plugin's context resolved.
+        llm: {
+          registerAdapter: llm.registerAdapter.bind(llm),
+        },
         specs: planeSource("opencode", ctx).catalog.filter(
           (spec) => spec.provider_npm === GOOGLE_SDK
         ),

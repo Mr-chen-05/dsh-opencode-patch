@@ -42,6 +42,8 @@ import type { CordisContext } from "../src/index.ts";
 import { orgFor, clearOrgs, setOrg } from "../src/org-cache.ts";
 import { baseForProtocol } from "../src/pi-provider.ts";
 import {
+  loadPiAiAdapterHost,
+  loadPiAiModule,
   loginTokenReader,
   reasoningEffortsFor,
 } from "../src/responses-provider.ts";
@@ -466,6 +468,11 @@ const createHost = (options: { onPlugin?: (config: unknown) => void } = {}) => {
   };
 
   registerService("llm", {
+    // The real service keeps its routes in an own map, and that map is the
+    // authority this plugin reads — `listProviders()` is Remote-decorated and
+    // under-reports. Exposed so a case can assert on the difference, and so a
+    // case can stage a registration that arrives after the declared check.
+    adapters,
     listConfigurableProviders: () => [...directory.values()],
     listProviders: () => [...adapters.values()],
     registerAdapter,
@@ -605,6 +612,7 @@ const createHost = (options: { onPlugin?: (config: unknown) => void } = {}) => {
   }) as unknown as CordisContext;
 
   return {
+    adapters,
     ctx,
     mountHostInstance,
     mountIsolated,
@@ -654,6 +662,34 @@ describe("responses-provider: registration is best-effort", () => {
     } as unknown as CordisContext;
     await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
     expect(plugin).not.toHaveBeenCalled();
+  });
+
+  it("reads the raw route map, not the decorated provider list", async () => {
+    // Measured: `listProviders()` is Remote-decorated and omitted a route the
+    // registry held, so a mount tried to re-register it and died on
+    // DUPLICATE_ADAPTER. Here every internal route is in the raw map and NONE
+    // is in the decorated list — that discrepancy, inverted into an assertion:
+    // reading the decorated list would mount, reading the map stands down.
+    const info = vi.fn();
+    const plugin = vi.fn();
+    const internal = Object.values(ROUTE_FOR_PLANE_PROTOCOL).flatMap((plane) =>
+      Object.values(plane.routes)
+    );
+    const ctx = {
+      isolate: () => ({ plugin }),
+      llm: {
+        adapters: new Map(internal.map((route) => [route, { id: route }])),
+        listProviders: () => [],
+        registerAdapter: vi.fn(),
+      },
+      logger: { info },
+    } as unknown as CordisContext;
+    await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
+    expect(plugin).not.toHaveBeenCalled();
+    expect(ctx.llm?.registerAdapter).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith(
+      expect.stringContaining("every internal route is already declared")
+    );
   });
 
   it("stands down when the host offers no scope to mount into", async () => {
@@ -706,6 +742,43 @@ describe("responses-provider: finding the host's plugin", () => {
     expect(piAi).toBeDefined();
   });
 
+  it("reads the plugin off the fiber when the loader kept no module", () => {
+    // The other loader generation hands the import result to the registry and
+    // keeps only the fiber, so the two pieces a second mount needs are read off
+    // it: the resolved callback on its runtime, and the registry-normalized
+    // `inject` — without which the plugin's first service access fails.
+    const { ctx } = createHost();
+    const callback = () => {};
+    (ctx.loader as { entries: () => unknown[] }).entries = () => [
+      {
+        fiber: { inject: { llm: null }, runtime: { callback } },
+        options: { name: PI_AI },
+      },
+    ];
+    expect(loadPiAi(ctx)).toEqual({ apply: callback, inject: { llm: null } });
+  });
+
+  it("reports a fiber entry that carries nothing mountable as absent", () => {
+    const { ctx } = createHost();
+    const fromEntry = (entry: unknown) => {
+      (ctx.loader as { entries: () => unknown[] }).entries = () => [entry];
+      return loadPiAi(ctx);
+    };
+    const options = { name: PI_AI };
+    // Four separate missing pieces, each of which alone makes the mount
+    // impossible: the fiber itself, its runtime, the callback, and the inject.
+    expect(fromEntry({ options })).toBeUndefined();
+    expect(
+      fromEntry({ fiber: { inject: { llm: null } }, options })
+    ).toBeUndefined();
+    expect(
+      fromEntry({ fiber: { inject: { llm: null }, runtime: {} }, options })
+    ).toBeUndefined();
+    expect(
+      fromEntry({ fiber: { runtime: { callback: () => {} } }, options })
+    ).toBeUndefined();
+  });
+
   it("ignores an entry belonging to a different package", () => {
     const { ctx, piAi } = createHost();
     (ctx.loader as { entries: () => unknown[] }).entries = () => [
@@ -718,6 +791,91 @@ describe("responses-provider: finding the host's plugin", () => {
     expect(loadPiAi({})).toBeUndefined();
     expect(loadPiAi({ loader: { entries: 1 } })).toBeUndefined();
     expect(loadPiAi(null)).toBeUndefined();
+  });
+
+  it("resolves the module from the base URL when the entry kept no namespace", async () => {
+    // The fiber-only generation keeps no namespace, and the class the bridge
+    // needs lives on one — so the entry's own name is resolved from the base
+    // URL the loader resolves against, which reaches the same file.
+    const { ctx } = createHost();
+    (ctx.loader as { entries: () => unknown[] }).entries = () => [
+      {
+        fiber: { inject: { llm: null }, runtime: { callback: () => {} } },
+        options: { name: PI_AI },
+      },
+    ];
+    // This repository's own tree, so the specifier resolves to the installed
+    // package — the same file the loader would have imported.
+    (ctx as { baseUrl?: string }).baseUrl = new URL(
+      "../",
+      import.meta.url
+    ).href;
+    const namespace = await loadPiAiModule(ctx);
+    // The class the module hands back is the installed package's own — the
+    // very one this file imported statically, not a copy of it.
+    expect(namespace?.PiAiAdapter).toBe(PiAiAdapter);
+  });
+
+  it("stands down without an entry, a base URL, or a resolvable module", async () => {
+    const base = new URL("../", import.meta.url).href;
+    const fiberEntry = {
+      fiber: { inject: { llm: null }, runtime: { callback: () => {} } },
+      options: { name: PI_AI },
+    };
+    // No entry names the package: nothing to import, even from a good base.
+    const unnamed = createHost();
+    (unnamed.ctx.loader as { entries: () => unknown[] }).entries = () => [];
+    (unnamed.ctx as { baseUrl?: string }).baseUrl = base;
+    expect(await loadPiAiModule(unnamed.ctx)).toBeUndefined();
+    // An entry, but no base URL to resolve the loader's specifier against.
+    const unbased = createHost();
+    (unbased.ctx.loader as { entries: () => unknown[] }).entries = () => [
+      fiberEntry,
+    ];
+    expect(await loadPiAiModule(unbased.ctx)).toBeUndefined();
+    // A base URL the package cannot be resolved from.
+    const unresolved = createHost();
+    (unresolved.ctx.loader as { entries: () => unknown[] }).entries = () => [
+      fiberEntry,
+    ];
+    (unresolved.ctx as { baseUrl?: string }).baseUrl =
+      "file:///nonexistent-dsh-opencode/";
+    expect(await loadPiAiModule(unresolved.ctx)).toBeUndefined();
+  });
+
+  it("hands the bridge a host carrying the adapter class either way", async () => {
+    // The namespace-keeping shape: the class is already on the record.
+    const kept = createHost();
+    expect(await loadPiAiAdapterHost(kept.ctx)).toBe(kept.piAi);
+    // The fiber-only shape: the record carries no class, so the module is
+    // resolved instead and its class is what the bridge gets.
+    const fiber = createHost();
+    (fiber.ctx.loader as { entries: () => unknown[] }).entries = () => [
+      {
+        fiber: { inject: { llm: null }, runtime: { callback: () => {} } },
+        options: { name: PI_AI },
+      },
+    ];
+    (fiber.ctx as { baseUrl?: string }).baseUrl = new URL(
+      "../",
+      import.meta.url
+    ).href;
+    const resolved = await loadPiAiAdapterHost(fiber.ctx);
+    expect(resolved?.PiAiAdapter).toBe(PiAiAdapter);
+    // Neither reaches it: the mount's own record comes back, so the bridge
+    // stands down on the missing class rather than on a missing host.
+    const bare = createHost();
+    const callback = () => {};
+    (bare.ctx.loader as { entries: () => unknown[] }).entries = () => [
+      {
+        fiber: { inject: { llm: null }, runtime: { callback } },
+        options: { name: PI_AI },
+      },
+    ];
+    expect(await loadPiAiAdapterHost(bare.ctx)).toEqual({
+      apply: callback,
+      inject: { llm: null },
+    });
   });
 });
 
@@ -768,6 +926,45 @@ describe("responses-provider: the mount survives the host's own instance", () =>
         expect.arrayContaining([expect.objectContaining({ id: route })])
       );
     }
+  });
+
+  it("drops a route that arrives after the check, instead of dying on it", async () => {
+    // The declared check and the registration are two reads of the same map,
+    // and registration is all-or-nothing: a route that appears in between —
+    // another plugin, a reload — would kill the whole forward. The facade
+    // re-reads the map at the registration point, so the late route is left to
+    // its owner and every other route still lands.
+    const host = createHost({
+      onPlugin: () => {
+        host.adapters.set("opencode-responses", {
+          id: "opencode-responses",
+          name: "opencode-responses",
+        });
+      },
+    });
+    // Pre-declared so the Gemini bridge stays out of this case's way: the
+    // route's own registration, not the mount's, and unrelated here.
+    host.adapters.set(GOOGLE_INTERNAL_ROUTE, {
+      id: GOOGLE_INTERNAL_ROUTE,
+      name: GOOGLE_INTERNAL_ROUTE,
+    });
+
+    const stop = await registerResponsesProvider(host.ctx);
+
+    expect(typeof stop).toBe("function");
+    // The three others landed, in the mount's own order.
+    const others = Object.values(ROUTE_FOR_PLANE_PROTOCOL).flatMap((plane) =>
+      Object.values(plane.routes).filter(
+        (route) =>
+          !SELF_MOUNTED_ROUTES.has(route) && route !== "opencode-responses"
+      )
+    );
+    expect(host.observables.adapters).toEqual(others);
+    // And the late route was not re-registered behind its owner's back.
+    expect(host.adapters.get("opencode-responses")).toEqual({
+      id: "opencode-responses",
+      name: "opencode-responses",
+    });
   });
 
   it("isolates both the authorization and the settings seam", async () => {
