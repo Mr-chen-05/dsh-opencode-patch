@@ -1,6 +1,6 @@
-# OpenCode 1.19.0: the API that moved
+# OpenCode 1.19.2: the API that moved
 
-A specification of what this plugin talks to, what OpenCode 1.19.0 talks to instead, and what a migration would have to change. Written because the difference is not cosmetic: an API key that authenticates a paid model is refused for a free one, and the free tier is where this plugin's original reason for existing lives.
+A specification of what this plugin talks to, what OpenCode 1.19.2 talks to instead, and what a migration would have to change. Written because the difference is not cosmetic: an API key that authenticates a paid model is refused for a free one, and the free tier is where this plugin's original reason for existing lives.
 
 Everything below is measured. Where something is not, it says so.
 
@@ -20,7 +20,7 @@ The difference is in what a credential can reach — but **not the way this docu
 
 So a deployment's API key keeps working exactly as it does today. **Logging in does not make the free tier reachable** — that was this document's claim and it is false, measured with the account's session token and its org. What a login buys is a credential for paid models; the free tier is not granted to anything sent from here.
 
-## What OpenCode 1.19.0 resolves for itself
+## What OpenCode 1.19.2 resolves for itself
 
 `opencode debug config` prints the configuration the running client actually uses. For the `opencode` provider, on this machine, with an account signed in:
 
@@ -52,7 +52,7 @@ Pointing the real client at a local server (`OPENCODE_CONFIG_CONTENT` overriding
 ```
 POST /v1/chat/completions
 authorization:        Bearer st_3624847b-9048-4656-87ab-309f1516f6bb
-user-agent:           opencode/1.19.0 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14
+user-agent:           opencode/1.19.2 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14
 x-opencode-client:    cli
 x-opencode-org-id:    wrk_01KWJYKNFF34P8F0JZDBX1WTB8
 x-opencode-project:   global

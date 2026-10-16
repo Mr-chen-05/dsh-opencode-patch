@@ -32,7 +32,7 @@ export const inject = ["llm"];
  * notices when one drifts - a stale patch version still looks like a version.
  * `pnpm run cli:version` compares this against the published CLI.
  */
-export const OPENCODE_CLI_VERSION = "1.19.0";
+export const OPENCODE_CLI_VERSION = "1.19.2";
 
 /**
  * The User-Agent the stream hook sends: the CLI's own shape, verbatim.

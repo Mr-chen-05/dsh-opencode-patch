@@ -363,7 +363,7 @@ export const patchFetch = (
 
     // 1. Session headers, as the version this plugin emulates sends them.
     //
-    // Read from the 1.x line's last release, v1.19.0, in
+    // Read from the 1.x line's last release, v1.19.2, in
     // `packages/opencode/src/session/llm/request.ts`:
     //
     //   x-opencode-session-id -> sessionID     always
@@ -376,14 +376,14 @@ export const patchFetch = (
     // and the affinity pair belongs to relays. 2.x changed the first of those to
     // an affinity id and split the value; an earlier version of this block
     // followed 2.x, which put a subagent in its own cache group. The plugin
-    // emulates 1.19.0, so it follows 1.19.0.
+    // emulates 1.19.2, so it follows 1.19.2.
     // 1. Session headers, as the version this plugin emulates sends them.
     //
-    // Read from the 1.x line's last release, v1.19.0, in
+    // Read from the 1.x line's last release, v1.19.2, in
     // `packages/opencode/src/session/llm/request.ts`: `x-opencode-session-id`
     // and `x-opencode-session` both carry `sessionID`, and the affinity pair
     // belongs to relays. 2.x splits the first of those into an affinity id; the
-    // plugin emulates 1.19.0, so it follows 1.19.0.
+    // plugin emulates 1.19.2, so it follows 1.19.2.
     //
     // Which ENDPOINT the request goes to is the deployment's, not this block's:
     // measured, either key serves a paid model on either endpoint - they are two
@@ -397,7 +397,7 @@ export const patchFetch = (
     );
     headers.set("x-opencode-session-id", sessionVal);
     headers.set(SESSION_HEADER, sessionVal);
-    // The affinity pair belongs to the OTHER branch in 1.19.0: for a provider
+    // The affinity pair belongs to the OTHER branch in 1.19.2: for a provider
     // that does not start with `opencode` - a relay a deployment claimed by URL -
     // the client sends `x-session-affinity` and `X-Session-Id`; for an OpenCode
     // plane it sends `x-opencode-session` instead and nothing else. This plugin

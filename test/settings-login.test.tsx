@@ -53,15 +53,13 @@ describe("settings: the sign-in row", () => {
             }),
           cancel: (flowId: string) => {
             cancelled.push(flowId);
-            return Promise.resolve({ kind: "cancelled" });
+            return Promise.resolve();
           },
         })}
         t={t}
       />
     );
-    const button = view.container.querySelector(
-      'button[type="button"]'
-    ) as HTMLButtonElement;
+    const button = view.container.querySelector('button[type="button"]')!;
     fireEvent.click(button);
     await waitFor(() => {
       expect(view.container.textContent).toContain("ABCD-EFGH");
