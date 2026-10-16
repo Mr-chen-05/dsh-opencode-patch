@@ -371,7 +371,7 @@ Every combination below was sent to `https://opencode.ai/zen/v1` against a Zen `
 | :-- | :-- |
 | credential | bare API key (`oc_sk_…`, 51 chars) · account session token (`st_…`, 39 chars) · the token **with** its org (`wrk_…`) · **no credential at all** |
 | structure | bare body · with the `read` and `bash` tool schemas the fallback injects |
-| headers | `x-opencode-client: cli` · `user-agent: opencode/1.19.2` · a valid `x-opencode-session-id` (`ses_…`) |
+| headers | `x-opencode-client: cli` · `user-agent: opencode/1.19.3` · a valid `x-opencode-session-id` (`ses_…`) |
 | endpoint | `/chat/completions` · `/responses` |
 
 So the refusal is not about structure, data, headers, route or credential class. It is per-model, it is not in the request, and no patch reaches it.

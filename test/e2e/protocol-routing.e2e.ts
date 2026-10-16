@@ -242,7 +242,7 @@ const otherProtocols = (expected: string) =>
 /**
  * Whether the gateway is refusing the FREE TIER rather than the route.
  *
- * The free tier moved with OpenCode 1.19.0's new API, and it is gated on a
+ * The free tier moved with OpenCode 1.19.3's new API, and it is gated on a
  * credential this plugin does not hold. Measured, one request each, on
  * `space-bunny-free`: the deployment's `oc_…` key answers `403 FreeTierError` on
  * both `…/zen/v1` and the new `…/inference/openai/v1`, with and without

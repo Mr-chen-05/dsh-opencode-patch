@@ -28,11 +28,16 @@ export const inject = ["llm"];
  * The User-Agent is origin proof: the gateway reads it to decide whether the
  * caller is the official CLI, so it has to name a version the CLI actually has.
  * It is a single constant here, and every other place that needs it imports it,
- * because five hand-copied strings are five chances to disagree and nothing
+ * because seven hand-copied strings are seven chances to disagree and nothing
  * notices when one drifts - a stale patch version still looks like a version.
  * `pnpm run cli:version` compares this against the published CLI.
+ *
+ * The pin names the 1.x line - the generation this plugin emulates, and what
+ * the registry's `latest` tag publishes. The 2.x line ships as
+ * `0.0.0-<channel>-*` snapshots under the `dev`/`next`/`beta` tags; nothing
+ * here claims it, and a claim that did would need its own constant.
  */
-export const OPENCODE_CLI_VERSION = "1.19.2";
+export const OPENCODE_CLI_VERSION = "1.19.3";
 
 /**
  * The User-Agent the stream hook sends: the CLI's own shape, verbatim.
