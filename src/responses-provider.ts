@@ -64,7 +64,6 @@ import { baseForProtocol } from "./pi-provider.ts";
 import {
   GOOGLE_INTERNAL_ROUTE,
   GOOGLE_SDK,
-  PLANES,
   PROTOCOL_FOR_SDK,
   ROUTE_FOR_PLANE_PROTOCOL,
   SELF_MOUNTED_ROUTES,
@@ -102,43 +101,6 @@ interface ModelProfile {
   name: string;
   reasoningEfforts?: Record<string, string | null> | false;
 }
-
-/**
- * The profile that OVERRIDES a plane route's models without replacing the route.
- *
- * This is the seam the failing `UNSUPPORTED_REASONING_EFFORT` needed. A model the
- * user selects on their own `opencode` / `opencode-go` route is dispatched through
- * THAT route, and `prepareCall` reads the route's ADAPTER - never the public
- * `resolveModelInfo` this plugin patches. So decorating the report was correct for
- * the picker and useless for dispatch: the adapter still resolved the model from
- * pi's installed catalog, where `step-5-preview-free` is absent, reported no
- * reasoning at all, and the composer's saved `high` then failed validation with
- * "does not support reasoning effort".
- *
- * `modelOverrides` is the entry that describes a model a hand-declared route keeps
- * by id, which is exactly this case, and it reaches the same resolver that
- * produces `thinkingLevelMap` - so the dispatched call and the picker agree
- * because they now read one place.
- */
-const overridesForCatalog = (
-  catalog: readonly CatalogModelSpec[]
-): Record<string, ModelProfile> =>
-  Object.fromEntries(
-    catalog.map((spec) => {
-      const reasoningEfforts = reasoningEffortsFor(spec);
-      return [
-        spec.id,
-        {
-          contextWindow: spec.context_window,
-          id: spec.id,
-          input: [...spec.input_modalities],
-          maxTokens: spec.max_output_tokens,
-          name: spec.name,
-          ...(reasoningEfforts === undefined ? {} : { reasoningEfforts }),
-        },
-      ];
-    })
-  );
 
 const ALL_THINKING_LEVELS: ReadonlySet<string> = new Set([
   "minimal",
@@ -728,23 +690,6 @@ export const registerResponsesProvider = async (
   // hand-picks the models it serves, and mounting over that would take the choice
   // away. Deferring is the point — this module exists so a deployment that
   // declares NOTHING still works, not to override one that does.
-  // The plane's OWN route is augmented as well as the internal ones. A model
-  // with no `provider.npm` stays on the route the user configured, and its call
-  // is dispatched through that route's adapter - which resolves the model from
-  // pi's installed catalog, where most of these ids are simply absent. Without
-  // this, `step-5-preview-free` reports no reasoning at dispatch time and a saved
-  // effort fails validation with `UNSUPPORTED_REASONING_EFFORT`, which is what
-  // the picker's own row could not explain.
-  const planeOverrides = new Map<string, Record<string, ModelProfile>>();
-  for (const plane of Object.keys(ROUTE_FOR_PLANE_PROTOCOL)) {
-    if (!declared.has(plane)) {
-      continue;
-    }
-    planeOverrides.set(
-      plane,
-      overridesForCatalog(planeSource(plane, ctx).catalog)
-    );
-  }
   const wanted = Object.entries(ROUTE_FOR_PLANE_PROTOCOL).flatMap(
     ([plane, entry]) =>
       Object.entries(entry.routes)
@@ -806,26 +751,6 @@ export const registerResponsesProvider = async (
     );
     mounted.push(
       `${route} (${plane} · ${protocol}) with ${models.length} model(s)`
-    );
-  }
-  // The plane's own route, kept whole: `modelOverrides` DESCRIBES the models it
-  // already serves rather than replacing its list, so a deployment that
-  // hand-picked its models keeps them and gains the metadata pi's snapshot
-  // lacks. Only a plane the deployment actually declares is touched.
-  for (const [plane, overrides] of planeOverrides) {
-    const source = planeSource(plane, ctx);
-    providers[plane] = providerProfile(
-      "openai-completions",
-      [],
-      source.apiKeyEnv,
-      (PLANES as Record<string, string | undefined>)[plane] ?? ""
-    );
-    // An empty `models` with a full `modelOverrides` is the shape
-    // `resolveRouteModels` reads as "these ids, by name".
-    (providers[plane] as { modelOverrides?: unknown }).modelOverrides =
-      overrides;
-    mounted.push(
-      `${plane} (its own route) overridden for ${Object.keys(overrides).length} model(s)`
     );
   }
   if (mounted.length === 0) {

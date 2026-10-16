@@ -514,3 +514,17 @@ A deployment declares its own `opencode` / `opencode-go` routes and no `models` 
 So a plane route's adapter is a stale source, and decorating `resolveModelInfo` by filling only what it left BLANK let every stale value survive — which is what the surfaces then reported, and what read as "the thinking level and the context are still wrong". Our catalog is the fresher snapshot of the same data, so it is now authoritative for the fields it carries, and the efforts are derived by the same `thinkingLevelMapFor` the internal routes use.
 
 The dispatch path needed no second patch, which is worth knowing before reaching for one: every stale model names an SDK and is therefore redirected to an internal route carrying our fresh profile, and the models that stay on the plane route already agree with the catalog — verified by diffing all 82 Zen and 31 Go entries against pi's file.
+
+## The plane-route override was wrong, and `modelOverrides` is why
+
+An attempt to make a selected model's thinking level survive dispatch mounted a `modelOverrides` profile for the deployment's own `opencode` / `opencode-go` routes. It could not have worked, for three separate reasons read out of `llm-pi-ai`'s resolver rather than assumed:
+
+1. **`modelOverrides` requires `defaults.has(id)`.** The resolver rejects an id the installed catalog does not describe, and in strict validation that is a thrown `INVALID_CONFIG` — so every id absent from pi's catalog, which is most of ours, would have failed the route rather than augmented it.
+2. **`entries` comes from `defaults.values()`.** With no `models` list the served set is pi's catalog, so an override id is never in `entries` at all. The entry describes models that already exist; it does not add them.
+3. **The route already has an adapter.** `llm.registerAdapter` throws `DUPLICATE_ADAPTER` for a route the host's own instance owns, and the plane routes are exactly those the deployment declared.
+
+So the attempt was reverted whole. What survives is the decoration of the public `resolveModelInfo`, which is what the picker reads and is correct for it: it reports the catalog's context and efforts for a plane route, so the composer offers real levels.
+
+What does NOT work, stated plainly, is the other half. `prepareCall` reads the route's **adapter**, never the public method, and the plane route's adapter resolves its models from pi's installed catalog — where `step-5-preview-free` is absent, because pi ships no `step-5` entry on either plane. A model with no SDK also has no redirect, so it is dispatched on the route the user selected and the adapter answers `UNKNOWN_MODEL`.
+
+The fix is therefore not a mount: it is a route whose adapter the plugin itself owns and whose `models` list carries the catalog's `reasoningEfforts` — the same `models` list the internal routes already use, which works precisely because `configured.length > 0` takes the `entries` from it directly and tolerates ids the installed catalog has never heard of. That means giving the model an SDK so `internalRouteFor` can redirect it, or listing it in the deployment's profile, and neither is something to invent without a measurement of which endpoint the model is actually served on.
