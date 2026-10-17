@@ -14,6 +14,7 @@ import type { AsyncLocalStorage } from "node:async_hooks";
 
 import { DEFAULT_GATEWAY_URLS, type ResolvedPluginConfig } from "./config.ts";
 import { resolveOpencodeStoreKey } from "./go-discovery.ts";
+import { isRecord } from "./guards.ts";
 import {
   extractApiKeyFromHeaders,
   getCapturedApiKey,
@@ -251,6 +252,20 @@ const resolveSessionHeader = (
   }
   return fallbackSessionId(sessionIdEnv);
 };
+
+/**
+ * A gateway refusal, restated as a 400.
+ *
+ * 403 means "understood and refused" on this gateway, and DSH reads 403 as AUTH —
+ * so passing one through tells a user with a working key that their key is
+ * invalid. The `type` distinguishes the refusals; the message keeps the gateway's
+ * words so it stays searchable.
+ */
+const restrictedResponse = (message: string, type: string): Response =>
+  Response.json(
+    { error: { message, type } },
+    { status: 400, statusText: "Bad Request" }
+  );
 
 /**
  * Wrap `fetch` so claimed OpenCode requests carry the gateway's expected
@@ -598,39 +613,73 @@ export const patchFetch = (
       hooks.onCredentialFailure(gatewayPlaneFor(url), response.status);
     }
 
-    // A 403 the gateway means as an entitlement answer is remapped to 400, so
-    // DSH's error classifier does not read it as an invalid API key ("AUTH").
+    // **403 is never a credential answer on this gateway.** It answers 401 for a
+    // credential it will not accept (`Missing API key`, `Invalid API key`, `Go
+    // requires a credential`) and 403 for a request it understood and refused.
+    // DSH's error classifier maps 403 to AUTH, so every refusal used to reach the
+    // user as "API key is invalid" — with a key that was working.
     //
-    // The message states what was observed and nothing else. It used to say the
-    // free tier "can only be used from within OpenCode" and then recommend
-    // `space-bunny-free` in the same sentence - self-contradictory, and wrong:
-    // this plugin reaches the gateway through the host's adapter and does serve
-    // free models, so a refusal here is about this request, not about the tier.
-    // The gateway's own words are kept so the reader can search them.
-    if (response.status === 403) {
+    // Measured on the live gateway, all of these are 403 and none is about auth:
+    //
+    //   FreeTierError            "…can only be used from within OpenCode…"
+    //   server_error             "Upstream request failed: Model access is disabled"
+    //   WAF 1010 (plain text)    the request did not look like the OpenCode client
+    //
+    // All three are remapped to 400 so the classifier reads them as a request
+    // problem rather than a key problem, and each keeps the gateway's own words so
+    // the reader can search them. The `type` is what tells them apart.
+    // Scoped to INFERENCE requests. `/usage` answers 403 for "subscription
+    // required", and `GoUsageService` reads that status to say so — remapping it
+    // would leave the panel describing a permission problem as a bad request.
+    const isUsageRequest = (() => {
       try {
-        const cloned = response.clone();
-        const text = await cloned.text();
-        if (
-          text.includes("FreeTierError") ||
-          text.includes("from within OpenCode")
-        ) {
-          return Response.json(
-            {
-              error: {
-                message:
-                  "The gateway refused this model for the credential in use (403 FreeTierError). If it is a free-tier id the refusal is about this request rather than the key - the same credential answers 200 for a paid model on the same endpoint. Reported as 400 so DSH does not read it as an invalid API key.",
-                type: "free_tier_restricted",
-              },
-            },
-            {
-              status: 400,
-              statusText: "Bad Request",
-            }
+        return new URL(url).pathname.replace(/\/+$/u, "").endsWith("/usage");
+      } catch {
+        return false;
+      }
+    })();
+    if (response.status === 403 && !isUsageRequest) {
+      try {
+        const text = await response.clone().text();
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = undefined;
+        }
+
+        if (isRecord(parsed)) {
+          const inner = isRecord(parsed.error) ? parsed.error : parsed;
+          const type = typeof inner.type === "string" ? inner.type : "";
+          const message =
+            typeof inner.message === "string" ? inner.message : text;
+          if (
+            type.includes("FreeTier") ||
+            message.includes("FreeTierError") ||
+            message.includes("from within OpenCode")
+          ) {
+            return restrictedResponse(
+              "The gateway refused this model for the credential in use (403 FreeTierError). If it is a free-tier id the refusal is about this request rather than the key - the same credential answers 200 for a paid model on the same endpoint. Reported as 400 so DSH does not read it as an invalid API key.",
+              "free_tier_restricted"
+            );
+          }
+          // Everything else the gateway refuses with a JSON 403 is an
+          // entitlement answer: the key was accepted, the account does not have
+          // this model. `Model access is disabled` is the common one.
+          return restrictedResponse(
+            `The gateway refused this model for this account (403 ${type || "refusal"}: ${message}). The credential was accepted - this is about what the account may use, not about the key. Reported as 400 so DSH does not read it as an invalid API key.`,
+            "entitlement_restricted"
+          );
+        }
+
+        if (text.includes("1010")) {
+          return restrictedResponse(
+            "Cloudflare refused this request (403 error code 1010): it did not look like the OpenCode client. This plugin restores the client User-Agent, so this means that restoration did not apply to this request. Reported as 400 so DSH does not read it as an invalid API key.",
+            "client_identity_blocked"
           );
         }
       } catch {
-        // Fall back to original response on clone/text errors
+        // Fall back to the original response when the body cannot be read.
       }
     }
 

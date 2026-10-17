@@ -320,6 +320,59 @@ describe("the request shape per configuration", () => {
     expect(payload.error.type).toBe("free_tier_restricted");
   });
 
+  it("remaps a 403 Model-access refusal to a 400, so it is not read as a bad key", async () => {
+    // Measured on the live gateway: a Zen `gpt-5.4` request answers
+    //   403 {"error":{"type":"server_error","message":"Upstream request failed: Model access is disabled"}}
+    // The credential was accepted; the account simply has no access to that model.
+    // DSH classifies 403 as AUTH, so it reached the user as "API key is invalid"
+    // with a key that was working. Only FreeTierError was remapped before, so this
+    // refusal fell through.
+    forced = {
+      body: JSON.stringify({
+        error: {
+          message: "Upstream request failed: Model access is disabled",
+          type: "server_error",
+        },
+      }),
+      status: 403,
+    };
+    const response = await als.run(sessionTurn(), () =>
+      post(
+        patchedWith(resolveConfig()),
+        responsesUrl(),
+        responsesBody("gpt-5.4")
+      )
+    );
+    expect(response.status).toBe(400);
+    const payload = (await response.json()) as {
+      error: { message: string; type: string };
+    };
+    expect(payload.error.type).toBe("entitlement_restricted");
+    // The gateway's own words are kept so the reader can search them.
+    expect(payload.error.message).toContain("Model access is disabled");
+    // And it says which half was fine.
+    expect(payload.error.message).toContain("not about the key");
+  });
+
+  it("remaps a Cloudflare 1010 block to a 400 rather than an auth failure", async () => {
+    // The plain-text WAF answer, which is what a request missing the client
+    // User-Agent earns. Also read as AUTH when passed through.
+    forced = { body: "error code: 1010", status: 403 };
+    const response = await als.run(sessionTurn(), () =>
+      post(
+        patchedWith(resolveConfig()),
+        responsesUrl(),
+        responsesBody("gpt-5.4")
+      )
+    );
+    expect(response.status).toBe(400);
+    const payload = (await response.json()) as {
+      error: { message: string; type: string };
+    };
+    expect(payload.error.type).toBe("client_identity_blocked");
+    expect(payload.error.message).toContain("1010");
+  });
+
   it("passes a 401 through and reports the plane to the rotation hook", async () => {
     forced = {
       body: JSON.stringify({ error: { message: "Invalid API key" } }),
