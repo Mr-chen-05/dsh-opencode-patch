@@ -317,11 +317,23 @@ export const isServableModel = (
  *   and then pushes a row for **every remaining registered provider** — so
  *   filtering only the configurable directory would not hide it.
  *
- * `listModels` is deliberately NOT patched. Every consumer of it in the Host
- * iterates `listProviders()` first — `buildModelCatalog`, `modelAvailable` and
- * `acp`'s model control all do — so once the registry omits the route, nothing
- * reaches its model list. Filtering it as well would be a third patch guarding
- * nothing.
+ * **`listModels` IS patched, and the note that used to sit here saying it was
+ * not is why the picker lost most of the catalog.** The old text read:
+ *
+ *   "`listModels` is deliberately NOT patched. Every consumer of it in the Host
+ *    iterates `listProviders()` first … so once the registry omits the route,
+ *    nothing reaches its model list."
+ *
+ * The premise is true and the conclusion does not follow. Hiding the internal
+ * routes is exactly why their models must be JOINED into the parent route's list:
+ * `buildModelCatalog` is `listProviders()` × `listModels(id)`, each internal route
+ * carries only its own protocol's models, and hiding it therefore makes those
+ * models unreachable rather than merely unlisted. Measured: 27 models in the
+ * picker before the join, 88 after.
+ *
+ * The patch now does two things: it empties an internal route's own list (nothing
+ * reaches it, but a third patch guarding nothing is cheaper than a surprise), and
+ * it merges each plane root's list with its plane's catalog. Both are below.
  *
  * Nothing in dispatch reads these: the adapter registry resolves a route
  * internally, and the `llm/stream` hook uses {@link isResponsesRouteRegistered}
