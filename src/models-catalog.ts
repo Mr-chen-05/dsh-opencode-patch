@@ -397,24 +397,10 @@ export const refreshCatalog = (
 
   refreshPromise = (async () => {
     try {
-      let response: Response;
-      try {
-        response = await fetchFn(MODELS_OPENCODE_URL, {
-          headers: { accept: "application/json" },
-          signal: AbortSignal.timeout(MODELS_DEV_TIMEOUT_MS),
-        });
-        if (!response.ok) {
-          response = await fetchFn(MODELS_DEV_URL, {
-            headers: { accept: "application/json" },
-            signal: AbortSignal.timeout(MODELS_DEV_TIMEOUT_MS),
-          });
-        }
-      } catch {
-        response = await fetchFn(MODELS_DEV_URL, {
-          headers: { accept: "application/json" },
-          signal: AbortSignal.timeout(MODELS_DEV_TIMEOUT_MS),
-        });
-      }
+      const response = await fetchFn(MODELS_OPENCODE_URL, {
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(MODELS_DEV_TIMEOUT_MS),
+      });
       if (response.ok) {
         const json: unknown = await response.json();
         const parsed = parseModelsDevCatalog(json);

@@ -36,7 +36,7 @@ import {
   isRetiredModel,
   type CatalogModelSpec,
   MODELS_DEV_TIMEOUT_MS,
-  MODELS_DEV_URL,
+  MODELS_OPENCODE_URL,
   parseModelsDevCatalog,
 } from "../src/models-catalog.ts";
 
@@ -51,12 +51,12 @@ const readPayload = async (): Promise<string> => {
   if (fromPath !== undefined) {
     return readFileSync(fromPath, "utf8");
   }
-  const response = await fetch(MODELS_DEV_URL, {
+  const response = await fetch(MODELS_OPENCODE_URL, {
     signal: AbortSignal.timeout(MODELS_DEV_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(
-      `models.dev answered ${response.status} ${response.statusText}`
+      `models.opencode.ai answered ${response.status} ${response.statusText}`
     );
   }
   return response.text();
@@ -189,7 +189,7 @@ const report = (
 };
 
 console.log(
-  `source: ${fromPath ?? MODELS_DEV_URL} (${payload.length} bytes${fromPath === undefined ? "" : ", local"})`
+  `source: ${fromPath ?? MODELS_OPENCODE_URL} (${payload.length} bytes${fromPath === undefined ? "" : ", local"})`
 );
 report("opencode-go", OPENCODE_GO_CATALOG, go);
 report("opencode  ", OPENCODE_ZEN_CATALOG, zen);
