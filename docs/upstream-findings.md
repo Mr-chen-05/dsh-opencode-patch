@@ -279,6 +279,18 @@ A throw out of the entry is a meter that disappears with no message. The guard i
 
 That matters because the live catalog names the INFERENCE family for the `opencode` provider (`api: https://opencode.ai/inference/openai/v1`). `toGoBaseURL` rewrote only the `zen/v1` form, so a base discovered from a provider row passed through untouched and the meter asked `…/inference/openai/v1/usage` — a path that does not exist, which is an unavailable meter with no explanation. Both families now resolve to `https://opencode.ai/zen/go/v1`.
 
+Confirmed by probing each candidate unauthenticated on 2026-10-17:
+
+```
+https://opencode.ai/zen/go/v1/usage                 401  {"type":"error","error":{"type":"AuthError","message":"Unauthorized"}}
+https://opencode.ai/inference/openai/v1/usage       404
+https://opencode.ai/inference/go/openai/v1/usage    404
+```
+
+401 is "the route is there, bring a credential"; 404 is "no such route". The middle
+one is the URL the meter used to ask, so every quota read was a 404 — an unavailable
+meter with nothing on screen to explain it.
+
 ## 3.8 Probing the gateway: 401/403 means SERVED, 400 means GONE — MEASURED
 
 `POST /zen/v1/chat/completions` with one token and no credential answers distinctly
