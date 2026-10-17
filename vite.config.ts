@@ -165,6 +165,9 @@ export default defineConfig({
         new URL("test/primitives-stub.tsx", import.meta.url)
       ),
     },
+    env: {
+      NODE_PATH: "",
+    },
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
     /**
      * Coverage over `src/` only.
