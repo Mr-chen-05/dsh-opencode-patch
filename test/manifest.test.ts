@@ -11,7 +11,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { name as PLUGIN_NAME } from "../src/index.ts";
+import { DEFAULT_PROVIDERS, name as PLUGIN_NAME } from "../src/index.ts";
 import { isRecord } from "./test-helpers.ts";
 
 afterEach(() => {
@@ -54,6 +54,25 @@ describe("bundle manifest consistency", () => {
       throw new Error("NS constant not found in src/settings-page.tsx");
     }
     expect(ns[1]).toBe("dsh-opencode-patch");
+  });
+
+  it("claims every route the layer mounts, in the shipped row", async () => {
+    // The row's `providers` REPLACES the code default, so a route present in one
+    // and absent from the other gets no session header, no origin headers and no
+    // key injection — silently, and only on requests that reach it. This drifted
+    // twice: `opencode-google` was missing from the code default while the row
+    // claimed `opencode-mistral`, a route this layer does not mount at all
+    // (Mistral is deliberately unserved).
+    const patch = await readText("cordis.patch.yml");
+    const block = /providers:\s*\n((?:\s*-\s*\S+\n)+)/.exec(patch);
+    if (block?.[1] === undefined) {
+      throw new Error("providers list not found in cordis.patch.yml");
+    }
+    const shipped = [...block[1].matchAll(/-\s*(\S+)/g)]
+      .map((m) => m[1])
+      .filter((id): id is string => id !== undefined)
+      .toSorted();
+    expect(shipped).toEqual([...DEFAULT_PROVIDERS].toSorted());
   });
 
   it("keeps the component name aligned with the default row id", () => {

@@ -34,6 +34,7 @@ describe("config-values: shared defaults", () => {
       "opencode-go",
       "opencode-responses",
       "opencode-anthropic",
+      "opencode-google",
       "opencode-go-responses",
       "opencode-go-anthropic",
     ]);

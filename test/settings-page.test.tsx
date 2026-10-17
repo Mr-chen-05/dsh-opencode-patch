@@ -278,6 +278,7 @@ describe("settings-page: apply & slots", () => {
       "opencode-go",
       "opencode-responses",
       "opencode-anthropic",
+      "opencode-google",
       "opencode-go-responses",
       "opencode-go-anthropic",
     ]);
