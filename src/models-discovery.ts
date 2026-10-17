@@ -515,7 +515,7 @@ export const decorateModelDiscovery = (
 };
 
 /** Every pi thinking level, in escalation order, `off` first. */
-const PI_THINKING_LEVELS: readonly string[] = [
+export const PI_THINKING_LEVELS: readonly string[] = [
   "off",
   "minimal",
   "low",
@@ -591,16 +591,22 @@ export const resolveEffectiveContextWindow = (
 
 /**
  * Wrap the ADAPTERS behind the plane routes, so a model our catalog carries but
- * pi's installed catalog does not is still resolvable at dispatch.
+ * pi's installed catalog does not is resolvable at dispatch, and takes every
+ * thinking level the composer offers.
  *
- * This is the seam the `modelOverrides` attempt missed. `buildModelCatalog` reads
- * the public `ctx.llm.resolveModelInfo`, which this plugin decorates, so the
- * picker shows the right context and levels for every catalogued model. But
- * `prepareCall` reads `registration.adapter.prepareCall` - the adapter itself -
- * and the plane routes' adapter resolves its models from pi's installed catalog.
- * `step-5-preview-free` has no `provider.npm`, so it stays on the route the user
- * selected, and pi ships no `step-5` entry on either plane: the adapter reports no
- * reasoning at all, and a saved effort then fails validation.
+ * This is the seam the `modelOverrides` attempt missed, and the method that
+ * matters is `modelOf`. The picker reads the public `ctx.llm.resolveModelInfo`,
+ * which this plugin decorates, so the composer renders OUR catalog's context and
+ * levels for every catalogued model. Dispatch (`streamWithSnapshot`) resolves
+ * the model through the adapter's `modelOf` and validates the saved effort with
+ * `getSupportedThinkingLevels`; `modelInfo` - and so `resolveModel` and
+ * `prepareCall` - read the same method, which is why filling the picker's answer
+ * was never enough. For an id pi's installed catalog does not carry -
+ * `glm-5.3-flash-free` on Zen, `cat-jam-free` on both planes, both declared in
+ * the deployment's profile - with no `reasoningEfforts` of its own on the row,
+ * that model materializes as `reasoning: false` with no level map: the only
+ * level it takes is `off`, so every level the picker offered came back
+ * UNSUPPORTED_REASONING_EFFORT.
  *
  * A `modelOverrides` entry cannot fix this - it only DESCRIBES ids
  * `defaults.has(id)`, and `entries` comes from `defaults.values()`, so an id pi
@@ -608,14 +614,18 @@ export const resolveEffectiveContextWindow = (
  *
  * The registry keeps its adapters in a public `Map`, so the registration is
  * wrapped in place: nothing is re-registered, the user's profile is untouched, and
- * the route keeps the adapter it always had. Only MISSING answers are filled, so
- * an adapter that knows the model keeps its own result - which is what dispatch
- * honours.
+ * the route keeps the adapter it always had. `resolveModel` and `prepareCall` fill
+ * only what the adapter left BLANK, so an adapter that knows the model keeps its
+ * own answer. `modelOf` is the other shape - what comes out of it has to ACCEPT
+ * the levels the composer offers, or a saved effort cannot be dispatched - so it
+ * fills the levels the model REFUSES and leaves every level it already takes
+ * alone: nothing is removed, and a level that dispatches today dispatches the
+ * same way afterwards.
  *
  * Only the adapters behind the plane ROUTES are wrapped - a foreign adapter in
  * the same registry (another provider's) is not this plugin's to replace - and
- * the original runs with the adapter as its receiver, because `resolveModel` and
- * `prepareCall` are class methods that read `this`.
+ * the original runs with the adapter as its receiver, because all three are
+ * class methods that read `this`.
  *
  * @param llm - the Host's LLM service.
  * @param config - the resolved config, for the ids a deployment withholds.
@@ -762,6 +772,95 @@ export const decoratePlaneAdapters = (
       adapter[method] = wrapped;
       restored.push(() => {
         adapter[method] = original;
+      });
+    }
+
+    // The half dispatch validates against, and the reason a filled picker was
+    // still not enough. `streamWithSnapshot` resolves the model through
+    // `modelOf` and then reads the level map off it; `getSupportedThinkingLevels`
+    // refuses a level whose entry is `null` and refuses `xhigh`/`max` unless the
+    // entry exists at all - so a level is filled exactly when the model does not
+    // already take it, and a level the adapter (or the deployment's own row)
+    // declares keeps its wire spelling.
+    //
+    // The map is the one the composer already renders: `thinkingLevelMapFor` is
+    // the same derivation `decorateModelInfo` uses to build the picker's Effort
+    // row, so the two read one source rather than two that have to agree.
+    const originalModelOf = adapter.modelOf;
+    if (typeof originalModelOf === "function") {
+      const wrappedModelOf = (
+        snapshot: unknown,
+        provider: string,
+        model: string
+      ): unknown => {
+        const answered: unknown = Reflect.apply(originalModelOf, adapter, [
+          snapshot,
+          provider,
+          model,
+        ]);
+        if (config.hiddenModels.includes(model) || !isRecord(answered)) {
+          return answered;
+        }
+        const spec = findModelSpecOn(plane, model);
+        if (spec === undefined) {
+          return answered;
+        }
+        const override = config.modelOverrides[model];
+        const levels =
+          override?.reasoningEfforts === undefined
+            ? thinkingLevelMapFor(spec)
+            : Object.fromEntries(
+                override.reasoningEfforts.map((id) => [id, id] as const)
+              );
+        // No opinion: the catalog does not call the model a reasoning one, and
+        // the deployment named no level for it either.
+        if (levels === undefined || Object.keys(levels).length === 0) {
+          return answered;
+        }
+        const declared = isRecord(answered.thinkingLevelMap)
+          ? answered.thinkingLevelMap
+          : {};
+        // pi's acceptance rule, which is what `resolveReasoningLevel` throws
+        // against (`getSupportedThinkingLevels`): a model that reasons takes a
+        // level whose entry is not `null`, and `xhigh`/`max` need an entry to
+        // exist at all - an absent entry there is not a level, while for the
+        // base levels it means the level's own name on the wire.
+        const taken = (level: string): boolean => {
+          if (answered.reasoning !== true) {
+            return false;
+          }
+          const entry = declared[level];
+          if (entry === null) {
+            return false;
+          }
+          return level === "xhigh" || level === "max"
+            ? entry !== undefined
+            : true;
+        };
+        const merged: Record<string, unknown> = { ...declared };
+        let filled = false;
+        for (const [level, wire] of Object.entries(levels)) {
+          // A level the model already takes keeps the adapter's own answer: one
+          // that spells the level itself keeps that spelling, and one that leaves
+          // it out keeps the level's name on the wire. Only what it REFUSES is
+          // filled, so the levels that work today keep working byte for byte.
+          if (wire === null || taken(level)) {
+            continue;
+          }
+          merged[level] = wire;
+          filled = true;
+        }
+        // Nothing to add - and so nothing to say about `reasoning` either, since
+        // every level is only "taken" for a model that already reasons: hand back
+        // the adapter's own object rather than an equal copy of it.
+        if (!filled) {
+          return answered;
+        }
+        return { ...answered, reasoning: true, thinkingLevelMap: merged };
+      };
+      adapter.modelOf = wrappedModelOf;
+      restored.push(() => {
+        adapter.modelOf = originalModelOf;
       });
     }
   }

@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   decorateModelDiscovery,
   decorateModelInfo,
+  findModelSpecOn,
   hideResponsesRoute,
   getLiveZenCatalog,
   isRouteRegistered,
@@ -30,7 +31,9 @@ import {
 import {
   decoratePlaneAdapters,
   isServableModel,
+  PI_THINKING_LEVELS,
 } from "../src/models-discovery.ts";
+import { thinkingLevelMapFor } from "../src/pi-provider.ts";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -569,13 +572,20 @@ describe("models-discovery: the adapter behind a plane route", () => {
   /**
    * A Host LLM service whose registry holds one adapter per route, as the real
    * registry does - `adapters` is a public `Map` keyed by route id.
+   *
+   * The adapter carries the three methods the real one does. `modelAnswer` is
+   * what `modelOf` resolves, which is the object dispatch validates an effort
+   * against; it defaults to the same answer `resolveModel` gives.
    */
   const llmWithAdapters = (
-    answer: (provider: string, model: string) => unknown
+    answer: (provider: string, model: string) => unknown,
+    modelAnswer: (provider: string, model: string) => unknown = answer
   ): { adapters: Map<string, { adapter: Record<string, unknown> }> } => {
     const adapters = new Map<string, { adapter: Record<string, unknown> }>();
     for (const route of ["opencode", "opencode-go"]) {
       const adapter: Record<string, unknown> = {
+        modelOf: (_snapshot: unknown, provider: string, model: string) =>
+          modelAnswer(provider, model),
         resolveModel: async (provider: string, model: string) =>
           answer(provider, model),
       };
@@ -597,12 +607,71 @@ describe("models-discovery: the adapter behind a plane route", () => {
     return fn as (provider: string, model: string) => Promise<unknown>;
   };
 
+  /** The adapter one route holds, with `modelOf` typed for the call. */
+  const modelOfOn = (
+    llm: { adapters: Map<string, { adapter: Record<string, unknown> }> },
+    route: string
+  ): ((snapshot: unknown, provider: string, model: string) => unknown) => {
+    const adapter = llm.adapters.get(route)?.adapter;
+    const fn = adapter?.modelOf;
+    if (typeof fn !== "function") {
+      throw new TypeError(`no modelOf on ${route}`);
+    }
+    return fn as (
+      snapshot: unknown,
+      provider: string,
+      model: string
+    ) => unknown;
+  };
+
+  /** The object dispatch reads, as far as the level map is concerned. */
+  interface PiModel {
+    reasoning?: boolean;
+    thinkingLevelMap?: Record<string, string | null>;
+  }
+
+  /**
+   * The levels `decorateModelInfo` renders as this id's Effort row, from the same
+   * derivation it uses: our catalog's map for the model, minus the levels the map
+   * pins to `null`. This is the picker half of the promise dispatch has to keep.
+   */
+  const pickerLevels = (plane: "go" | "zen", id: string): string[] => {
+    const spec = findModelSpecOn(plane, id);
+    const map = spec === undefined ? undefined : thinkingLevelMapFor(spec);
+    if (map === undefined) {
+      return [];
+    }
+    return PI_THINKING_LEVELS.filter((level) => map[level] !== null);
+  };
+
+  /**
+   * pi's own acceptance rule, which is what `resolveReasoningLevel` throws
+   * against - `getSupportedThinkingLevels` in pi-ai, copied verbatim into
+   * `dsh-llm-pi-ai`: no map or `reasoning: false` means `off` alone, a `null`
+   * entry refuses that level, and `xhigh`/`max` have to have an entry at all.
+   */
+  const supportedLevels = (model: PiModel): string[] => {
+    if (model.reasoning !== true) {
+      return ["off"];
+    }
+    return PI_THINKING_LEVELS.filter((level) => {
+      const mapped = model.thinkingLevelMap?.[level];
+      if (mapped === null) {
+        return false;
+      }
+      if (level === "xhigh" || level === "max") {
+        return mapped !== undefined;
+      }
+      return true;
+    });
+  };
+
   it("fills what the adapter left blank, so dispatch sees the model's reasoning", async () => {
-    // The seam the modelOverrides attempt missed. `prepareCall` reads the
-    // ADAPTER, not the public resolveModelInfo, and the plane route's adapter
-    // resolves from pi's installed catalog - which carries no step-5 entry on
-    // either plane. So it answers nothing about the model, and a saved effort
-    // then fails validation with UNSUPPORTED_REASONING_EFFORT.
+    // The seam the modelOverrides attempt missed, and the half of it that reads
+    // this method (`modelOf` is the other - see the case below). The plane
+    // route's adapter resolves from pi's installed catalog, which carries no
+    // step-5 entry on either plane, so it answers nothing about the model and a
+    // saved effort then fails validation with UNSUPPORTED_REASONING_EFFORT.
     const llm = llmWithAdapters(() => ({}));
     const stop = decoratePlaneAdapters(
       llm as never,
@@ -713,14 +782,21 @@ describe("models-discovery: the adapter behind a plane route", () => {
   it("restores the adapter's own methods on dispose", () => {
     const llm = llmWithAdapters(() => ({}));
     const before = llm.adapters.get("opencode-go")?.adapter.resolveModel;
+    const beforeModelOf = llm.adapters.get("opencode-go")?.adapter.modelOf;
     const stop = decoratePlaneAdapters(
       llm as never,
       resolveConfig({ enrichModels: true })
     );
     const after = llm.adapters.get("opencode-go")?.adapter.resolveModel;
     expect(after).not.toBe(before);
+    expect(llm.adapters.get("opencode-go")?.adapter.modelOf).not.toBe(
+      beforeModelOf
+    );
     stop?.();
     expect(llm.adapters.get("opencode-go")?.adapter.resolveModel).toBe(before);
+    expect(llm.adapters.get("opencode-go")?.adapter.modelOf).toBe(
+      beforeModelOf
+    );
   });
 
   it("calls the original on the adapter, because it is a class method that reads `this`", async () => {
@@ -761,6 +837,7 @@ describe("models-discovery: the adapter behind a plane route", () => {
     // adapter in the same registry keeps its methods, and the stand-down says
     // so by restoring nothing.
     const foreign: Record<string, unknown> = {
+      modelOf: () => ({}),
       resolveModel: async () => ({}),
     };
     const llm = { adapters: new Map([["commandcode", { adapter: foreign }]]) };
@@ -771,6 +848,9 @@ describe("models-discovery: the adapter behind a plane route", () => {
 
     expect(llm.adapters.get("commandcode")?.adapter.resolveModel).toBe(
       foreign.resolveModel
+    );
+    expect(llm.adapters.get("commandcode")?.adapter.modelOf).toBe(
+      foreign.modelOf
     );
     expect(stop).toBeUndefined();
   });
@@ -790,6 +870,194 @@ describe("models-discovery: the adapter behind a plane route", () => {
     )) as { reasoning?: unknown };
     // The deployment's word beats the catalog's.
     expect(resolved.reasoning).toBeUndefined();
+    stop?.();
+  });
+
+  it("accepts at dispatch every level the picker offers, for a model pi does not carry", () => {
+    // The failure this exists for, in one case: `glm-5.3-flash-free` is on both
+    // planes and in neither of pi's installed catalogs, so the materialized model
+    // came back `reasoning: false` with no level map, the only level it took was
+    // `off`, and a saved `max` AND `high` were both refused with
+    // UNSUPPORTED_REASONING_EFFORT while the picker offered both.
+    const llm = llmWithAdapters(
+      () => ({}),
+      () => ({ id: "glm-5.3-flash-free", reasoning: false })
+    );
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({ enrichModels: true })
+    );
+
+    const model = modelOfOn(llm, "opencode")(
+      undefined,
+      "opencode",
+      "glm-5.3-flash-free"
+    ) as PiModel;
+
+    expect(model.reasoning).toBe(true);
+    // THE invariant, and the whole point of the wrap: every level the Effort row
+    // offers is a level this model answers.
+    const offered = pickerLevels("zen", "glm-5.3-flash-free");
+    expect(offered.length).toBeGreaterThan(0);
+    expect(supportedLevels(model)).toEqual(expect.arrayContaining(offered));
+
+    stop?.();
+  });
+
+  it("hands back the adapter's own object when it already takes every offered level", () => {
+    // The no-op branch: nothing is filled, so dispatch keeps the object the
+    // adapter made rather than an equal copy - `space-bunny-free` ships a
+    // complete map, so there is nothing to add.
+    const own = {
+      id: "space-bunny-free",
+      reasoning: true,
+      thinkingLevelMap: {
+        high: "high",
+        low: "low",
+        max: "max",
+        medium: "medium",
+        off: null,
+        xhigh: "xhigh",
+      },
+    };
+    const llm = llmWithAdapters(
+      () => ({}),
+      () => own
+    );
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({ enrichModels: true })
+    );
+
+    expect(
+      modelOfOn(llm, "opencode")(undefined, "opencode", "space-bunny-free")
+    ).toBe(own);
+
+    stop?.();
+  });
+
+  it("fills only what the model refuses, and keeps the spelling the model declared", () => {
+    // A model can answer with a map of its own - pi ships one, and a deployment's
+    // `reasoningEfforts` row materializes as one - and that map is the adapter's
+    // answer about its own protocol, so it is not to be rewritten. Three things
+    // it does differently from ours, all of them kept:
+    //
+    //   `off: "none"`      a level we do not offer at all (never removed)
+    //   `medium: "medium-plus"`  a level it spells its own way (kept, not respelled)
+    //   `low` absent       a base level it takes implicitly, with `low` on the wire
+    //
+    // And one thing it refuses that the picker still offers - `xhigh: null` for
+    // this id - which is exactly what gets filled, because otherwise the Effort
+    // row promises a level `resolveReasoningLevel` throws on.
+    const declared = {
+      id: "qwen3.8-flash",
+      reasoning: true,
+      thinkingLevelMap: { medium: "medium-plus", off: "none", xhigh: null },
+    };
+    const llm = llmWithAdapters(
+      () => ({}),
+      () => ({ ...declared })
+    );
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({ enrichModels: true })
+    );
+
+    const model = modelOfOn(llm, "opencode")(
+      undefined,
+      "opencode",
+      "qwen3.8-flash"
+    ) as PiModel;
+
+    expect(model.thinkingLevelMap?.off).toBe("none");
+    expect(model.thinkingLevelMap?.medium).toBe("medium-plus");
+    expect(model.thinkingLevelMap?.low).toBeUndefined();
+    expect(model.thinkingLevelMap?.xhigh).toBe("xhigh");
+    const offered = pickerLevels("zen", "qwen3.8-flash");
+    expect(offered).toEqual(expect.arrayContaining(["low", "medium", "xhigh"]));
+    expect(supportedLevels(model)).toEqual(expect.arrayContaining(offered));
+
+    stop?.();
+  });
+
+  it("accepts the levels a deployment's own modelOverrides names", () => {
+    // The picker renders an override's ids verbatim, so dispatch has to take
+    // them: one promise, not two.
+    const llm = llmWithAdapters(
+      () => ({}),
+      () => ({ id: "glm-5.3-flash-free", reasoning: false })
+    );
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({
+        enrichModels: true,
+        modelOverrides: {
+          "glm-5.3-flash-free": { reasoningEfforts: ["off", "medium"] },
+        },
+      })
+    );
+
+    const model = modelOfOn(llm, "opencode")(
+      undefined,
+      "opencode",
+      "glm-5.3-flash-free"
+    ) as PiModel;
+
+    expect(supportedLevels(model)).toEqual(
+      expect.arrayContaining(["off", "medium"])
+    );
+
+    stop?.();
+  });
+
+  it("leaves alone an id the plane's own catalog does not carry", () => {
+    // "No opinion" is per PLANE, because the two are different catalogs:
+    // `step-5-preview` is Go's, so on Zen there is nothing to fill, and neither
+    // is anything invented for an id no catalog knows at all.
+    const goOnly = { id: "step-5-preview" };
+    const foreign = { id: "not-a-catalogued-id" };
+    const llm = llmWithAdapters(
+      () => ({}),
+      (_provider, model) => (model === goOnly.id ? goOnly : foreign)
+    );
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({ enrichModels: true })
+    );
+
+    // On its own plane it is catalogued and filled; on Zen it is left exactly as
+    // the adapter answered.
+    expect(
+      modelOfOn(llm, "opencode-go")(undefined, "opencode-go", goOnly.id)
+    ).not.toBe(goOnly);
+    expect(modelOfOn(llm, "opencode")(undefined, "opencode", goOnly.id)).toBe(
+      goOnly
+    );
+    expect(modelOfOn(llm, "opencode")(undefined, "opencode", foreign.id)).toBe(
+      foreign
+    );
+
+    stop?.();
+  });
+
+  it("withholds an id a deployment names from modelOf too", () => {
+    const blank = { id: "glm-5.3-flash-free", reasoning: false };
+    const llm = llmWithAdapters(
+      () => ({}),
+      () => blank
+    );
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({
+        enrichModels: true,
+        hiddenModels: ["glm-5.3-flash-free"],
+      })
+    );
+
+    expect(
+      modelOfOn(llm, "opencode")(undefined, "opencode", "glm-5.3-flash-free")
+    ).toBe(blank);
+
     stop?.();
   });
 
