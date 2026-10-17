@@ -829,16 +829,23 @@ export const decorateModelInfo = (
       }
       resolved = {};
     }
-    // Our own routes carry the real metadata already, and an answer that is not
-    // a record has nothing to fill in.
-    if (isInternalRoute(provider) || !isRecord(resolved)) {
+    // Our own routes carry the real metadata already.
+    if (isInternalRoute(provider)) {
       return resolved;
     }
     const spec = findModelSpecOn(catalogPlaneForRoute(provider), model);
     if (spec === undefined) {
       return resolved;
     }
-    const out: Record<string, unknown> = { ...resolved };
+    // A NON-RECORD answer is the same hazard as a throw, one step quieter: the
+    // Host reads `resolved.reasoning` immediately after this returns, so
+    // `undefined` becomes `TypeError: Cannot read properties of undefined` inside
+    // the group's `Promise.all` — and the whole provider group goes with it. When
+    // the catalog knows the model, the answer is built from the catalog instead of
+    // passed through.
+    const out: Record<string, unknown> = isRecord(resolved)
+      ? { ...resolved }
+      : {};
     // Our catalog is the FRESHER VINTAGE of the same data, and the divergence is
     // measured rather than assumed. pi ships an installed `opencode` catalog the
     // plane routes fall back to, and it is a different snapshot of models.dev:
@@ -851,7 +858,7 @@ export const decorateModelInfo = (
     // values survive, which is what the surfaces then reported — so the fields
     // our catalog carries are authoritative here rather than advisory.
     const override = config.modelOverrides[model];
-    const existingContext = isRecord(resolved.context) ? resolved.context : {};
+    const existingContext = isRecord(out.context) ? out.context : {};
     const requestedWindow = override?.contextWindow;
 
     if (typeof spec.context_window === "number" && spec.context_window > 0) {

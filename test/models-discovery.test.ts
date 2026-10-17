@@ -853,6 +853,41 @@ describe("models-discovery: the Effort row a model reports", () => {
     stop?.();
   });
 
+  it("turns a NON-RECORD answer into a catalog record, so the group survives", async () => {
+    // The quieter half of the same hazard. The Host reads `resolved.reasoning`
+    // immediately after `resolveModelInfo` returns, so an `undefined` answer is a
+    // TypeError inside the group's `Promise.all` — and the whole provider group
+    // goes with it, exactly as a throw would.
+    const ctx = {
+      llm: {
+        // Answers nothing at all for every id, which is what a permissive
+        // adapter does for a model its installed catalog does not carry.
+        resolveModelInfo: async () => {
+          /* answers nothing at all */
+        },
+      },
+    } as never as CordisContext;
+    const stop = decorateModelInfo(ctx, enrichConfig);
+
+    const resolved = (await patched(ctx)("opencode", "gpt-5.4")) as {
+      context?: { contextWindow?: number };
+      defaultMaxTokens?: number;
+      reasoning?: { efforts: unknown[] };
+    };
+    expect(resolved).toBeTypeOf("object");
+    expect(resolved.context?.contextWindow).toBeGreaterThan(0);
+    expect(resolved.defaultMaxTokens).toBeGreaterThan(0);
+    expect(resolved.reasoning?.efforts.length).toBeGreaterThan(0);
+
+    // An id the catalog cannot describe still passes through unchanged: there is
+    // nothing honest to build, and the Host's own handling is the better error.
+    await expect(
+      patched(ctx)("opencode", "not-a-real-model")
+    ).resolves.toBeUndefined();
+
+    stop?.();
+  });
+
   it("fills the reasoning a plane route's adapter does not report", async () => {
     const ctx = llmWith(() => ({
       id: "minimax-m3",
