@@ -4,13 +4,13 @@ How this plugin makes OpenCode's models speak the protocol each of them is actua
 
 ## 1. Why routing exists
 
-OpenCode serves its models on **four different API shapes**, and which one a model lives on is a property of the model, not of the account. The per-plane counts, and the tables that go with them, live in [`redirect-planes.md`](./redirect-planes.md) §2; what follows is why the plugin has to care. Measured 2026-10-05:
+OpenCode serves its models on **four different API shapes**, and which one a model lives on is a property of the model, not of the account. The per-plane counts, and the tables that go with them, live in [`redirect-planes.md`](./redirect-planes.md) §2; what follows is why the plugin has to care. Measured 2026-10-17:
 
 | API shape | Wire endpoint | Which models | Signal in the catalog |
 | :-- | :-- | :-- | :-- |
 | OpenAI **Chat Completions** | `POST /zen/v1/chat/completions` | **the default**: 29 of 86 | the model names **no** SDK |
-| OpenAI **Responses** | `POST /zen/v1/responses` | 30 of 86 | `@ai-sdk/openai` |
-| Anthropic **Messages** | `POST /zen/v1/messages` | 18 of 86 | `@ai-sdk/anthropic` |
+| OpenAI **Responses** | `POST /zen/v1/responses` | 31 of 86 | `@ai-sdk/openai` |
+| Anthropic **Messages** | `POST /zen/v1/messages` | 17 of 86 | `@ai-sdk/anthropic` |
 | Google **Generative AI** | `POST /zen/v1/models/<id>:streamGenerateContent` | 8 of 86 | `@ai-sdk/google` |
 | Mistral **Conversations** | `POST /zen/v1/chat/completions` | 1 of 86 | `@ai-sdk/mistral` |
 

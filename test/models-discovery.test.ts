@@ -520,14 +520,14 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
 
   it("offers Zen's free tier models normally", () => {
     expect(isServableModel("space-bunny-free", "opencode")).toBe(true);
-    expect(isServableModel("step-5-preview-free", "opencode")).toBe(true);
-    expect(isServableModel("muse-spark-1.3-contributor-free", "opencode")).toBe(
+    expect(isServableModel("space-bunny-free", "opencode")).toBe(true);
+    expect(isServableModel("muse-spark-1.2-contributor-free", "opencode")).toBe(
       true
     );
   });
 
   it("still offers the Go plane's free models, because Go has no free tier", () => {
-    expect(isServableModel("step-5-preview-free", "opencode-go")).toBe(true);
+    expect(isServableModel("space-bunny-free", "opencode-go")).toBe(true);
     expect(isServableModel("beam-free", "opencode-go")).toBe(true);
     // And a paid Zen model is untouched by the free-tier rule.
     expect(isServableModel("deepseek-v4.1-flash", "opencode")).toBe(true);
@@ -588,7 +588,7 @@ describe("models-discovery: the adapter behind a plane route", () => {
     // does not carry.
     const resolved = (await resolveOn(llm, "opencode-go")(
       "opencode-go",
-      "step-5-preview-free"
+      "cat-jam-free"
     )) as {
       id?: string;
       name?: string;
@@ -598,16 +598,19 @@ describe("models-discovery: the adapter behind a plane route", () => {
     };
 
     // Everything dispatch validates against, filled from our catalog.
-    expect(resolved.id).toBe("step-5-preview-free");
+    expect(resolved.id).toBe("cat-jam-free");
     expect(resolved.name).toBeTruthy();
     expect(resolved.context?.contextWindow).toBeGreaterThan(0);
     expect(resolved.defaultMaxTokens).toBeGreaterThan(0);
     // And the levels the composer offers - so a saved `high` resolves rather
-    // than being rejected.
+    // than being rejected. `cat-jam-free` declares five efforts, and the point is
+    // that they come from OUR catalog rather than from the empty adapter answer.
     expect(resolved.reasoning?.efforts.map((e) => e.id)).toEqual([
       "low",
       "medium",
       "high",
+      "xhigh",
+      "max",
     ]);
 
     stop?.();
@@ -619,7 +622,7 @@ describe("models-discovery: the adapter behind a plane route", () => {
     const own = {
       context: { contextWindow: 999 },
       defaultMaxTokens: 12345,
-      id: "step-5-preview-free",
+      id: "space-bunny-free",
       inputModalities: ["text"],
       name: "Its Own Name",
       provider: "opencode",
@@ -632,7 +635,7 @@ describe("models-discovery: the adapter behind a plane route", () => {
     );
     const resolved = await resolveOn(llm, "opencode")(
       "opencode",
-      "step-5-preview-free"
+      "space-bunny-free"
     );
     expect(resolved).toEqual(own);
     stop?.();
@@ -717,7 +720,7 @@ describe("models-discovery: the adapter behind a plane route", () => {
 
     const resolved = (await resolveOn(llm as never, "opencode-go")(
       "opencode-go",
-      "step-5-preview-free"
+      "cat-jam-free"
     )) as { context?: { contextWindow?: number } };
 
     // It ran ON the instance - the counter lives on `this` - and the wrapper
@@ -753,12 +756,12 @@ describe("models-discovery: the adapter behind a plane route", () => {
       llm as never,
       resolveConfig({
         enrichModels: true,
-        hiddenModels: ["step-5-preview-free"],
+        hiddenModels: ["space-bunny-free"],
       })
     );
     const resolved = (await resolveOn(llm, "opencode-go")(
       "opencode-go",
-      "step-5-preview-free"
+      "space-bunny-free"
     )) as { reasoning?: unknown };
     // The deployment's word beats the catalog's.
     expect(resolved.reasoning).toBeUndefined();

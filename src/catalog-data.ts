@@ -297,6 +297,23 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
   {
     context_window: 1_048_576,
     cost: {
+      cache_read: 0,
+      input: 0,
+      output: 0,
+    },
+    id: "cat-jam-free",
+    input_modalities: ["text"],
+    is_free: true,
+    max_output_tokens: 131_072,
+    name: "Cat Jam Free",
+    reasoning: true,
+    reasoning_options: [
+      { type: "effort", values: ["low", "medium", "high", "xhigh", "max"] },
+    ],
+  },
+  {
+    context_window: 1_048_576,
+    cost: {
       cache_read: 0.03,
       cache_write: 0,
       input: 0.15,
@@ -543,21 +560,6 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
   {
     context_window: 1_000_000,
     cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
-    },
-    id: "step-5-preview-free",
-    input_modalities: ["text", "image"],
-    is_free: true,
-    max_output_tokens: 65_536,
-    name: "Step 5 Preview Free",
-    reasoning: true,
-    reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
-  },
-  {
-    context_window: 1_000_000,
-    cost: {
       cache_read: 0.26,
       input: 1.4,
       output: 4.4,
@@ -650,6 +652,24 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     reasoning: true,
     reasoning_options: [
       { type: "effort", values: ["medium", "high", "xhigh"] },
+    ],
+  },
+  {
+    context_window: 1_048_576,
+    cost: {
+      cache_read: 0,
+      input: 0,
+      output: 0,
+    },
+    id: "muse-spark-1.2-contributor-free",
+    input_modalities: ["text", "image"],
+    is_free: true,
+    max_output_tokens: 131_072,
+    name: "Muse Spark 1.2 Free",
+    provider_npm: "@ai-sdk/openai",
+    reasoning: true,
+    reasoning_options: [
+      { type: "effort", values: ["minimal", "low", "medium", "high", "xhigh"] },
     ],
   },
   {
@@ -934,6 +954,20 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     reasoning: true,
   },
   {
+    context_window: 1_048_576,
+    cost: {
+      input: 0,
+      output: 0,
+    },
+    id: "exo-free",
+    input_modalities: ["text", "image"],
+    is_free: true,
+    max_output_tokens: 131_072,
+    name: "Exo Free",
+    reasoning: true,
+    reasoning_options: [{ type: "effort", values: ["high"] }],
+  },
+  {
     context_window: 400_000,
     cost: {
       cache_read: 0.005,
@@ -1048,6 +1082,23 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     reasoning: true,
     reasoning_options: [
       { type: "effort", values: ["minimal", "low", "medium", "high"] },
+    ],
+  },
+  {
+    context_window: 1_048_576,
+    cost: {
+      cache_read: 0,
+      input: 0,
+      output: 0,
+    },
+    id: "cat-jam-free",
+    input_modalities: ["text"],
+    is_free: true,
+    max_output_tokens: 131_072,
+    name: "Cat Jam Free",
+    reasoning: true,
+    reasoning_options: [
+      { type: "effort", values: ["low", "medium", "high", "xhigh", "max"] },
     ],
   },
   {
@@ -1250,23 +1301,6 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     ],
   },
   {
-    context_window: 262_144,
-    cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
-    },
-    id: "ll-alpha-free",
-    input_modalities: ["text"],
-    is_free: true,
-    max_output_tokens: 65_536,
-    name: "LL Alpha Free",
-    reasoning: true,
-    reasoning_options: [
-      { type: "effort", values: ["low", "medium", "high", "xhigh", "max"] },
-    ],
-  },
-  {
     context_window: 1_000_000,
     cost: {
       cache_read: 1,
@@ -1313,20 +1347,21 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     reasoning: true,
   },
   {
-    context_window: 1_000_000,
+    context_window: 1_048_576,
     cost: {
-      cache_read: 0.3,
-      cache_write: 3.75,
-      input: 3,
-      output: 15,
+      cache_read: 0.15,
+      input: 1.25,
+      output: 4.25,
     },
-    id: "claude-sonnet-4",
+    id: "muse-spark-1.2",
     input_modalities: ["text", "image"],
-    max_output_tokens: 64_000,
-    name: "Claude Sonnet 4",
-    provider_npm: "@ai-sdk/anthropic",
+    max_output_tokens: 131_072,
+    name: "Muse Spark 1.2",
+    provider_npm: "@ai-sdk/openai",
     reasoning: true,
-    reasoning_options: [{ min: 1024, type: "budget_tokens" }],
+    reasoning_options: [
+      { type: "effort", values: ["minimal", "low", "medium", "high", "xhigh"] },
+    ],
   },
   {
     context_window: 400_000,
@@ -1822,21 +1857,6 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
   {
     context_window: 1_000_000,
     cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
-    },
-    id: "step-5-preview-free",
-    input_modalities: ["text", "image"],
-    is_free: true,
-    max_output_tokens: 65_536,
-    name: "Step 5 Preview Free",
-    reasoning: true,
-    reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
-  },
-  {
-    context_window: 1_000_000,
-    cost: {
       cache_read: 0.26,
       input: 1.4,
       output: 4.4,
@@ -1963,24 +1983,6 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     provider_npm: "@ai-sdk/google",
     reasoning: true,
     reasoning_options: [{ type: "effort", values: ["low", "medium", "high"] }],
-  },
-  {
-    context_window: 1_048_576,
-    cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
-    },
-    id: "muse-spark-1.3-contributor-free",
-    input_modalities: ["text", "image"],
-    is_free: true,
-    max_output_tokens: 131_072,
-    name: "Muse Spark 1.3 Free",
-    provider_npm: "@ai-sdk/openai",
-    reasoning: true,
-    reasoning_options: [
-      { type: "effort", values: ["minimal", "low", "medium", "high", "xhigh"] },
-    ],
   },
   {
     context_window: 1_000_000,

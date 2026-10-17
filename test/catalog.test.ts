@@ -48,12 +48,14 @@ afterEach(() => {
 describe("OpenCode Model Catalog & Enrichment", () => {
   it("keeps a retained id fully described, not merely present", () => {
     // A retained row is offered to a user, so it has to carry what a picker
-    // renders. `step-5-preview-free` survives on the registry's deprecated flag,
-    // and its metadata survives with it - context, output cap, modalities and
-    // the thinking levels - because an id kept without its fields is a row that
-    // cannot be priced or reasoned about.
+    // renders. `cat-jam-free` is one of the three ids measured as still answering
+    // despite the registry's deprecated flag, so it is retained — and its
+    // metadata survives with it: context, output cap, modalities and the thinking
+    // levels, because an id kept without its fields is a row that cannot be
+    // priced or reasoned about. It is also present on BOTH planes, which is why
+    // it is the fixture here.
     for (const catalog of [OPENCODE_ZEN_CATALOG, OPENCODE_GO_CATALOG]) {
-      const spec = catalog.find((m) => m.id === "step-5-preview-free");
+      const spec = catalog.find((m) => m.id === "cat-jam-free");
       expect(spec).toBeDefined();
       expect(spec?.context_window).toBeGreaterThan(0);
       expect(spec?.max_output_tokens).toBeGreaterThan(0);
@@ -66,13 +68,13 @@ describe("OpenCode Model Catalog & Enrichment", () => {
 
   it("retains a deprecated id the gateway still serves, on both planes", () => {
     // The registry's deprecated flag is a statement about the vendor's
-    // catalogue, not the gateway, and the two disagree in measured cases:
-    // step-5-preview-free carried the flag on both planes while still answering,
-    // which is how the session this was written in was running on it. Dropping
-    // it on the flag alone removes a working model - the same failure as
-    // offering a broken one, and indistinguishable from here.
+    // catalogue, not the gateway, and the two disagree in measured cases.
+    // `cat-jam-free` is deprecated on BOTH planes and answers `403 FreeTierError`
+    // on both, so retaining it is what keeps a working model. Dropping it on the
+    // flag alone removes a working model - the same failure as offering a broken
+    // one, and indistinguishable from here.
     for (const catalog of [OPENCODE_ZEN_CATALOG, OPENCODE_GO_CATALOG]) {
-      expect(catalog.some((m) => m.id === "step-5-preview-free")).toBe(true);
+      expect(catalog.some((m) => m.id === "cat-jam-free")).toBe(true);
     }
     // And a genuinely retired id stays out of the RUNTIME catalog. It is still in
     // the bundled shim DATA — retirement is a runtime filter, not a property of
@@ -213,7 +215,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(freeModels.length).toBe(13);
 
     const ids = new Set(OPENCODE_ZEN_CATALOG.map((m) => m.id));
-    expect(ids.has("muse-spark-1.3-contributor-free")).toBe(true);
+    expect(ids.has("muse-spark-1.2-contributor-free")).toBe(true);
     expect(ids.has("space-bunny-free")).toBe(true);
     expect(ids.has("beam-free")).toBe(true);
     expect(ids.has("claude-sonnet-4-5")).toBe(true);
@@ -247,8 +249,8 @@ describe("OpenCode Model Catalog & Enrichment", () => {
 
     // Every plane we declare a route for is present in the cold-start shim, so
     // the mount has models to serve before the first refresh ever runs.
-    expect(buckets.get("@ai-sdk/openai")?.length).toBe(30);
-    expect(buckets.get("@ai-sdk/anthropic")?.length).toBe(18);
+    expect(buckets.get("@ai-sdk/openai")?.length).toBe(31);
+    expect(buckets.get("@ai-sdk/anthropic")?.length).toBe(17);
 
     // And each of those SDKs maps to a protocol this plugin actually serves, so
     // no carried model names a format with nowhere to go.
@@ -274,13 +276,13 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // count is exactly the shim's, and the two planes do not overlap.
     const responses = modelsForSdk("@ai-sdk/openai").map((m) => m.id);
     const anthropic = modelsForSdk("@ai-sdk/anthropic").map((m) => m.id);
-    expect(responses.length).toBe(32);
+    expect(responses.length).toBe(33);
     // 20, not 21: `claude-sonnet-4` is retired because it answers
     // `400 "Model is unavailable."` (measured), so it is not offered.
     expect(anthropic.length).toBe(20);
     expect(responses.filter((id) => anthropic.includes(id))).toEqual([]);
     // The flagship of each plane is on the shim, so a cold start can serve it.
-    expect(responses).toContain("muse-spark-1.3-contributor-free");
+    expect(responses).toContain("muse-spark-1.2-contributor-free");
     expect(anthropic).toContain("claude-sonnet-4-5");
   });
 
@@ -297,8 +299,8 @@ describe("OpenCode Model Catalog & Enrichment", () => {
         modelsForSdk(sdk).length
       );
     }
-    expect(modelsForSdk("@ai-sdk/openai", zen).length).toBe(30);
-    expect(modelsForSdk("@ai-sdk/anthropic", zen).length).toBe(18);
+    expect(modelsForSdk("@ai-sdk/openai", zen).length).toBe(31);
+    expect(modelsForSdk("@ai-sdk/anthropic", zen).length).toBe(17);
     // And the ones that would have leaked are genuinely Go-only.
     const goOnly = ["muse-spark-1.3-contributor", "qwen3.7-plus"];
     for (const id of goOnly) {
@@ -356,7 +358,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // enriched listing is one shorter than the generated data.
     expect(zenJson.data.length).toBe(getLiveZenCatalog().length);
     expect(
-      zenJson.data.some((m) => m.id === "muse-spark-1.3-contributor-free")
+      zenJson.data.some((m) => m.id === "muse-spark-1.2-contributor-free")
     ).toBe(true);
   });
 
@@ -607,10 +609,10 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const initialGo = getLiveGoCatalog();
     expect(initialGo.length).toBe(OPENCODE_GO_CATALOG.length);
     const initialZen = getLiveZenCatalog();
-    // One shorter than the generated data: `claude-sonnet-4` is retired because it
-    // answers `400 "Model is unavailable."` (measured), and retirement filters at
-    // load rather than at generation.
-    expect(initialZen.length).toBe(OPENCODE_ZEN_CATALOG.length - 1);
+    // Equal to the generated data: the shim was regenerated, so the retired ids
+    // (`claude-sonnet-4`, and the three dead rows) are no longer IN it. Retirement
+    // still filters at load; it just has nothing left to remove from this set.
+    expect(initialZen.length).toBe(OPENCODE_ZEN_CATALOG.length);
 
     const mockFetch = vi.fn().mockResolvedValue(
       Response.json({
@@ -650,9 +652,10 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // Three zen rows are new to the merged map, and NONE is filtered any more:
     // `muse-spark-1.2` and `muse-spark-1.2-contributor-free` are served (measured
     // `401` and `403`), so retirement no longer removes them.
-    // Three zen rows are new to the merged map and NONE is filtered, while the
-    // base is one shorter than the raw shim because `claude-sonnet-4` is retired.
-    expect(updated.zen.length).toBe(OPENCODE_ZEN_CATALOG.length + 2);
+    // ONE zen row is new to the merged map: the mock's `future-zen-model`. Its
+    // two `muse-spark-1.2*` rows are already in the regenerated shim, so they are
+    // not additions any more.
+    expect(updated.zen.length).toBe(OPENCODE_ZEN_CATALOG.length + 1);
 
     const futureModel = updated.go.find((m) => m.id === "future-test-model");
     expect(futureModel).toBeDefined();

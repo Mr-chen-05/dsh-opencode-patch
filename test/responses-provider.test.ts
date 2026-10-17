@@ -50,7 +50,7 @@ import {
 import { createTokenStore } from "../src/token-store.ts";
 import { createCredentialsSeam, createOpencodeStore } from "./test-helpers.ts";
 
-const MUSE = "muse-spark-1.3-contributor-free";
+const MUSE = "muse-spark-1.2-contributor-free";
 
 /** The package name the loader entry is matched on. */
 const PI_AI = "@deepseek-ai/dsh-llm-pi-ai";

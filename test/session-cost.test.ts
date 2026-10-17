@@ -163,13 +163,13 @@ describe("recordTurnUsage", () => {
         totalTokens: 10_000_000,
       },
       { input: 0, output: 0 },
-      "muse-spark-1.3-contributor-free",
+      "muse-spark-1.2-contributor-free",
       true
     );
     expect(snap.freeModel).toBe(true);
     expect(snap.costUsd).toBe(0);
     expect(snap.activeRateFormatted).toBe("Free");
-    expect(snap.modelsUsed).toContain("muse-spark-1.3-contributor-free");
+    expect(snap.modelsUsed).toContain("muse-spark-1.2-contributor-free");
   });
 
   it("re-describes the snapshot for the model the picker is on", () => {

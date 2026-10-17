@@ -625,12 +625,12 @@ describe("UsagePanel", () => {
     // which model, then what it costs.
     const free = usage({
       session: session({
-        activeModel: "muse-spark-1.3-contributor-free",
+        activeModel: "muse-spark-1.2-contributor-free",
         freeModel: true,
       }),
     });
     const line = collectText(UsagePanel(panelProps({ usage: free }))).join("");
-    expect(line).toContain("muse-spark-1.3-contributor-free");
+    expect(line).toContain("muse-spark-1.2-contributor-free");
     expect(line).toContain("t:freeModel");
 
     // A paid model still reads model · rate.
@@ -648,14 +648,14 @@ describe("UsagePanel", () => {
     // like a debug value.
     const named = usage({
       session: session({
-        activeModel: "muse-spark-1.3-contributor-free",
+        activeModel: "muse-spark-1.2-contributor-free",
         activeModelName: "Muse Spark 1.3 Free",
         freeModel: true,
       }),
     });
     const line = collectText(UsagePanel(panelProps({ usage: named }))).join("");
     expect(line).toContain("Muse Spark 1.3 Free");
-    expect(line).not.toContain("muse-spark-1.3-contributor-free");
+    expect(line).not.toContain("muse-spark-1.2-contributor-free");
   });
 
   it("hides the Go breakdown on a Zen route", () => {

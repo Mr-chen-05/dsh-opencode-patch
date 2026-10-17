@@ -514,21 +514,21 @@ describe("GoUsageService readings", () => {
 
   it("fills in the catalog's display name for the model a turn recorded", async () => {
     // A turn records the id — that is what the gateway speaks — so without this
-    // the meter's row showed `muse-spark-1.3-contributor-free` where a user
+    // the meter's row showed `muse-spark-1.2-contributor-free` where a user
     // expects `Muse Spark 1.3 Contributor Free`.
     recordTurnUsage(
       "s-name",
       { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
       { input: 0, output: 0 },
-      "muse-spark-1.3-contributor-free",
+      "muse-spark-1.2-contributor-free",
       true
     );
     stubFetch(() => new Response(okBody()));
     const usage = await serviceWithKey("sk-live-key").read({
       sessionId: "s-name",
     });
-    expect(usage.session?.activeModel).toBe("muse-spark-1.3-contributor-free");
-    expect(usage.session?.activeModelName).toBe("Muse Spark 1.3 Free");
+    expect(usage.session?.activeModel).toBe("muse-spark-1.2-contributor-free");
+    expect(usage.session?.activeModelName).toBe("Muse Spark 1.2 Free");
     expect(usage.session?.freeModel).toBe(true);
   });
 

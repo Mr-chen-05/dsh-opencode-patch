@@ -7,7 +7,7 @@
  * - Streaming SSE response delivery with typed events:
  *   (response.created, response.output_text.delta, response.completed)
  * - Unary JSON response generation when stream is false
- * - Automatic core tool injection (read, bash) for free-tier models (e.g. muse-spark-1.3-contributor-free)
+ * - Automatic core tool injection (read, bash) for free-tier models (e.g. muse-spark-1.2-contributor-free)
  * - Tool omission for paid models (e.g. gpt-5.4)
  * - Configurable injectCoreTools toggle
  * - Wire header validation and session header compliance
@@ -102,7 +102,7 @@ describe("OpenAI v2 Responses Endpoint (/responses)", () => {
     const result = await runner.execute("opencode", "/zen/v1/responses", {
       body: {
         input: [],
-        model: "muse-spark-1.3-contributor-free",
+        model: "muse-spark-1.2-contributor-free",
         stream: true,
       },
       config: { injectCoreTools: true },
@@ -135,7 +135,7 @@ describe("OpenAI v2 Responses Endpoint (/responses)", () => {
     const result = await runner.execute("opencode", "/zen/v1/responses", {
       body: {
         input: [],
-        model: "muse-spark-1.3-contributor-free",
+        model: "muse-spark-1.2-contributor-free",
         stream: true,
       },
       config: { injectCoreTools: false },

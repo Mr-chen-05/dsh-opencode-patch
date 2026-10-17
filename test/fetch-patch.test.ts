@@ -524,7 +524,7 @@ describe("patchFetch", () => {
       freeModelMarker: "preview",
     });
     expect(toolNamesOf(parseJsonBody(customHit))).toEqual(["read", "bash"]);
-    const customCatalogFree = await runWith("muse-spark-1.3-contributor-free", {
+    const customCatalogFree = await runWith("muse-spark-1.2-contributor-free", {
       freeModelMarker: "preview",
     });
     expect(toolNamesOf(parseJsonBody(customCatalogFree))).toEqual([
@@ -541,7 +541,7 @@ describe("patchFetch", () => {
     expect(toolNamesOf(parseJsonBody(allModels))).toEqual(["read", "bash"]);
 
     // A blank marker falls back to the default instead of disabling injection.
-    const blank = await runWith("muse-spark-1.3-contributor-free", {
+    const blank = await runWith("muse-spark-1.2-contributor-free", {
       freeModelMarker: "",
     });
     expect(toolNamesOf(parseJsonBody(blank))).toEqual(["read", "bash"]);
@@ -784,7 +784,7 @@ describe("patchFetch", () => {
       await patched("https://opencode.ai/zen/v1/responses", {
         body: JSON.stringify({
           input: [{ content: "hi", role: "user" }],
-          model: "muse-spark-1.3-contributor-free",
+          model: "muse-spark-1.2-contributor-free",
         }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
@@ -824,7 +824,7 @@ describe("patchFetch", () => {
 
     const chat = await run(
       "https://opencode.ai/zen/v1/chat/completions",
-      JSON.stringify({ input: "hi", model: "muse-spark-1.3-contributor-free" })
+      JSON.stringify({ input: "hi", model: "muse-spark-1.2-contributor-free" })
     );
     // The gateway checks read+bash on completions too, so a free completions
     // body gains both; a non-JSON route stays untouched (covered below by the
@@ -850,7 +850,7 @@ describe("patchFetch", () => {
       await patched("https://opencode.ai/zen/v1/responses", {
         body: JSON.stringify({
           input: [{ content: "hi", role: "user" }],
-          model: "muse-spark-1.3-contributor-free",
+          model: "muse-spark-1.2-contributor-free",
         }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
@@ -869,7 +869,7 @@ describe("patchFetch", () => {
       await patched("https://opencode.ai/zen/v1/responses", {
         body: JSON.stringify({
           input: "run command",
-          model: "muse-spark-1.3-contributor-free",
+          model: "muse-spark-1.2-contributor-free",
           tools: [{ name: "bash", type: "function" }],
         }),
         headers: { "Content-Type": "application/json" },
@@ -885,7 +885,7 @@ describe("patchFetch", () => {
     const payload = Buffer.from(
       JSON.stringify({
         input: "test buffer",
-        model: "muse-spark-1.3-contributor-free",
+        model: "muse-spark-1.2-contributor-free",
       }),
       "utf-8"
     );
@@ -908,7 +908,7 @@ describe("patchFetch", () => {
       )("https://opencode.ai/zen/v1/responses", {
         body: JSON.stringify({
           input: "hi",
-          model: "muse-spark-1.3-contributor-free",
+          model: "muse-spark-1.2-contributor-free",
           tools: [
             { name: "read", type: "function" },
             { name: "bash", type: "function" },
@@ -1002,7 +1002,7 @@ describe("patchFetch", () => {
       },
     });
     const request = new Request("https://opencode.ai/zen/v1/responses", {
-      body: JSON.stringify({ model: "muse-spark-1.3-contributor-free" }),
+      body: JSON.stringify({ model: "muse-spark-1.2-contributor-free" }),
       method: "POST",
     });
     await request.text();
@@ -1040,7 +1040,7 @@ describe("patchFetch", () => {
     const request = new Request("https://opencode.ai/zen/v1/responses", {
       body: JSON.stringify({
         input: "hi",
-        model: "muse-spark-1.3-contributor-free",
+        model: "muse-spark-1.2-contributor-free",
       }),
       headers: { "Content-Type": "application/json" },
       method: "POST",
@@ -1068,7 +1068,7 @@ describe("patchFetch", () => {
 
   it("resolves a credential for the Zen free model that gets redirected to /responses", async () => {
     // The reported symptom: a Go-plane free model works, Zen free models do not.
-    // `muse-spark-1.3-contributor-free` is the ONE Zen free model naming
+    // `muse-spark-1.2-contributor-free` is the ONE Zen free model naming
     // `@ai-sdk/openai`, so the stream hook redirects it to `opencode-responses` -
     // a route the plugin mounts itself, which therefore carries pi's
     // `Bearer unused` placeholder and depends on THIS injection to authenticate.
@@ -1087,7 +1087,7 @@ describe("patchFetch", () => {
 
     await als.run({ provider: "opencode", value: "ses_x" }, async () => {
       await patched("https://opencode.ai/inference/v1/responses", {
-        body: JSON.stringify({ model: "muse-spark-1.3-contributor-free" }),
+        body: JSON.stringify({ model: "muse-spark-1.2-contributor-free" }),
         // The sentinel the mounted route declares; a placeholder must be
         // replaced, never forwarded.
         headers: { authorization: "Bearer unused" },

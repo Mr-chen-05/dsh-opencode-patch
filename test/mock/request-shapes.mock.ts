@@ -289,7 +289,7 @@ describe("the request shape per configuration", () => {
       post(
         patchedWith(resolveConfig()),
         responsesUrl(),
-        responsesBody("muse-spark-1.3-contributor-free")
+        responsesBody("muse-spark-1.2-contributor-free")
       )
     );
     expect(response.status).toBe(200);

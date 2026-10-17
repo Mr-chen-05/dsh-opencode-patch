@@ -34,7 +34,7 @@ import { parseJsonBody, toolNamesOf } from "./test-helpers.ts";
 const RESPONSES_URL = `https://opencode.ai/zen/v1${RESPONSES_PATH}`;
 
 /** The one free-tier model the gateway serves on `/responses`. */
-const FREE_MODEL = "muse-spark-1.3-contributor-free";
+const FREE_MODEL = "muse-spark-1.2-contributor-free";
 
 /** The shipped fallback options: enabled, scoped to the named marker. */
 const options = (
@@ -207,7 +207,7 @@ describe("maybeInjectCoreTools: bodies it must not rewrite", () => {
 
   it("returns a body that is not JSON untouched", () => {
     const garbage = "{not json at all";
-    const truncated = '{"model":"muse-spark-1.3-contributor-free","tools":[';
+    const truncated = '{"model":"muse-spark-1.2-contributor-free","tools":[';
     const headers = new Headers();
 
     // A stream that died mid-write reaches the interceptor as a half-written

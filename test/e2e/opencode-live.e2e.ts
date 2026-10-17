@@ -151,7 +151,7 @@ describe.skipIf(!LIVE || !ZEN_KEY)(
         // second half, and it is what keeps these out of the picker. Testing the
         // first half through the second would make this case unfalsifiable.
         expect(ids.has("mimo-v2.6-flash-free")).toBe(true);
-        expect(ids.has("muse-spark-1.3-contributor-free")).toBe(true);
+        expect(ids.has("muse-spark-1.2-contributor-free")).toBe(true);
 
         // And nothing the provider retired is resurrected by the enrichment.
         for (const retired of RETIRED_ZEN_MODEL_IDS) {

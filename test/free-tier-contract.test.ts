@@ -34,7 +34,7 @@ const freeModelIds = (): string[] => {
     "mimo-v2.6-flash-free",
     "big-pickle",
     "space-bunny-free",
-    "muse-spark-1.3-contributor-free",
+    "muse-spark-1.2-contributor-free",
   ]) {
     if (findModelSpec(id)?.is_free === true) {
       ids.add(id);

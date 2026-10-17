@@ -320,7 +320,7 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
   it(
     "routes a free-tier model to the one endpoint that recognises it",
     async (context) => {
-      const model = "muse-spark-1.3-contributor-free";
+      const model = "muse-spark-1.2-contributor-free";
       const expected = servedProtocolFor(model);
       expect(expected, `${model} no longer redirects`).toBe("openai-responses");
 
@@ -651,7 +651,7 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
     for (const model of [
       "grok-4.7",
       "qwen3.8-max",
-      "muse-spark-1.3-contributor-free",
+      "muse-spark-1.2-contributor-free",
     ]) {
       const spec = findModelSpecOn("zen", model);
       expect(spec, `${model} left the Zen catalog`).toBeDefined();

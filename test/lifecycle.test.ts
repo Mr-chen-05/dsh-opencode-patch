@@ -504,7 +504,7 @@ describe("apply (plugin lifecycle)", () => {
       },
       llm: {
         listConfigurableProviders: () => [{ provider: "opencode" }],
-        listModels: async () => [{ id: "muse-spark-1.3-contributor-free" }],
+        listModels: async () => [{ id: "muse-spark-1.2-contributor-free" }],
         listProviders: () => [{ id: "opencode" }, { id: "opencode-responses" }],
         stream: (options: unknown) => {
           dispatched.push(options);
@@ -524,7 +524,7 @@ describe("apply (plugin lifecycle)", () => {
       throw new TypeError("stream handler not registered");
     }
     const result: unknown = streamHandler(
-      { model: "muse-spark-1.3-contributor-free", provider: "opencode" },
+      { model: "muse-spark-1.2-contributor-free", provider: "opencode" },
       () => {
         nextCalls += 1;
         return createMockStream("from-opencode-route");
@@ -533,7 +533,7 @@ describe("apply (plugin lifecycle)", () => {
 
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0]).toMatchObject({
-      model: "muse-spark-1.3-contributor-free",
+      model: "muse-spark-1.2-contributor-free",
       provider: "opencode-responses",
     });
     // The redirect replaces the dispatch; running both would bill twice.
@@ -631,7 +631,7 @@ describe("apply (plugin lifecycle)", () => {
       throw new TypeError("stream handler not registered");
     }
     const result: unknown = streamHandler(
-      { model: "muse-spark-1.3-contributor-free", provider: "opencode" },
+      { model: "muse-spark-1.2-contributor-free", provider: "opencode" },
       () => {
         nextCalls += 1;
         return createMockStream("from-opencode-route");
@@ -667,7 +667,7 @@ describe("apply (plugin lifecycle)", () => {
     }
     const result: unknown = streamHandler(
       {
-        model: "muse-spark-1.3-contributor-free",
+        model: "muse-spark-1.2-contributor-free",
         provider: "opencode",
         sessionId: "dsh-session-test-888",
       },
@@ -729,7 +729,7 @@ describe("apply (plugin lifecycle)", () => {
 
     const result: unknown = streamHandler(
       {
-        model: "muse-spark-1.3-contributor-free",
+        model: "muse-spark-1.2-contributor-free",
         provider: "opencode",
         sessionId: "dsh-session-proxy-check",
       },
@@ -878,7 +878,7 @@ describe("apply (plugin lifecycle)", () => {
       }
       const result: unknown = streamHandler(
         {
-          model: "muse-spark-1.3-contributor-free",
+          model: "muse-spark-1.2-contributor-free",
           provider: "opencode",
           sessionId: "session-debug-999",
         },
@@ -899,7 +899,7 @@ describe("apply (plugin lifecycle)", () => {
         throw new Error("debug entry is not an object");
       }
       expect(parsed.header).toBe("x-opencode-session");
-      expect(parsed.model).toBe("muse-spark-1.3-contributor-free");
+      expect(parsed.model).toBe("muse-spark-1.2-contributor-free");
       expect(parsed.provider).toBe("opencode");
       expect(parsed.session).toBe("session-debug-999");
       expect(typeof parsed.value).toBe("string");

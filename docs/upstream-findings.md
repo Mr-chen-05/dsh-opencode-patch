@@ -328,9 +328,10 @@ MAX       low12=0xfff  401  Go requires a credential
 
 The session header was accepted every time; the only complaint was the credential. So the low twelve bits do not decide admission, and the clamp in `src/session.ts` is gone. That is the third independent refutation, after the vendor's generator and the 200k-id simulation.
 
-## 3.9 The bundled shim is stale, and three dead rows are still offered — OPEN
+## 3.9 The bundled shim was stale — RESOLVED
 
-The gateway answers `410 ModelDeprecated` for retired models, with the reason in the body:
+The gateway answers `410 ModelDeprecated` for retired models, with the reason in the
+body:
 
 ```
 ll-alpha-free                   410 {"type":"error","error":{"type":"ModelDeprecated","message":"Model ll-alpha-free has been deprecated."}}
@@ -339,41 +340,45 @@ step-5-preview-free             400 "Model is unavailable."
 space-bunny-free                403 FreeTierError   <- served
 ```
 
-All three dead ids are still in `src/catalog-data.ts`, because that file was generated while they were active. A cold start therefore offers three models that cannot answer.
+All three dead ids were still in `src/catalog-data.ts`, generated while they were active,
+so a cold start offered three models that could not answer.
 
-They are NOT added to `RETIRED_ZEN_MODEL_IDS`, because a dozen tests use those ids as their canonical free-model fixtures and retargeting them is a change of its own. The correct fix is to **regenerate the shim**:
+**Regenerated 2026-10-17** (`scripts/regenerate-catalog-shim.ts --write`). The diff was
+four ids out and four in per plane, counts unchanged at 86 / 30:
 
-```sh
-node --experimental-strip-types scripts/regenerate-catalog-shim.ts --write
+```
+opencode-go: 30 -> 30   + cat-jam-free            - step-5-preview-free
+opencode   : 86 -> 86   + muse-spark-1.2, muse-spark-1.2-contributor-free, exo-free, cat-jam-free
+                        - ll-alpha-free, claude-sonnet-4, step-5-preview-free, muse-spark-1.3-contributor-free
 ```
 
-That removes the dead rows from the DATA rather than filtering them at load, and it refreshes every price and context window at the same time — the shim predates the current catalog by enough that 43 of its rows are now deprecated. Expect the `modelsForSdk` counts and the free-tier fixture ids to move when it runs.
+Verified after: **0 offered models are measured dead**, and the generator reports
+`shim is current`. The SDK split moved with it — Zen is now 31 `@ai-sdk/openai` / 17
+`@ai-sdk/anthropic` / 29 no-SDK / 1 Mistral / 8 Google — and `README.md`,
+`docs/redirect-planes.md` and `docs/protocol-routing-and-merge.md` were updated to match,
+because `catalog.test.ts` holds all three tables to the catalog.
+
+Fixture ids that pointed at now-dead models were retargeted to served ones:
+`step-5-preview-free` → `space-bunny-free` (or `cat-jam-free` where both planes are
+needed), `muse-spark-1.3-contributor-free` → `muse-spark-1.2-contributor-free` (still
+`@ai-sdk/openai`, still free, still answers `403`).
 
 ## 3.10 The picker never received the protocol-routed models — FIXED
 
-`buildModelCatalog` (the composer's list) is `listProviders()` × `listModels(id)`,
-read from the host's own
-`@deepseek-ai/dsh-api-session-controller/lib/types/catalog.js`. The internal protocol
-routes are hidden from `listProviders`, and each carries only its own protocol's models,
-because `registerResponsesProvider` builds every route with
-`sdksForProtocol(protocol).flatMap(sdk => modelsForSdk(sdk, catalog))`.
+`buildModelCatalog` (the composer's list) is `listProviders()` × `listModels(id)`, read from the host's own `@deepseek-ai/dsh-api-session-controller/lib/types/catalog.js`. The internal protocol routes are hidden from `listProviders`, and each carries only its own protocol's models, because `registerResponsesProvider` builds every route with `sdksForProtocol(protocol).flatMap(sdk => modelsForSdk(sdk, catalog))`.
 
-So enumerating `opencode` returned the completions bucket alone, and every Responses,
-Messages and Google model — servable, and already redirectable by `internalRouteFor` —
-was absent from the picker. Measured:
+So enumerating `opencode` returned the completions bucket alone, and every Responses, Messages and Google model — servable, and already redirectable by `internalRouteFor` — was absent from the picker. Measured:
 
-| | rows |
-| :-- | --: |
-| adapter's completions bucket | 28 |
-| picker before the join | **27** |
-| picker after the join | **87** |
-| Go route before / after | 20 / 29 |
+|                              |    rows |
+| :--------------------------- | ------: |
+| adapter's completions bucket |      28 |
+| picker before the join       |  **27** |
+| picker after the join        |  **87** |
+| Go route before / after      | 20 / 29 |
 
-`listModels` now merges the parent route's list with its plane's catalog via the same
-`mergeDiscoveredModels` the "fetch available models" path already used.
+`listModels` now merges the parent route's list with its plane's catalog via the same `mergeDiscoveredModels` the "fetch available models" path already used.
 
-**If the picker ever looks short again, check this join first.** It is invisible from the
-outside: the models are not filtered, not deprecated, just never enumerated.
+**If the picker ever looks short again, check this join first.** It is invisible from the outside: the models are not filtered, not deprecated, just never enumerated.
 
 ## 4. How to re-check any of this
 
