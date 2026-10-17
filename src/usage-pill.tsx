@@ -412,11 +412,33 @@ const ActiveUsage = ({
   );
 };
 
+/**
+ * Reasons already written to the console, so a re-render does not flood it.
+ *
+ * A meter that is absent and a meter that failed look identical on screen, which
+ * is why "the meter is not shown" cost several rounds. The injector already
+ * computes a precise reason — "no modelDirectories service", "directoryFor threw:
+ * …", "no usage service: remote.opencodeGoUsage.read is missing" — and this
+ * component used to destructure it as `_reason` and drop it. Now it says it, once
+ * per distinct reason.
+ */
+const reportedAbsences = new Set<string>();
+
+const reportAbsence = (reason: string): void => {
+  if (reportedAbsences.has(reason)) {
+    return;
+  }
+  reportedAbsences.add(reason);
+  console.warn(
+    `[dsh-opencode-patch] the usage meter is not rendering: ${reason}`
+  );
+};
+
 export const UsagePill = ({
   directory,
   meterProviders,
   modelMarkers: _modelMarkers,
-  reason: _reason,
+  reason,
   ...props
 }: UsagePillProps): React.ReactElement | null => {
   // A fallback rather than an early return: `useSyncExternalStore` is a hook, so
@@ -433,6 +455,9 @@ export const UsagePill = ({
   // the honest state, and it is safe to return here: this is the component's
   // only hook.
   if (directory === undefined) {
+    if (typeof reason === "string" && reason.length > 0) {
+      reportAbsence(reason);
+    }
     return null;
   }
 
