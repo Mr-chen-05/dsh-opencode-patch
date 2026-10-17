@@ -215,6 +215,32 @@ describe("GoUsageService endpoint", () => {
     expect(capture.url).toBe("https://opencode.ai/zen/go/v1/usage");
   });
 
+  it("rewrites the INFERENCE endpoint onto the Go plane too", async () => {
+    // The case that was broken. The catalog now names the inference family for the
+    // `opencode` provider (`api: https://opencode.ai/inference/openai/v1`), so a
+    // base discovered from a provider row is very often that family — and the
+    // rewrite handled only `zen/v1`. The meter then asked
+    // `…/inference/openai/v1/usage`, which does not exist.
+    //
+    // Measured unauthenticated: `/zen/go/v1/usage` answers 401 (the route is there,
+    // bring a credential) while both `/inference/openai/v1/usage` and
+    // `/inference/go/openai/v1/usage` answer 404. So both families have to land on
+    // the zen/go form.
+    for (const declared of [
+      "https://opencode.ai/inference/openai/v1",
+      "https://opencode.ai/inference/v1",
+      "https://opencode.ai/inference/go/openai/v1",
+    ]) {
+      const capture = stubFetch(() => new Response(okBody()));
+      const service = new GoUsageService(
+        contextWithEntries([providerEntry({ baseURL: declared })]),
+        { resolveApiKey: () => Promise.resolve("sk-live-key") }
+      );
+      await service.read();
+      expect(capture.url, declared).toBe(GO_USAGE_URL);
+    }
+  });
+
   it("falls back to the stock endpoint when nothing declares one", async () => {
     // A cold profile with no provider row still has to poll somewhere real.
     const capture = stubFetch(() => new Response(okBody()));
