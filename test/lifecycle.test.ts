@@ -129,6 +129,77 @@ describe("apply (plugin lifecycle)", () => {
     expect(mounted).toContain("GoUsageService");
   });
 
+  it("reports WHY the usage service is unreachable, in each of the three ways", () => {
+    // A browser console carried:
+    //
+    //   the usage meter is not rendering: no usage service:
+    //   remote.opencodeGoUsage.read is missing
+    //
+    // That proves the CLIENT half is fine — the contribution mounts and its
+    // descriptor names `service: "opencodeGoUsage"`. What is missing is a Service
+    // the Gateway's source-mode discovery can find, and there are three ways that
+    // happens with nothing on the client to show it: it never registered, it
+    // registered under another key, or it registered as a VALUE (`ctx.provide`)
+    // rather than a Service. The three are indistinguishable from outside, so the
+    // host now names which one it is.
+    const messages: string[] = [];
+    const hostWith = (get: () => unknown): unknown => ({
+      effect: () => {},
+      get,
+      llm: {},
+      logger: {
+        info: (...args: unknown[]) => messages.push(args.map(String).join(" ")),
+        warn: (...args: unknown[]) => messages.push(args.map(String).join(" ")),
+      },
+      on: () => {},
+      plugin: () => {
+        /* the real path; not needed for these three cases */
+      },
+    });
+
+    // 1. Never registered: `ctx.get` answers nothing for the key.
+    apply(
+      hostWith(() => {
+        /* an unregistered name */
+      }) as never,
+      { usageEnabled: true }
+    );
+    expect(
+      messages.some(
+        (m) => m.includes("did not register") && m.includes("ctx.get")
+      )
+    ).toBe(true);
+
+    // 2. Registered, but with no `typertRemote` binding — a provided value, which
+    //    the Gateway's service scan cannot see.
+    messages.length = 0;
+    apply(hostWith(() => ({ read: async () => ({}) })) as never, {
+      usageEnabled: true,
+    });
+    expect(
+      messages.some(
+        (m) =>
+          m.includes("no typertRemote binding") && m.includes("ctx.provide")
+      )
+    ).toBe(true);
+
+    // 3. Registered and bound — the good case, reported as reachable.
+    messages.length = 0;
+    const bound = {
+      read: async () => ({}),
+      typertRemote: {
+        namespace: "opencodeGoUsage",
+        serviceKey: "opencodeGoUsage",
+      },
+    };
+    apply(hostWith(() => bound) as never, { usageEnabled: true });
+    expect(
+      messages.some(
+        (m) => m.includes("reachable") && m.includes("opencodeGoUsage")
+      )
+    ).toBe(true);
+  });
+
   it("registers the login service, which has no switch to be off", () => {
     // A login is an action the user takes, not a behaviour the plugin runs, so
     // there is no setting that could turn its remote off: the service answers

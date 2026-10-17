@@ -35,7 +35,7 @@ import {
 import { recordDebug } from "./debug.ts";
 import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
-import { isFetchFunction } from "./guards.ts";
+import { isFetchFunction, isRecord } from "./guards.ts";
 import { LEGACY_NAME, LEGACY_PKG, name } from "./identity.ts";
 import { createLoginCredentialReader } from "./login-credential.ts";
 import { LoginService } from "./login-service.ts";
@@ -185,6 +185,63 @@ const installUsageService = (
       error
     );
   }
+  verifyUsageService(ctx);
+};
+
+/**
+ * Confirm the usage service is REACHABLE from the context, and say so either way.
+ *
+ * The client reported, from a browser console:
+ *
+ *   the usage meter is not rendering: no usage service: remote.opencodeGoUsage.read is missing
+ *
+ * That names the client's half as fine (the contribution mounts, the descriptor
+ * names `service: "opencodeGoUsage"`). The Gateway exposes a namespace from the
+ * host's registry, so what is missing is a Service it can find — and there are
+ * three ways that happens with nothing in the client to show it:
+ *
+ *  1. the host never registered it (this installer threw, or `usageEnabled` is off
+ *     in the row the host actually loaded);
+ *  2. it registered under another key;
+ *  3. it registered as a VALUE (`ctx.provide`) rather than a Service, and the
+ *     Gateway's "source-mode discovery" scans services, so a provided value is
+ *     invisible to it even though `ctx.get` can see it.
+ *
+ * Cases 2 and 3 are indistinguishable from the client and from here, so this reads
+ * the service back through the same context and reports what it found: whether it
+ * resolved, and whether it carries the `typertRemote` binding the Gateway scans
+ * for. One line, once per process, so the next console says which case it is
+ * instead of a meter that is merely absent.
+ */
+const verifyUsageService = (ctx: CordisContext): void => {
+  let resolved: unknown;
+  try {
+    resolved =
+      typeof ctx.get === "function" ? ctx.get("opencodeGoUsage") : undefined;
+  } catch {
+    // An unregistered name answers undefined on some hosts and throws on others.
+    resolved = undefined;
+  }
+  if (!isRecord(resolved)) {
+    ctx.logger?.warn?.(
+      "[dsh-opencode-patch] the usage service did not register: ctx.get('opencodeGoUsage') answered nothing",
+      "the meter will render nothing with 'no usage service'"
+    );
+    return;
+  }
+  const binding: unknown = resolved.typertRemote;
+  if (!isRecord(binding)) {
+    ctx.logger?.warn?.(
+      "[dsh-opencode-patch] the usage service registered but carries no typertRemote binding",
+      "the Gateway's source-mode discovery will not find it; ctx.provide() publishes a value, not a Service",
+      "the meter will render nothing with 'no usage service'"
+    );
+    return;
+  }
+  ctx.logger?.info?.(
+    "[dsh-opencode-patch] the usage service is reachable with a typertRemote binding for namespace %s",
+    typeof binding.namespace === "string" ? binding.namespace : "(unnamed)"
+  );
 };
 
 /**
