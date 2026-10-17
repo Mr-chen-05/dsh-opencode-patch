@@ -273,6 +273,20 @@ list slot "conversation.input.right" already has an entry with id "dsh-opencode-
 
 A throw out of the entry is a meter that disappears with no message. The guard is now keyed on the slot REGISTRY (`WeakSet`), so a re-activation against the same registry is a no-op while a genuinely fresh registry still registers, and the registration itself is wrapped so a duplicate can never become an exception.
 
+## 3.7 The Go quota endpoint has exactly one public route — VERIFIED
+
+`packages/console/app/src/routes/zen/go/v1/usage.ts` is the **only** quota route in
+either major version (checked 1.19.3 and 2.0.32), and the inference proxy's path table
+(`packages/console/app/src/lib/inference-proxy.ts`) lists
+`"GET /zen/go/v1/usage": "/go/v1/usage"` with **no** `/inference/.../usage` counterpart.
+
+That matters because the live catalog names the INFERENCE family for the `opencode`
+provider (`api: https://opencode.ai/inference/openai/v1`). `toGoBaseURL` rewrote only
+the `zen/v1` form, so a base discovered from a provider row passed through untouched and
+the meter asked `…/inference/openai/v1/usage` — a path that does not exist, which is an
+unavailable meter with no explanation. Both families now resolve to
+`https://opencode.ai/zen/go/v1`.
+
 ## 4. How to re-check any of this
 
 1. Find the upstream source that **produces** the value, not a client that consumes it.

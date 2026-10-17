@@ -504,6 +504,23 @@ describe("toGoBaseURL and resolveGoBaseURL", () => {
     );
   });
 
+  it("rewrites the INFERENCE family onto the Go plane too", () => {
+    // The catalog now names the inference family for the `opencode` provider
+    // (`api: https://opencode.ai/inference/openai/v1`), so a base discovered
+    // from a provider row is very often that family. Rewriting only `zen/v1`
+    // left it untouched and the meter asked `…/inference/openai/v1/usage` — a
+    // path that does not exist. Measured: the only public quota route in either
+    // 1.19.3 or 2.0.32 is `packages/console/app/src/routes/zen/go/v1/usage.ts`,
+    // and the inference proxy table has no `/inference/.../usage` entry.
+    expect(toGoBaseURL("https://opencode.ai/inference/openai/v1")).toBe(
+      GO_BASE
+    );
+    expect(toGoBaseURL("https://opencode.ai/inference/v1")).toBe(GO_BASE);
+    expect(toGoBaseURL("https://opencode.ai/inference/go/openai/v1")).toBe(
+      GO_BASE
+    );
+  });
+
   it("leaves an already-Go or entirely custom base alone", () => {
     // The rewrite is a host-level substitution, not a guess: a self-hosted or
     // mirrored gateway must reach its own `/usage`, not the vendor's.

@@ -187,18 +187,38 @@ export const discoverGoConfig = (
 };
 
 /**
- * Point a Zen base URL at the Go quota endpoint.
+ * Point a discovered base URL at the Go quota endpoint.
  *
- * The two share a host, so a base URL discovered from a Zen provider row
- * (`…/zen/v1`) still addresses the Go plan's `/usage` once rewritten; every
- * other URL passes through untouched.
+ * **Both endpoint families have to land on the `zen/go` form, and that is
+ * measured rather than assumed.** The public quota route is
+ * `GET /zen/go/v1/usage` and there is no second one: the only route file in
+ * either major version is
+ * `packages/console/app/src/routes/zen/go/v1/usage.ts` (checked in 1.19.3 and
+ * 2.0.32), and the inference proxy's path table
+ * (`packages/console/app/src/lib/inference-proxy.ts`) lists
+ * `"GET /zen/go/v1/usage": "/go/v1/usage"` with no `/inference/.../usage`
+ * counterpart.
+ *
+ * The catalog now names the INFERENCE family for the `opencode` provider
+ * (`api: https://opencode.ai/inference/openai/v1`), so a base discovered from a
+ * provider row is very often that family. Rewriting only `zen/v1` left it
+ * untouched, and the meter then asked `…/inference/openai/v1/usage` — a path
+ * that does not exist — which is an unavailable meter with no explanation.
+ *
+ * A URL on neither family (a mirror, a self-hosted gateway) passes through
+ * untouched: this function does not invent an endpoint it was not given.
  *
  * @param url - candidate base URL.
  */
-export const toGoBaseURL = (url: string): string =>
-  url.includes("opencode.ai/zen/v1")
-    ? url.replace("opencode.ai/zen/v1", "opencode.ai/zen/go/v1")
-    : url;
+export const toGoBaseURL = (url: string): string => {
+  if (url.includes("opencode.ai/inference")) {
+    return DEFAULT_USAGE_BASE_URL;
+  }
+  if (url.includes("opencode.ai/zen/v1")) {
+    return url.replace("opencode.ai/zen/v1", "opencode.ai/zen/go/v1");
+  }
+  return url;
+};
 
 /**
  * Base URL for Go quota requests: an explicit non-default config wins,
