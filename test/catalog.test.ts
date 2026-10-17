@@ -74,9 +74,12 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     for (const catalog of [OPENCODE_ZEN_CATALOG, OPENCODE_GO_CATALOG]) {
       expect(catalog.some((m) => m.id === "step-5-preview-free")).toBe(true);
     }
-    // And a genuinely retired id still stays out.
+    // And a genuinely retired id stays out of the RUNTIME catalog. It is still in
+    // the bundled shim DATA — retirement is a runtime filter, not a property of
+    // the generated file — so the assertion is against `getLiveZenCatalog()`.
+    const runtime = new Set(getLiveZenCatalog().map((m) => m.id));
     for (const retired of RETIRED_ZEN_MODEL_IDS) {
-      expect(OPENCODE_ZEN_CATALOG.some((m) => m.id === retired)).toBe(false);
+      expect(runtime.has(retired)).toBe(false);
     }
   });
 
@@ -121,7 +124,12 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // answers `403 FreeTierError` — both were retired here and both are served,
     // so the set hid two working models. Only the contributor row genuinely
     // absent from the zen catalog stays.
-    expect([...RETIRED_ZEN_MODEL_IDS]).toEqual(["muse-spark-1.2-contributor"]);
+    expect([...RETIRED_ZEN_MODEL_IDS].toSorted()).toEqual(
+      // `claude-sonnet-4` is the one dead row among the 84 the registry calls
+      // active: measured `400 "Model is unavailable."` while the other 83
+      // answered 401/403.
+      ["claude-sonnet-4", "muse-spark-1.2-contributor"].toSorted()
+    );
     expect(isRetiredModel("go", "muse-spark-1.2-contributor")).toBe(false);
     expect(isRetiredModel("zen", "muse-spark-1.2")).toBe(false);
     expect(isRetiredModel("zen", "muse-spark-1.2-contributor")).toBe(true);
@@ -267,7 +275,9 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const responses = modelsForSdk("@ai-sdk/openai").map((m) => m.id);
     const anthropic = modelsForSdk("@ai-sdk/anthropic").map((m) => m.id);
     expect(responses.length).toBe(32);
-    expect(anthropic.length).toBe(21);
+    // 20, not 21: `claude-sonnet-4` is retired because it answers
+    // `400 "Model is unavailable."` (measured), so it is not offered.
+    expect(anthropic.length).toBe(20);
     expect(responses.filter((id) => anthropic.includes(id))).toEqual([]);
     // The flagship of each plane is on the shim, so a cold start can serve it.
     expect(responses).toContain("muse-spark-1.3-contributor-free");
@@ -342,7 +352,9 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const zenJson = (await zenResponse.json()) as {
       data: Array<{ id: string }>;
     };
-    expect(zenJson.data.length).toBe(OPENCODE_ZEN_CATALOG.length);
+    // The runtime catalog, not the raw shim: retirement filters at load, so the
+    // enriched listing is one shorter than the generated data.
+    expect(zenJson.data.length).toBe(getLiveZenCatalog().length);
     expect(
       zenJson.data.some((m) => m.id === "muse-spark-1.3-contributor-free")
     ).toBe(true);
@@ -595,7 +607,10 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const initialGo = getLiveGoCatalog();
     expect(initialGo.length).toBe(OPENCODE_GO_CATALOG.length);
     const initialZen = getLiveZenCatalog();
-    expect(initialZen.length).toBe(OPENCODE_ZEN_CATALOG.length);
+    // One shorter than the generated data: `claude-sonnet-4` is retired because it
+    // answers `400 "Model is unavailable."` (measured), and retirement filters at
+    // load rather than at generation.
+    expect(initialZen.length).toBe(OPENCODE_ZEN_CATALOG.length - 1);
 
     const mockFetch = vi.fn().mockResolvedValue(
       Response.json({
@@ -635,7 +650,9 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // Three zen rows are new to the merged map, and NONE is filtered any more:
     // `muse-spark-1.2` and `muse-spark-1.2-contributor-free` are served (measured
     // `401` and `403`), so retirement no longer removes them.
-    expect(updated.zen.length).toBe(OPENCODE_ZEN_CATALOG.length + 3);
+    // Three zen rows are new to the merged map and NONE is filtered, while the
+    // base is one shorter than the raw shim because `claude-sonnet-4` is retired.
+    expect(updated.zen.length).toBe(OPENCODE_ZEN_CATALOG.length + 2);
 
     const futureModel = updated.go.find((m) => m.id === "future-test-model");
     expect(futureModel).toBeDefined();

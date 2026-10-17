@@ -287,14 +287,11 @@ https://opencode.ai/inference/openai/v1/usage       404
 https://opencode.ai/inference/go/openai/v1/usage    404
 ```
 
-401 is "the route is there, bring a credential"; 404 is "no such route". The middle
-one is the URL the meter used to ask, so every quota read was a 404 — an unavailable
-meter with nothing on screen to explain it.
+401 is "the route is there, bring a credential"; 404 is "no such route". The middle one is the URL the meter used to ask, so every quota read was a 404 — an unavailable meter with nothing on screen to explain it.
 
 ## 3.8 Probing the gateway: 401/403 means SERVED, 400 means GONE — MEASURED
 
-`POST /zen/v1/chat/completions` with one token and no credential answers distinctly
-enough to classify every id:
+`POST /zen/v1/chat/completions` with one token and no credential answers distinctly enough to classify every id:
 
 | answer | meaning |
 | :-- | :-- |
@@ -304,33 +301,22 @@ enough to classify every id:
 | `410 Gone` | the model is GONE |
 | `400 "Request is missing x-opencode-session…"` | Go plane needs the session header first |
 
-That is the "kept until it stops ANSWERING" probe the source comments kept asking for
-and never ran. Run 2026-10-17 over the 43 zen ids the registry marks `deprecated`:
+That is the "kept until it stops ANSWERING" probe the source comments kept asking for and never ran. Run 2026-10-17 over the 43 zen ids the registry marks `deprecated`:
 
-- **36 answered `400`, 4 answered `410`** — genuinely gone. The `deprecated` flag is
-  right for these.
-- **3 still answered**: `exo-free` (`403`), `cat-jam-free` (`403`),
-  `muse-spark-1.2-contributor-free` (`403`). The flag is wrong for these, and dropping
-  them hid working models.
-- `step-5-preview-free`, which `RETAINED_MODEL_IDS` was pinning by hand, answered
-  **`400` — it is gone**. The pin had outlived the model.
+- **36 answered `400`, 4 answered `410`** — genuinely gone. The `deprecated` flag is right for these.
+- **3 still answered**: `exo-free` (`403`), `cat-jam-free` (`403`), `muse-spark-1.2-contributor-free` (`403`). The flag is wrong for these, and dropping them hid working models.
+- `step-5-preview-free`, which `RETAINED_MODEL_IDS` was pinning by hand, answered **`400` — it is gone**. The pin had outlived the model.
 
-`GET /zen/v1/models` is also incomplete: it omits `deepseek-v4-flash-vision-exp`
-(`401`) and `nemotron-3-ultra-free` (`403`), both of which answer. So neither the
-registry's flag nor the gateway's own listing is authoritative — only a probe is.
+`GET /zen/v1/models` is also incomplete: it omits `deepseek-v4-flash-vision-exp` (`401`) and `nemotron-3-ultra-free` (`403`), both of which answer. So neither the registry's flag nor the gateway's own listing is authoritative — only a probe is.
 
 ### What that changed
 
-- `RETAINED_MODEL_IDS` → `cat-jam-free`, `exo-free`, `muse-spark-1.2-contributor-free`;
-  `step-5-preview-free` removed.
-- `RETIRED_ZEN_MODEL_IDS` → `muse-spark-1.2-contributor` only. `muse-spark-1.2`
-  answered `401` on zen and `muse-spark-1.2-contributor-free` answered `403`, so both
-  were being hidden while being served.
+- `RETAINED_MODEL_IDS` → `cat-jam-free`, `exo-free`, `muse-spark-1.2-contributor-free`; `step-5-preview-free` removed.
+- `RETIRED_ZEN_MODEL_IDS` → `muse-spark-1.2-contributor` only. `muse-spark-1.2` answered `401` on zen and `muse-spark-1.2-contributor-free` answered `403`, so both were being hidden while being served.
 
 ### The session "pass band" is refuted LIVE
 
-Five session ids were minted with low-12 values `0xfc5`, `0x001`, `0xffe`, `0x000` and
-`0xfff` and sent to `POST /zen/go/v1/chat/completions`. All five answered identically:
+Five session ids were minted with low-12 values `0xfc5`, `0x001`, `0xffe`, `0x000` and `0xfff` and sent to `POST /zen/go/v1/chat/completions`. All five answered identically:
 
 ```
 BAND      low12=0xfc5  401  Go requires a credential
@@ -340,10 +326,7 @@ ZERO      low12=0x000  401  Go requires a credential
 MAX       low12=0xfff  401  Go requires a credential
 ```
 
-The session header was accepted every time; the only complaint was the credential. So
-the low twelve bits do not decide admission, and the clamp in `src/session.ts` is gone.
-That is the third independent refutation, after the vendor's generator and the 200k-id
-simulation.
+The session header was accepted every time; the only complaint was the credential. So the low twelve bits do not decide admission, and the clamp in `src/session.ts` is gone. That is the third independent refutation, after the vendor's generator and the 200k-id simulation.
 
 ## 4. How to re-check any of this
 

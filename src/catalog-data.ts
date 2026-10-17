@@ -99,6 +99,11 @@ export const RETIRED_ZEN_MODEL_IDS: ReadonlySet<string> = new Set([
   // `muse-spark-1.2-contributor` is absent from zen while the Go plane serves
   // it, so this set names it and `isRetiredModel` applies to zen only.
   "muse-spark-1.2-contributor",
+  // Measured the same way, and it is the ONLY dead row among the 84 the registry
+  // calls active: 83 answered `401`/`403` and this one answered
+  // `400 "Model is unavailable."`. It is present in the bundled catalog, so it
+  // was being offered and then failing on selection.
+  "claude-sonnet-4",
 ]);
 
 /** Complete catalog of OpenCode Go subscription models from models.dev. */
