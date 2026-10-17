@@ -15,6 +15,7 @@ import {
   decorateModelDiscovery,
   decorateModelInfo,
   hideResponsesRoute,
+  getLiveZenCatalog,
   isRouteRegistered,
   mergeDiscoveredModels,
   isDeprecatedModelOn,
@@ -429,6 +430,30 @@ describe("models-discovery: hiding the internal Responses route", () => {
 
     stop?.();
     expect(ctx.llm?.listProviders?.()).toHaveLength(2);
+  });
+
+  it("lists EVERY servable catalog model on the parent route", async () => {
+    // The contract the join exists for. The host's picker is
+    // `listProviders()` × `listModels(id)`, and the adapter behind `opencode`
+    // only carries its own protocol's models — so the parent route has to publish
+    // the union, or the Responses / Messages / Google models are unreachable.
+    // Measured on the live catalog: 27 rows before the join, 88 after.
+    const { ctx } = hostWith();
+    const stop = hideResponsesRoute(ctx, resolveConfig());
+
+    const listed = (await ctx.llm?.listModels?.("opencode")) as Array<{
+      id: string;
+    }>;
+    const ids = new Set(listed.map((m) => m.id));
+    const expected = getLiveZenCatalog()
+      .filter((m) => isServableModel(m.id, "opencode"))
+      .map((m) => m.id);
+    // Nothing servable is missing — that is the whole point.
+    expect(expected.filter((id) => !ids.has(id))).toEqual([]);
+    // And the list is the catalog's size, not the adapter's single fake row.
+    expect(ids.size).toBeGreaterThanOrEqual(expected.length);
+
+    stop?.();
   });
 
   it("degrades to a no-op when the Host exposes no listing at all", () => {
