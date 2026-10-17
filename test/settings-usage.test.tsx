@@ -153,6 +153,37 @@ describe("settings: reading the quota through the Host", () => {
       readGoUsage(scopeWith(async () => 42))
     ).resolves.toBeUndefined();
   });
+
+  it("survives a remote whose guarded access THROWS", async () => {
+    // The regression this pins: `scope.remote.opencodeGoUsage` is not an
+    // optional chain, it is a cordis GUARDED PROPERTY. For a namespace this
+    // bundle never declared in `inject` it throws
+    // `cannot get property "remote.opencodeGoUsage" without inject`, and a
+    // throw out of a render takes the whole settings card — which is what "the
+    // usage meter is not shown properly" was.
+    //
+    // The meter's own injector was fixed for this once already. This call site
+    // was missed, so the card still died. Both now read through the one guard
+    // in `settings-remote.ts`, and this is the test that says so.
+    const throwingRemote = new Proxy(
+      {},
+      {
+        get: (_target, prop) => {
+          if (prop === "opencodeGoUsage") {
+            throw new TypeError(
+              'cannot get property "remote.opencodeGoUsage" without inject'
+            );
+          }
+          // Every other namespace is simply absent, as on a host that mounts
+          // nothing — the throw is the whole point of the fixture.
+        },
+      }
+    );
+
+    await expect(
+      readGoUsage({ remote: throwingRemote })
+    ).resolves.toBeUndefined();
+  });
 });
 
 describe("settings: the summary container", () => {

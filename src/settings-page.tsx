@@ -27,6 +27,7 @@ import { OpencodeCard } from "./settings-card.tsx";
 import { en, zh } from "./settings-copy.ts";
 import { SPECS } from "./settings-fields.ts";
 import type { LoginRemoteCalls } from "./settings-login.tsx";
+import { remoteNamespace } from "./settings-remote.ts";
 import { readGoUsage } from "./settings-usage.tsx";
 import { usageRemote } from "./usage-contract.ts";
 import { UsagePill } from "./usage-pill.tsx";
@@ -138,41 +139,14 @@ export const loginCalls = (ctx: ClientContext): LoginRemoteCalls => {
 /**
  * Read a namespace off the host's remote face, or `undefined` when it is absent.
  *
- * Cordis guards property access on a remote service by NAME. A namespace this
- * bundle has not declared in `inject` throws
- * `cannot get property "remote.opencodeLogin" without inject` rather than
- * answering `undefined`, and an optional chain cannot catch a throw - which is
- * the error the reporter's screenshot showed, and why neither the meter nor the
- * sign-in row appeared. Declaring the names is not the answer either: a name in
- * `inject` is a HARD gate that stops the whole plugin activating until it exists,
- * which is what took the meter out once with "web boot: 1 entry did not activate".
- *
- * So the read is guarded, and the absence is reported by the caller that already
- * handles a genuine "the host mounted none".
- *
- * @param remote - the host's remote face.
- * @param namespace - the namespace to read.
- * @returns the namespace's calls, or `undefined` when it is not reachable.
+ * The implementation lives in `settings-remote.ts` and is shared with the
+ * settings card, which carried the same unguarded read after the meter was
+ * fixed. See that module for why the guard has to exist at all: Cordis guards
+ * property access by NAME and throws, and an optional chain cannot catch a
+ * throw.
  */
-const remoteNamespace = (
-  remote: unknown,
-  namespace: string
-):
-  | Record<string, ((query?: unknown) => Promise<unknown>) | undefined>
-  | undefined => {
-  try {
-    const face = (remote as Record<string, unknown> | undefined)?.[namespace];
-    if (face === undefined || face === null || typeof face !== "object") {
-      return undefined;
-    }
-    return face as Record<
-      string,
-      ((query?: unknown) => Promise<unknown>) | undefined
-    >;
-  } catch {
-    return undefined;
-  }
-};
+
+export { remoteNamespace } from "./settings-remote.ts";
 
 /** The value a Remote result carries, or a thrown failure. */
 export const unwrapRemote = async (result: unknown): Promise<unknown> => {

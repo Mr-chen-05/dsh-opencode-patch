@@ -24,6 +24,7 @@ import React from "react";
 import { formatUsd } from "./go-limits.ts";
 import { isRecord } from "./guards.ts";
 import type { Translate } from "./settings-copy.ts";
+import { isRemoteCall, remoteNamespace } from "./settings-remote.ts";
 import type { GoUsage, UsageWindow } from "./usage-contract.ts";
 import { formatRelativeReset, getWindowState, resetLabel } from "./usage-ui.ts";
 
@@ -48,11 +49,6 @@ export const isGoUsage = (value: unknown): value is GoUsage =>
   isWindow(value.weekly) &&
   isWindow(value.monthly);
 
-/** Whether a value can be called as the Host's read. A predicate, not a cast. */
-const isReadFunction = (
-  value: unknown
-): value is (query: unknown) => Promise<unknown> => typeof value === "function";
-
 /**
  * Read the Go plane's quota through the Host service.
  *
@@ -68,21 +64,38 @@ export const readGoUsage = async (
   // for all of them — so each one says which it was. Without this, "no remote",
   // "no service" and "an answer this does not recognise" are one symptom, and
   // finding the cause means reading the host's code instead of the console.
-  if (!isRecord(scope) || !isRecord(scope.remote)) {
+  //
+  // The namespace is read through the shared guard, NOT as
+  // `scope.remote.opencodeGoUsage`. Cordis guards property access by name and
+  // THROWS for a namespace this bundle never declared in `inject`, and an
+  // optional chain cannot catch a throw — so the direct read takes the whole
+  // settings card down, which is what "the meter is not shown" was. The meter's
+  // own injector was fixed for exactly this; this call site was not, and that is
+  // the second fix this now does not need.
+  const remote = isRecord(scope) ? scope.remote : undefined;
+  if (remote === undefined) {
     console.warn(
       "[dsh-opencode-patch] usage read: the settings scope exposes no remote"
     );
     return undefined;
   }
-  const service = scope.remote.opencodeGoUsage;
-  if (!isRecord(service) || !isReadFunction(service.read)) {
+  const namespace = remoteNamespace(remote, "opencodeGoUsage");
+  if (namespace === undefined) {
     console.warn(
       "[dsh-opencode-patch] usage read: no opencodeGoUsage service on the remote",
-      Object.keys(isRecord(scope.remote) ? scope.remote : {})
+      Object.keys(isRecord(remote) ? remote : {})
     );
     return undefined;
   }
-  const result: unknown = await service.read({ provider: "opencode-go" });
+  const call = namespace.read;
+  if (!isRemoteCall(call)) {
+    console.warn(
+      "[dsh-opencode-patch] usage read: no opencodeGoUsage service on the remote",
+      Object.keys(namespace)
+    );
+    return undefined;
+  }
+  const result: unknown = await call({ provider: "opencode-go" });
   const value = isRecord(result) && "value" in result ? result.value : result;
   if (!isGoUsage(value)) {
     console.warn(

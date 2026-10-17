@@ -25,7 +25,11 @@ import type {
   LoginCredential,
   LoginCredentialReader,
 } from "./login-credential.ts";
-import { enrichModelsResponse, isModelsListingUrl } from "./models-catalog.ts";
+import {
+  enrichModelsResponse,
+  findModelSpec,
+  isModelsListingUrl,
+} from "./models-catalog.ts";
 import {
   fallbackSessionId,
   isOpenCodeSessionId,
@@ -59,6 +63,44 @@ const gatewayPlaneFor = (url: string): string => {
     return "opencode";
   }
   return "";
+};
+
+/**
+ * Whether the model a body names is one the gateway admits with no key.
+ *
+ * The gateway's free-tier rule is per-model, not per-plane: `allowAnonymous` on
+ * the model entry admits a request with no key at all, or with the literal
+ * `public`, and the proxy strips it before forwarding
+ * (`packages/console/app/src/lib/inference-proxy.ts`, identical in 1.19 and 2.x;
+ * `docs/upstream-findings.md` §1.5). So "no credential resolved" is only a fault
+ * for a model that NEEDS one, and reporting it for a free model sends the reader
+ * to set a key they do not need.
+ *
+ * The body is read rather than assumed, because the model is the only thing that
+ * decides. A plane-level check would be wrong in both directions: the Zen plane
+ * offers free models, and so does Go, which serves them by subscription key.
+ *
+ * @param body - the request body, when there is one to read.
+ * @returns whether the model it names is flagged free.
+ */
+const isFreeModelBody = (body: RequestInit["body"]): boolean => {
+  if (typeof body !== "string" || body.length === 0) {
+    return false;
+  }
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (typeof parsed !== "object" || parsed === null) {
+      return false;
+    }
+    const model: unknown = (parsed as Record<string, unknown>).model;
+    // Both JSON routes carry the id under `model`, the Responses API included.
+    if (typeof model !== "string" || model.length === 0) {
+      return false;
+    }
+    return findModelSpec(model)?.is_free === true;
+  } catch {
+    return false;
+  }
 };
 
 /** The credential header the request's protocol actually reads. */
@@ -365,18 +407,24 @@ export const patchFetch = (
         ) {
           headers.set("authorization", `Bearer ${fallbackKey}`);
         }
-      } else if (plane.length > 0 && !warnedNoCredential.has(plane)) {
-        // No credential resolved for a gateway request, so the adapter's own
-        // placeholder is what goes out and the gateway answers 401 - which the
-        // user reads as "API key invalid" with nothing to act on. The message
-        // states what was COMPUTED and nothing it was not: which sources were
-        // consulted and what each answered, so the reader can tell a missing env
-        // var from a missing login from a disabled store read.
+      } else if (
+        plane.length > 0 &&
+        !warnedNoCredential.has(plane) &&
+        // A free model is ADMITTED with no credential at all, so "no credential
+        // resolved" is not a failure there and saying it is sends the reader to
+        // a key they do not need. The gateway's own rule is per-model
+        // (`allowAnonymous` on the model entry, with no key or the literal
+        // `public` - `docs/upstream-findings.md` §1.5), so the model is asked
+        // rather than the plane. Keep the placeholder: the proxy strips it for
+        // an anonymous request anyway, so stripping it here would change nothing
+        // but would also deprive a keyless-but-paid model of a header to fill.
         //
-        // This is the guard the tier bug needed. A mis-classified tier made a
-        // captured, working key invisible here, the request went out with the
-        // placeholder, and the only symptom was an auth error on a credential
-        // that was fine.
+        // `init.body` is read, not the `Request`: the tool-injection block below
+        // resolves a `Request`-carried body, and this check runs before it. A
+        // body the switch cannot see answers "not free", which is the safe
+        // side - the warning is the status quo, not a new failure.
+        !isFreeModelBody(init?.body)
+      ) {
         warnedNoCredential.add(plane);
         const sources: string[] = [
           `a key on the request: ${requestKey === undefined ? "none" : "present"}`,
@@ -398,22 +446,6 @@ export const patchFetch = (
       }
     }
 
-    // 1. Session headers, as the version this plugin emulates sends them.
-    //
-    // Read from the 1.x line's last release, v1.19.3, in
-    // `packages/opencode/src/session/llm/request.ts`:
-    //
-    //   x-opencode-session-id -> sessionID     always
-    //   x-opencode-session    -> sessionID     for opencode providers
-    //   x-opencode-request    -> user.id       for opencode providers
-    //   x-session-affinity    -> sessionID     for OTHER providers only
-    //   X-Session-Id          -> sessionID     for OTHER providers only
-    //
-    // So `x-opencode-session` and `x-opencode-session-id` carry the SAME value,
-    // and the affinity pair belongs to relays. 2.x changed the first of those to
-    // an affinity id and split the value; an earlier version of this block
-    // followed 2.x, which put a subagent in its own cache group. The plugin
-    // emulates 1.19.3, so it follows 1.19.3.
     // 1. Session headers, as the version this plugin emulates sends them.
     //
     // Read from the 1.x line's last release, v1.19.3, in

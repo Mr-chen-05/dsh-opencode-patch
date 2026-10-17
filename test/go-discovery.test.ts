@@ -46,6 +46,7 @@ import {
 } from "../src/go-discovery.ts";
 import {
   clearCapturedApiKeys,
+  getCapturedApiKey,
   isPlaceholderApiKey,
   recordCapturedApiKey,
 } from "../src/key-capture.ts";
@@ -1076,6 +1077,36 @@ describe("gaps characterised while pinning the policy", () => {
     );
     const routed = await resolveRoutedKey(context, "opencode-go", "request");
     expect(routed.key).toBe("sk-real-captured");
+  });
+
+  it("treats the gateway's keyless sentinel as not a credential", async () => {
+    // A free-tier model is admitted with no key at all, or with the literal
+    // `public` — the proxy strips it before forwarding
+    // (`packages/console/app/src/lib/inference-proxy.ts`, both 1.19 and 2.x:
+    // `const anonymous = !key || key === "public"`). `docs/upstream-findings.md`
+    // §1.5. Old code omitted it, so the literal was captured, then forwarded as
+    // a real Bearer, which turns an admitted free request into an
+    // authenticated one and answers 401.
+    expect(isPlaceholderApiKey("public")).toBe(true);
+    expect(isPlaceholderApiKey("PUBLIC")).toBe(true);
+
+    // Never captured from a live request, however it arrives.
+    clearCapturedApiKeys();
+    recordCapturedApiKey("public", "opencode-go", GO_REQUEST);
+    expect(getCapturedApiKey("opencode-go")).toBeUndefined();
+
+    // And never used as a declared env credential, so a free turn goes out
+    // keyless rather than carrying the sentinel.
+    const context = composition([
+      registryEntry("opencode-go", {
+        headers: { authorization: "Bearer public" },
+      }),
+    ]);
+    process.env.OPENCODE_GO_API_KEY = "public";
+    expect(
+      await resolveGoApiKey(context, "opencode-go", "auto")
+    ).toBeUndefined();
+    expect(discoverGoConfig(context).literalKey).toBeUndefined();
   });
 
   it("filters a Zen key out of the Go endpoint however it was filed", async () => {

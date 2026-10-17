@@ -90,6 +90,11 @@ describe("patchFetch", () => {
     // invisible, the adapter's placeholder went out, and the only symptom was a
     // 401 the user read as an invalid key on a credential that was fine. So the
     // silence is replaced by a line that states what each source answered.
+    //
+    // The request goes to the Go plane, because the Zen plane offers free models
+    // the gateway admits with no key at all, and reporting a missing key there
+    // sends the reader to set one they do not need — see
+    // `docs/upstream-findings.md` §1.5 and the companion test below.
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const warnings: unknown[][] = [];
     const original = console.warn;
@@ -108,7 +113,7 @@ describe("patchFetch", () => {
       );
       // A gateway request with no credential anywhere: no key on the request, no
       // captured key, no env var, no login, and the installation store off.
-      await patched("https://opencode.ai/inference/v1/chat/completions", {
+      await patched("https://opencode.ai/zen/go/v1/chat/completions", {
         body: JSON.stringify({ messages: [] }),
         headers: {},
         method: "POST",
@@ -123,12 +128,56 @@ describe("patchFetch", () => {
     expect(line, "the absence must be reported, not passed over").toBeDefined();
     // It states what it consulted and what each answered, so a missing env var
     // reads differently from a missing login.
-    expect(line).toContain("opencode");
-    expect(line).toContain("OPENCODE_API_KEY: unset");
+    expect(line).toContain("opencode-go");
+    expect(line).toContain("OPENCODE_GO_API_KEY: unset");
     expect(line).toContain(
       "a key captured from a live request (policy auto): none"
     );
     expect(line).toContain("not enabled");
+  });
+
+  it("does NOT report a missing key on a plane that offers free models", async () => {
+    // The gateway admits a free model with no credential at all, or with the
+    // literal `public` (per-model `allowAnonymous`;
+    // `docs/upstream-findings.md` §1.5). So "no credential resolved" is not a
+    // fault on the Zen plane, which offers them, and the warning would name a
+    // key the user does not need. The Go plane has no free tier, so the same
+    // keyless request there does report — the pair pins the distinction.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const warnings: unknown[][] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+    try {
+      const ok = vi.fn(async () =>
+        Response.json({ ok: true }, { status: 200 })
+      );
+      const patched = patchFetch(
+        ok as unknown as typeof fetch,
+        als,
+        resolveConfig(),
+        {}
+      );
+      await patched("https://opencode.ai/zen/v1/chat/completions", {
+        body: JSON.stringify({
+          messages: [],
+          model: "space-bunny-free",
+        }),
+        headers: {},
+        method: "POST",
+      });
+    } finally {
+      console.warn = original;
+    }
+
+    const lines = warnings
+      .map((args) => args.map(String).join(" "))
+      .filter((text) => text.includes("no credential resolved"));
+    expect(
+      lines,
+      "a keyless free turn is a success, not a missing credential"
+    ).toHaveLength(0);
   });
 
   it("does not name the sources when a credential does resolve", async () => {
