@@ -242,15 +242,21 @@ const otherProtocols = (expected: string) =>
 /**
  * Whether the gateway is refusing the FREE TIER rather than the route.
  *
- * The free tier moved with OpenCode 1.19.3's new API, and it is gated on a
- * credential this plugin does not hold. Measured, one request each, on
- * `space-bunny-free`: the deployment's `oc_…` key answers `403 FreeTierError` on
- * both `…/zen/v1` and the new `…/inference/openai/v1`, with and without
- * `x-opencode-org-id`; the literal `public` answers the same; and the real
- * client — whose captured request carries an `st_…` session token — is served.
+ * Measured, one request each, on `step-5-preview-free` — which was the canonical
+ * free-tier id when those runs were made and has since been retired, so the
+ * cases below now sample `space-bunny-free`: the deployment's `oc_…` key answers
+ * `403 FreeTierError` on both `…/zen/v1` and the new `…/inference/openai/v1`,
+ * with and without `x-opencode-org-id`; the literal `public` answers the same;
+ * and the real client — whose captured request carries an `st_…` session token —
+ * is served.
  *
- * So this is not the account and not the route: the paid path still works with
- * an API key, and the free path needs a session token from an account login.
+ * **Read that as a statement about the CLIENT, not the credential.** The
+ * gateway's own message is "OpenCode's free tier can only be used from within
+ * OpenCode", and presenting as that client is what this plugin does — so a free
+ * model is OFFERED now, and a refusal names its own reason rather than being
+ * pre-empted by an exclusion. What the older runs establish still holds: an
+ * org id and a key do not unlock it.
+ *
  * `docs/opencode-1.19-api.md` has the endpoints, the captured headers and the
  * login flow.
  */
