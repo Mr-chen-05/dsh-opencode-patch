@@ -100,11 +100,46 @@ export const statusOf = (
  * @param props - the remote's calls and the translator.
  * @returns the row, or nothing when the host mounted no login service.
  */
+/**
+ * The plane the user last chose, cached instead of reset to Zen on every mount.
+ *
+ * The row is a CHOICE of type — pay-as-you-go Zen or the Go subscription — and a
+ * grant is stored per plane, so re-opening settings must not silently flip the
+ * reader back to the other one and re-read its state. `localStorage` because this
+ * is a per-browser preference, not a deployment setting: it belongs to the person
+ * looking at the card, and it must not travel with the plugin's config.
+ *
+ * Both accessors swallow: a browser in private mode, or a host that renders this
+ * server-side, must render the row rather than fail on a storage call.
+ */
+const PLANE_STORAGE_KEY = "dsh-opencode-patch:login-plane";
+
+const readStoredPlane = (): LoginPlane | undefined => {
+  try {
+    const raw = globalThis.localStorage?.getItem(PLANE_STORAGE_KEY);
+    return raw === "opencode" || raw === "opencode-go" ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const rememberPlane = (plane: LoginPlane): void => {
+  try {
+    globalThis.localStorage?.setItem(PLANE_STORAGE_KEY, plane);
+  } catch {
+    // No storage: the choice lasts for this mount only, which is still better
+    // than resetting it on every render.
+  }
+};
+
 export const LoginSection: React.FC<LoginSectionProps> = (
   props: LoginSectionProps
 ) => {
   const { login, t } = props;
-  const [plane, setPlane] = useState<LoginPlane>("opencode");
+  // Lazily initialised so the cache is read once per mount, not on every render.
+  const [plane, setPlane] = useState<LoginPlane>(
+    () => readStoredPlane() ?? "opencode"
+  );
   const [state, setState] = useState<LoginState>();
   const [challenge, setChallenge] = useState<LoginChallenge>();
   const [failure, setFailure] = useState<string>();
@@ -285,6 +320,7 @@ export const LoginSection: React.FC<LoginSectionProps> = (
     setChallengeReceivedAt(undefined);
     setFailure(undefined);
     setPlane(next);
+    rememberPlane(next);
   };
 
   return (

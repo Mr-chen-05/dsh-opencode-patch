@@ -34,6 +34,63 @@ const calls = (
   ...overrides,
 });
 
+describe("settings: the sign-in row remembers its plane", () => {
+  const KEY = "dsh-opencode-patch:login-plane";
+
+  afterEach(() => {
+    localStorage.removeItem(KEY);
+  });
+
+  it("starts on the plane that was last chosen, not always Zen", async () => {
+    // A grant is stored PER PLANE, so resetting the radio to Zen on every mount
+    // silently re-reads the wrong plane's state and shows "not signed in" to
+    // someone who signed in on Go. The choice is cached for that reason.
+    localStorage.setItem(KEY, "opencode-go");
+    const read: string[] = [];
+    render(
+      <LoginSection
+        login={calls({
+          read: (plane) => {
+            read.push(plane);
+            return Promise.resolve({ orgs: [], plane, signedIn: false });
+          },
+        })}
+        t={t}
+      />
+    );
+    await waitFor(() => {
+      expect(read).toContain("opencode-go");
+    });
+    expect(read).not.toContain("opencode");
+  });
+
+  it("caches a newly chosen plane, so the next mount keeps it", async () => {
+    const view = render(<LoginSection login={calls()} t={t} />);
+    // Scoped to this render: an earlier case in this file leaves its own row
+    // mounted, and an unscoped query matches both.
+    const go = within(view.container).getByLabelText(zh.loginPlaneGo);
+    fireEvent.click(go);
+    expect(localStorage.getItem(KEY)).toBe("opencode-go");
+  });
+
+  it("renders without storage rather than failing on it", () => {
+    // Private mode and a server render both make the storage calls throw; the row
+    // must still render.
+    const getItem = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new Error("denied");
+      });
+    try {
+      expect(() =>
+        render(<LoginSection login={calls()} t={t} />)
+      ).not.toThrow();
+    } finally {
+      getItem.mockRestore();
+    }
+  });
+});
+
 describe("settings: the sign-in row", () => {
   it("cancels a flow it started, on the way out", async () => {
     // A flow started from the card could only be abandoned by reloading the page.
