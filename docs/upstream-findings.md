@@ -370,10 +370,37 @@ So enumerating `opencode` returned the completions bucket alone, and every Respo
 
 **If the picker ever looks short again, check this join first.** It is invisible from the outside: the models are not filtered, not deprecated, just never enumerated.
 
+## 3.11 The provider list was wrong in both directions — FIXED
+
+`DEFAULT_PROVIDERS` exists to cover every route this layer mounts; an unclaimed route gets no session header, no origin headers and no key injection, silently and only on the requests that reach it. It was wrong twice:
+
+- **missing `opencode-google`**, which the Google bridge mounts rather than the wrapper (`SELF_MOUNTED_ROUTES` excludes it from the mount loop, which is why it was easy to miss). It matters more now: the picker publishes the whole catalog on the parent route, so a Google model is reachable and dispatched there.
+- **`cordis.patch.yml` claimed `opencode-mistral`**, a route this layer does not mount at all — Mistral is deliberately unserved.
+
+The row's `providers` list REPLACES the code default, so the two drifting apart is exactly how this survived. A manifest test now requires them to be equal.
+
 ## 4. How to re-check any of this
+
+Most of this document exists because four separate bugs had the same invisible shape: a model that is dropped is not filtered, not deprecated and not erroring — it is simply absent. Each was found with a hand-written script that was then thrown away. That script is now kept:
+
+```sh
+pnpm run catalog:verify        # offline: shim, join, routing, free-tier tools
+pnpm run catalog:verify:probe  # adds a live probe of every offered model
+```
+
+It checks, and exits non-zero on any failure:
+
+1. **Shim freshness** — the bundled `catalog-data.ts` equals the live registry minus the retired ids (the generator's own rule; comparing against the raw parse reports `claude-sonnet-4` as missing, because it is active in the registry and retired here).
+2. **Dead rows** (`--probe`) — no offered model answers `400 Model is unavailable` or `410 ModelDeprecated`.
+3. **The picker's join** — every servable model reaches the parent route's list.
+4. **Routing** — every servable model resolves to a route this plugin mounts.
+5. **Free-tier tools** — every free model gets the core-tool fallback.
+
+### The general method
 
 1. Find the upstream source that **produces** the value, not a client that consumes it.
 2. Simulate the upstream algorithm directly, over the range that matters.
 3. Compare the distribution against the claimed constraint. A constraint the upstream violates in its common case is not a constraint.
+4. When a claim is about what the GATEWAY does, probe the gateway. `401`/`403` means the model exists and the credential is missing; `400`/`410` means it is gone. That one table settled the free-tier, deprecation and retirement questions at once.
 
-For the session id, step 2 is already written: `scripts/verify-session-band.ts` prints the low-12 distribution of our own derivation and of a faithful port of the vendor's generator.
+For the session id specifically, `scripts/verify-session-band.ts` reproduces the refutation in §3.1 against a byte-for-byte port of the vendor's generator.

@@ -62,6 +62,8 @@
   "scripts": {
     "build": "vp pack && node --experimental-strip-types scripts/name-client-bundle.ts",
     "catalog:shim": "node --experimental-strip-types scripts/regenerate-catalog-shim.ts",
+    "catalog:verify": "node --experimental-strip-types scripts/verify-catalog.ts",
+    "catalog:verify:probe": "node --experimental-strip-types scripts/verify-catalog.ts --probe",
     "limits:shim": "node --experimental-strip-types scripts/generate-go-limits.ts",
     "check": "vp check",
     "clean": "rm -rf lib",

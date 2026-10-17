@@ -121,7 +121,7 @@ When `decorateModelInfo` or `decoratePlaneAdapters` enriches a model:
 Full implementation parity is locked by a multi-layered automated test matrix:
 
 1. **Unit & Integration Suites (`test/*.test.ts`)**:
-   - 62 test files covering all configuration readers, session derivation, catalog parsers, routing tables, and UI state machines.
+   - Cover every configuration reader, session derivation, catalog parser, routing table and UI state machine. The count is deliberately not written here: a number in prose does not regenerate with the suite it counts, and this file already carried a stale one.
    - Fast-executing, isolated in-memory test workers.
 2. **Gateway Contract Mock Suites (`test/mock/*.mock.ts`)**:
    - Strict HTTP wire contract tests verifying byte-level header injection, SSE chunk streaming, and 401/403/429/502 error emulation.
