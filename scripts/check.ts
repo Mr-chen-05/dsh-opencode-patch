@@ -263,13 +263,25 @@ const CHILD_ENV = Object.fromEntries(
 );
 
 try {
-  const [packed] = JSON.parse(
+  // `npm pack --json` answers with an array of results through npm 11 and with
+  // a name-keyed object from npm 12 on, which is what Node 26 ships and what CI
+  // runs. Both shapes are read rather than pinning the toolchain: the value
+  // wanted is one pack result either way.
+  const packReport = JSON.parse(
     execFileSync(
       "npm",
       ["pack", "--json", "--ignore-scripts", "--pack-destination", scratch],
       { cwd: ROOT, encoding: "utf8", env: CHILD_ENV }
     )
-  ) as [{ filename: string; entryCount: number }];
+  ) as
+    | { filename: string; entryCount: number }[]
+    | Record<string, { filename: string; entryCount: number }>;
+  const packed = Array.isArray(packReport)
+    ? packReport[0]
+    : Object.values(packReport)[0];
+  if (packed === undefined) {
+    throw new Error("npm pack --json answered with no result");
+  }
 
   const project = join(scratch, "consumer");
   execFileSync("mkdir", ["-p", project]);
@@ -506,8 +518,16 @@ if (releaseYml.includes("scripts/publish-scoped.ts")) {
  * from the card could only be abandoned by reloading the page, and the effect
  * that owns the poll loop now cancels the flow it owns on the way out. The
  * growth is the cancel call, its result type and the release path.
+ *
+ * Raised 120 -> 124 KB when the client measured 123122 bytes and this ceiling
+ * caught it. The commit that crossed the line grew it by 835 bytes — the meter
+ * saying WHY it renders nothing instead of rendering nothing quietly — and the
+ * growth since the last raise is that kind of thing: copy and JSX in the usage
+ * and settings surfaces, hundreds of bytes at a time. Nothing in the curve is a
+ * dependency that should have stayed external, which is the case this tripwire
+ * exists to catch.
  */
-const CLIENT_BUDGET = 120 * 1024;
+const CLIENT_BUDGET = 124 * 1024;
 const clientPath = join(ROOT, "lib/client.js");
 if (existsSync(clientPath)) {
   const clientStat = statSync(clientPath);
