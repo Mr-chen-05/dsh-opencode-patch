@@ -18,6 +18,7 @@ import {
   KEY_SOURCE_POLICIES,
   resolveConfig,
   type ActiveTurnState,
+  type ModelOverrideConfig,
   type PluginConfig,
 } from "../src/index.ts";
 
