@@ -361,15 +361,15 @@ Fixture ids that pointed at now-dead models were retargeted to served ones: `ste
 
 So enumerating a parent route returns that route's own models, and a Responses / Messages / Google model is only listed if the deployment declared it:
 
-|                              |    rows |
-| :--------------------------- | ------: |
-| adapter's completions bucket |      28 |
-| a declared list of one id    |       1 |
-| after the (withdrawn) join   |  **87** |
+|                              |   rows |
+| :--------------------------- | -----: |
+| adapter's completions bucket |     28 |
+| a declared list of one id    |      1 |
+| after the (withdrawn) join   | **87** |
 
 **A join was added here and then withdrawn.** It merged the plane's whole catalog into `listModels` so that models on the hidden routes would be reachable. It did make them reachable — and it silently overrode every explicit `models:` array, which is a configuration decision this plugin is in no position to answer for. The failure was invisible on screen: nobody can tell 27 rows from 87 without counting the config. What surfaced was a user picking a model their deployment never offered, and that model failing for reasons that had nothing to do with the plugin.
 
-The rule that replaced it: **a route's list is not ours to widen.** `listModels` filters (a model the plane cannot serve is dropped, because offering one produces a failure with nothing in the row to explain it) and otherwise returns exactly what the deployment declared. `internalRouteFor` still redirects a *declared* model whose protocol differs, so a Responses / Messages / Google id keeps working — it just has to be listed. `test/picker-integration.test.ts` holds the picker to the declaration, and `models-discovery.test.ts` asserts that a servable catalogued model which was not declared stays out.
+The rule that replaced it: **a route's list is not ours to widen.** `listModels` filters (a model the plane cannot serve is dropped, because offering one produces a failure with nothing in the row to explain it) and otherwise returns exactly what the deployment declared. `internalRouteFor` still redirects a _declared_ model whose protocol differs, so a Responses / Messages / Google id keeps working — it just has to be listed. `test/picker-integration.test.ts` holds the picker to the declaration, and `models-discovery.test.ts` asserts that a servable catalogued model which was not declared stays out.
 
 ## 3.11 The provider list was wrong in both directions — FIXED
 

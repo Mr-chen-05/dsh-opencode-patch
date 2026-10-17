@@ -153,7 +153,7 @@ So the shape that follows:
 
   This plugin already has the shape for it: `token-store.ts` writes a `grant` whose payload is the owner's to define, and an account and an org are exactly that. What it must NOT do is infer the plane from the token's prefix — `st_...` is a useful confirmation, not a contract, and the login is where the answer is actually known.
 
-- **A model's reachability follows from the plane it resolved on — and a refusal is reported, not hidden.** Zen refuses its free ids by the gateway's own decision; the Go plane has no free tier to gate and serves its free models by subscription key. The picker offers both, and a refusal comes back named (`400 free_tier_restricted`) rather than the row disappearing.
+- **A model's reachability follows from the plane it resolved on — and a refusal is reported, not hidden.** Zen refuses its free ids by the gateway's own decision; the Go plane has no free tier to gate and serves its free models by subscription key. The picker offers both, and a refusal comes back verbatim (`403 FreeTierError`, with the gateway's own message) rather than the row disappearing.
 - **Zero configuration survives.** A deployment that pastes a key gets the key plane and today's behaviour; one that logs in gets the account plane as a working credential for paid models — the free tier is granted to neither. Neither names an endpoint.
 
 The endpoint, notably, is NOT part of this. Both paths answer identically for a paid model, so the plane is a description of what a credential can reach — not a different address. The tables stay as the key plane's description; the account plane is described by what the login returns.

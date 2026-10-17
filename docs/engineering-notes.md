@@ -220,7 +220,7 @@ The rule that would have caught it is already written above and was not applied:
 
 ## Auto review has two failure modes, and only one of them is about the model
 
-`403 free_tier_restricted` is the one this work chased: the audit call takes its route from `session.requestHeader()`, so a session selected on a Zen free-tier model fails before the patch's headers matter.
+`403 FreeTierError` (passed through unchanged, after a remap to 400 was tried and withdrawn) is the one this work chased: the audit call takes its route from `session.requestHeader()`, so a session selected on a Zen free-tier model fails before the patch's headers matter.
 
 `429 RATE_LIMIT: Upstream request failed: Endpoint is unavailable` is a second one, observed afterwards, and it is not about the model, the tier, or this plugin. The reviewer's own endpoint is rate-limited or down, and the tool call is refused before its body runs — which is what a refused tool call looks like from the outside, and why "auto-review failed" is not by itself evidence about the plugin.
 

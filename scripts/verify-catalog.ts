@@ -176,29 +176,33 @@ if (PROBE) {
   }
 }
 
-// ── 3. The picker's join ────────────────────────────────────────────────────
-console.log("\n3. the picker's join");
+// ── 3. The declared list is published verbatim ──────────────────────────────
+console.log("\n3. the declared list is not widened");
 for (const [route, catalog, plane] of [
   ["opencode", getLiveZenCatalog(), "zen"],
   ["opencode-go", getLiveGoCatalog(), "go"],
 ] as const) {
-  // The adapter behind a parent route carries only its own protocol's models, so
-  // the join is what publishes the rest. Simulated with an empty adapter list,
-  // which is the worst case: everything must come from the catalog.
-  const listed = mergeDiscoveredModels([], plane, catalog).filter((m) =>
+  // A deployment declares some ids; the picker must publish exactly those. An
+  // earlier revision merged the whole catalog in, which silently overrode every
+  // `models:` array. This asserts the opposite: declared in, declared out.
+  const declared = catalog
+    .filter((m) => isServableModel(m.id, route))
+    .slice(0, 3)
+    .map((m) => ({ id: m.id, name: m.name }));
+  const listed = mergeDiscoveredModels(declared, plane, catalog).filter((m) =>
     isServableModel(m.id, route)
   );
-  const expected = catalog
-    .filter((m) => isServableModel(m.id, route))
-    .map((m) => m.id);
   const listedIds = new Set(listed.map((m) => m.id));
-  const missing = expected.filter((id) => !listedIds.has(id));
-  if (missing.length > 0) {
+  const declaredIds = declared.map((m) => m.id);
+  const added = [...listedIds].filter((id) => !declaredIds.includes(id));
+  if (added.length > 0) {
     fail(
-      `${route}: ${missing.length} servable models never join: ${missing.slice(0, 5).join(", ")}`
+      `${route}: ${added.length} undeclared models were added: ${added.slice(0, 5).join(", ")}`
     );
   } else {
-    ok(`${route}: all ${expected.length} servable models are published`);
+    ok(
+      `${route}: exactly the ${declaredIds.length} declared model(s), nothing added`
+    );
   }
 }
 

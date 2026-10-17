@@ -144,7 +144,7 @@ describe("mergeDiscoveredModels", () => {
     expect(ids).toContain("adapter-only");
   });
 
-  it("keeps adapter rows, appends missing rows, and drops an empty id", () => {
+  it("keeps adapter rows, drops an empty id, and does NOT append the catalog", () => {
     const merged = mergeDiscoveredModels(
       [
         {
@@ -164,13 +164,12 @@ describe("mergeDiscoveredModels", () => {
       ]
     );
 
-    // `muse-spark-1.2-contributor-free` is KEPT now: it answers on the zen plane
-    // (measured `403 FreeTierError`), so it is not retired. It used to be dropped
-    // here, which is one of the working models that went missing.
+    // **Exactly what the adapter reported.** The catalog supplies metadata, not
+    // rows: a refresh must not widen the deployment's list, so `space-bunny-free`
+    // — catalogued, servable, and NOT declared here — stays out.
     expect(merged.map((model) => model.id)).toEqual([
       "adapter-model",
       "muse-spark-1.2-contributor-free",
-      "space-bunny-free",
     ]);
     // The adapter’s own capacities win over the canonical catalog.
     expect(merged[0]).toEqual({
@@ -189,9 +188,9 @@ describe("mergeDiscoveredModels", () => {
       [catalogRow("space-bunny-free", "Space Bunny Free")]
     );
 
+    // Kept — it is not retired — and the catalog appends nothing.
     expect(merged.map((model) => model.id)).toEqual([
       "muse-spark-1.2-contributor",
-      "space-bunny-free",
     ]);
   });
 
@@ -213,19 +212,26 @@ describe("mergeDiscoveredModels", () => {
       ]
     );
 
+    // Unsupported modalities are stripped from the adapter row, and the catalog
+    // row is not appended — the adapter answered.
     expect(merged).toEqual([
       {
+        contextWindow: undefined,
         id: "adapter-multimodal",
         inputModalities: ["text", "image"],
-      },
-      {
-        contextWindow: 1000000,
-        id: "catalog-multimodal",
-        inputModalities: ["text", "image"],
-        maxTokens: 131072,
-        name: "Catalog Multimodal",
+        maxTokens: undefined,
+        name: undefined,
       },
     ]);
+  });
+
+  it("stands the catalog in only when the adapter reported nothing", () => {
+    // An empty answer is an ABSENCE, not a declaration of "no models", so the
+    // catalog fills it — that is the one case where appending is right.
+    const merged = mergeDiscoveredModels([], "zen", [
+      catalogRow("space-bunny-free", "Space Bunny Free"),
+    ]);
+    expect(merged.map((model) => model.id)).toEqual(["space-bunny-free"]);
   });
 
   it("enriches candidate rows missing contextWindow or maxTokens from the catalog spec", () => {
@@ -308,7 +314,7 @@ describe("decorateModelDiscovery", () => {
     expect(ctx.llm?.discoverModels).toBe(original);
   });
 
-  it("adds Space Bunny and keeps the 1.2 row the zen plane serves", async () => {
+  it("keeps the 1.2 row the zen plane serves and adds nothing on refresh", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockRejectedValue(new Error("offline catalog test"))
@@ -338,7 +344,9 @@ describe("decorateModelDiscovery", () => {
       { baseURL: "https://opencode.ai/zen/v1", provider: "opencode" },
       undefined
     );
-    expect(ids).toContain("space-bunny-free");
+    // The refresh does NOT add catalog rows the deployment did not declare.
+    expect(ids).not.toContain("space-bunny-free");
+    expect(ids).toHaveLength(1);
     // Kept, not removed: it answers on zen (measured `403 FreeTierError`), so it
     // is not retired. Removing it was hiding a working model.
     expect(ids).toContain("muse-spark-1.2-contributor-free");

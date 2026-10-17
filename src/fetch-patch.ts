@@ -14,7 +14,6 @@ import type { AsyncLocalStorage } from "node:async_hooks";
 
 import { DEFAULT_GATEWAY_URLS, type ResolvedPluginConfig } from "./config.ts";
 import { resolveOpencodeStoreKey } from "./go-discovery.ts";
-import { isRecord } from "./guards.ts";
 import {
   extractApiKeyFromHeaders,
   getCapturedApiKey,
@@ -253,20 +252,6 @@ const resolveSessionHeader = (
   }
   return fallbackSessionId(sessionIdEnv);
 };
-
-/**
- * A gateway refusal, restated as a 400.
- *
- * 403 means "understood and refused" on this gateway, and DSH reads 403 as AUTH —
- * so passing one through tells a user with a working key that their key is
- * invalid. The `type` distinguishes the refusals; the message keeps the gateway's
- * words so it stays searchable.
- */
-const restrictedResponse = (message: string, type: string): Response =>
-  Response.json(
-    { error: { message, type } },
-    { status: 400, statusText: "Bad Request" }
-  );
 
 /**
  * Wrap `fetch` so claimed OpenCode requests carry the gateway's expected
@@ -596,94 +581,20 @@ export const patchFetch = (
       userAgent: headers.get("User-Agent") ?? null,
     });
 
-    // **403 is never a credential answer on this gateway.** It answers 401 for a
-    // credential it will not accept (`Missing API key`, `Invalid API key`, `Go
-    // requires a credential`) and 403 for a request it understood and refused.
-    // DSH's error classifier maps 403 to AUTH, so every refusal used to reach the
-    // user as "API key is invalid" — with a key that was working.
+    // **A 403 is passed through untouched, with the gateway's own words.**
     //
-    // Measured on the live gateway, all of these are 403 and none is about auth:
+    // A revision remapped it to 400 here, so DSH's classifier would stop reading
+    // it as AUTH. That was the wrong trade: it rewrote a status the gateway
+    // chose, and the user asked for the opposite — keep the 403, keep the real
+    // message. `classifyPiAiError` will label a 403 "AUTH", and that is the
+    // classifier's reading; the message under it is the gateway's and is
+    // accurate, which is what matters. Do not rewrite what the gateway said.
     //
-    //   FreeTierError            "…can only be used from within OpenCode…"
-    //   server_error             "Upstream request failed: Model access is disabled"
-    //   WAF 1010 (plain text)    the request did not look like the OpenCode client
-    //
-    // All three are remapped to 400 so the classifier reads them as a request
-    // problem rather than a key problem, and each keeps the gateway's own words so
-    // the reader can search them. The `type` is what tells them apart.
-    //
-    // **The status alone is not enough.** `classifyPiAiError` (dsh-llm-pi-ai)
-    // tests the MESSAGE for `\b(?:401|403)\b` before it looks at anything else,
-    // so a rewritten body that quotes the original code is still classified
-    // AUTH. Measured: this remap shipped and refusals still reached the user as
-    // "API key is invalid", because the rewritten text carried the code it was
-    // rewriting away. The text below therefore names the gateway's error, says
-    // 400, and never repeats 401/403.
-    // Scoped to INFERENCE requests. `/usage` answers 403 for "subscription
-    // required", and `GoUsageService` reads that status to say so — remapping it
-    // would leave the panel describing a permission problem as a bad request.
-    const isUsageRequest = (() => {
-      try {
-        return new URL(url).pathname.replace(/\/+$/u, "").endsWith("/usage");
-      } catch {
-        return false;
-      }
-    })();
-    if (response.status === 403 && !isUsageRequest) {
-      try {
-        const text = await response.clone().text();
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          parsed = undefined;
-        }
-
-        if (isRecord(parsed)) {
-          const inner = isRecord(parsed.error) ? parsed.error : parsed;
-          const type = typeof inner.type === "string" ? inner.type : "";
-          const message =
-            typeof inner.message === "string" ? inner.message : text;
-          if (
-            type.includes("FreeTier") ||
-            message.includes("FreeTierError") ||
-            message.includes("from within OpenCode")
-          ) {
-            return restrictedResponse(
-              "The gateway refused this model for the credential in use (FreeTierError). If it is a free-tier id the refusal is about this request rather than the key - the same credential answers 200 for a paid model on the same endpoint. DSH reports this as a request problem (400), not as an invalid API key.",
-              "free_tier_restricted"
-            );
-          }
-          // Everything else the gateway refuses with a JSON 403 is an
-          // entitlement answer: the key was accepted, the account does not have
-          // this model. `Model access is disabled` is the common one.
-          //
-          // The gateway's own words are kept, so the reader can search the answer
-          // - with one exception: a bare status token IN them would put the
-          // sentence straight back into `AUTH`, because the classifier reads the
-          // text before it reads the status. Generalizing the token keeps the
-          // sentence readable and keeps the answer about the refusal.
-          const refusal = `${type || "refusal"}: ${message.replaceAll(
-            /\b(?:401|403)\b/gu,
-            "4xx"
-          )}`;
-          return restrictedResponse(
-            `The gateway refused this model for this account (${refusal}). The credential was accepted - this is about what the account may use, not about the key. DSH reports this as a request problem (400), not as an invalid API key.`,
-            "entitlement_restricted"
-          );
-        }
-
-        if (text.includes("1010")) {
-          return restrictedResponse(
-            "Cloudflare refused this request (error code 1010): it did not look like the OpenCode client. This plugin restores the client User-Agent, so this means that restoration did not apply to this request. DSH reports this as a request problem (400), not as an invalid API key.",
-            "client_identity_blocked"
-          );
-        }
-      } catch {
-        // Fall back to the original response when the body cannot be read.
-      }
-    }
-
+    // Measured 403 shapes on this gateway, none of them about a credential:
+    //   FreeTierError  "…can only be used from within OpenCode…"
+    //   server_error   "Upstream request failed: Model access is disabled"
+    //   WAF 1010       the request did not look like the OpenCode client
+    // The credential case is a 401 (`Missing API key`, `Invalid API key`).
     const method = (
       init?.method ??
       (typeof Request !== "undefined" && input instanceof Request

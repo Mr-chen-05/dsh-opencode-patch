@@ -120,11 +120,18 @@ export const resolveDiscoveryProvider = (
 };
 
 /**
- * Merge canonical entries into an adapter’s discovery answer while honoring
- * provider-scoped retirements.
+ * Enrich an adapter’s discovery answer from the catalog, honoring provider-scoped
+ * retirements.
  *
- * The adapter’s own rows keep their capacities and order. Canonical rows are
- * appended only when the adapter did not already report that ID.
+ * The adapter’s own rows keep their capacities and order; a missing capacity is
+ * filled from the catalog. **Catalog rows are NOT appended when the adapter
+ * answered at all** — the deployment’s list is the list, and a refresh must not
+ * widen it. They are used only as a cold-start fallback, when the adapter
+ * reported nothing, so a route is never empty.
+ *
+ * An earlier version always appended the catalog. On the picker that was
+ * invisible until someone counted the rows; on a refresh it is the same mistake a
+ * second time — the settings model list would grow past what was configured.
  */
 export const mergeDiscoveredModels = (
   discovered: unknown,
@@ -163,18 +170,22 @@ export const mergeDiscoveredModels = (
     }
   }
 
-  for (const spec of catalog) {
-    if (seen.has(spec.id) || isRetiredModel(provider, spec.id)) {
-      continue;
+  // Cold-start fallback only: nothing was reported, so the catalog stands in.
+  const fallback = merged.length === 0;
+  if (fallback) {
+    for (const spec of catalog) {
+      if (seen.has(spec.id) || isRetiredModel(provider, spec.id)) {
+        continue;
+      }
+      seen.add(spec.id);
+      merged.push({
+        contextWindow: spec.context_window,
+        id: spec.id,
+        inputModalities: sanitizeModalities(spec.input_modalities),
+        maxTokens: spec.max_output_tokens,
+        name: spec.name,
+      });
     }
-    seen.add(spec.id);
-    merged.push({
-      contextWindow: spec.context_window,
-      id: spec.id,
-      inputModalities: sanitizeModalities(spec.input_modalities),
-      maxTokens: spec.max_output_tokens,
-      name: spec.name,
-    });
   }
 
   return merged;

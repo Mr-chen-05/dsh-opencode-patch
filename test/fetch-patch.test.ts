@@ -326,117 +326,36 @@ describe("patchFetch", () => {
     expect(headerOf(capture.init, SESSION_HEADER)).toBeNull();
   });
 
-  it("rewrites an inference 403 to a 400 the classifier reads as a refusal, never as a bad key", async () => {
-    // DSH's error classifier maps 403 to AUTH, so every entitlement answer used
-    // to reach the user as "API key is invalid" with a key that was working.
-    // Measured on the live gateway: a free-tier refusal, `Model access is
-    // disabled` and Cloudflare's 1010 are all 403 and none is about the
-    // credential, so each comes back as 400 — the free tier through a fixed
-    // explanation that names the gateway's error, the others through the
-    // gateway's own type and message.
-    //
-    // The status is only half of it. `classifyPiAiError` tests the MESSAGE for
-    // `\b(?:401|403)\b` before anything else, so the rewritten body has to be
-    // free of those tokens as well - the first version of this remap quoted the
-    // code it was rewriting away and stayed AUTH.
-    const authToken = /\b(?:401|403)\b/u;
+  it("passes a 403 through untouched, message and status", async () => {
+    // A 403 from this gateway is a refusal it understood, not a rejected
+    // credential (that is a 401) — but the status is the gateway's to choose and
+    // this interceptor does not rewrite it. An earlier revision remapped it to
+    // 400 so DSH's classifier would stop labelling it AUTH; the trade was wrong.
+    // The classifier's label is its own reading; the message underneath is the
+    // gateway's and is accurate, and that is what was asked for.
+    const body = JSON.stringify({
+      error: {
+        message: "OpenCode's free tier can only be used from within OpenCode",
+        type: "FreeTierError",
+      },
+    });
     const als = new AsyncLocalStorage<ActiveTurnState>();
-    const answer = async (body: string): Promise<Response> => {
-      const patched = patchFetch(
-        (async () =>
-          new Response(body, { status: 403 })) as unknown as typeof fetch,
-        als,
-        resolveConfig()
-      );
-      return patched("https://opencode.ai/zen/v1/chat/completions", {
-        body: "{}",
-        method: "POST",
-      });
-    };
-    const refusal = async (response: Response) =>
-      (await response.json()) as { error: { message: string; type: string } };
-
-    const free = await answer(
-      JSON.stringify({
-        error: {
-          message: "OpenCode's free tier can only be used from within OpenCode",
-          type: "FreeTierError",
-        },
-      })
-    );
-    expect(free.status).toBe(400);
-    const freeRefusal = await refusal(free);
-    expect(freeRefusal.error.type).toBe("free_tier_restricted");
-    // The gateway's own error name survives; the status token does not.
-    expect(freeRefusal.error.message).toContain("FreeTierError");
-    expect(authToken.test(freeRefusal.error.message)).toBe(false);
-
-    // The same refusal with no `error` wrapper: a flat `{ type, message }` is
-    // what several gateway errors look like, and it is an entitlement answer —
-    // the credential was accepted and the account lacks the model.
-    const entitlement = await answer(
-      JSON.stringify({
-        message: "Upstream request failed: Model access is disabled",
-        type: "server_error",
-      })
-    );
-    expect(entitlement.status).toBe(400);
-    const entitlementRefusal = await refusal(entitlement);
-    expect(entitlementRefusal.error.type).toBe("entitlement_restricted");
-    expect(entitlementRefusal.error.message).toContain(
-      "Upstream request failed: Model access is disabled"
-    );
-    expect(authToken.test(entitlementRefusal.error.message)).toBe(false);
-
-    // A JSON refusal with neither field: nothing is invented — the raw body is
-    // kept as the message and the type says only that it was a refusal.
-    const untyped = await answer(
-      JSON.stringify({ error: { note: "no message" } })
-    );
-    expect(untyped.status).toBe(400);
-    const untypedRefusal = await refusal(untyped);
-    expect(untypedRefusal.error.message).toContain("refusal: ");
-    expect(authToken.test(untypedRefusal.error.message)).toBe(false);
-
-    // The gateway's own words are kept, but an upstream can name a status in
-    // them, and that name is exactly what the classifier greps for: left as it
-    // arrived, the answer would be AUTH again through the gateway's voice
-    // rather than ours.
-    const upstreamNamed = await answer(
-      JSON.stringify({
-        error: {
-          message: "upstream answered 403 to the relay",
-          type: "relay_error",
-        },
-      })
-    );
-    expect(upstreamNamed.status).toBe(400);
-    const upstreamRefusal = await refusal(upstreamNamed);
-    expect(upstreamRefusal.error.message).toContain(
-      "upstream answered 4xx to the relay"
-    );
-    expect(authToken.test(upstreamRefusal.error.message)).toBe(false);
-
-    // Cloudflare's WAF answers with plain text rather than JSON, so this shape
-    // is only reachable through the text fallback.
-    const waf = await answer("error code: 1010");
-    expect(waf.status).toBe(400);
-    const wafRefusal = await refusal(waf);
-    expect(wafRefusal.error.type).toBe("client_identity_blocked");
-    expect(authToken.test(wafRefusal.error.message)).toBe(false);
-
-    // `/usage` 403s for "subscription required" and the meter READS that
-    // status, so the rewrite is scoped to inference and this one passes through.
     const patched = patchFetch(
       (async () =>
-        new Response("{}", { status: 403 })) as unknown as typeof fetch,
+        new Response(body, { status: 403 })) as unknown as typeof fetch,
       als,
       resolveConfig()
     );
-    const usage = await patched("https://opencode.ai/zen/go/v1/usage", {
-      method: "GET",
-    });
-    expect(usage.status).toBe(403);
+    const response = await patched(
+      "https://opencode.ai/zen/v1/chat/completions",
+      { body: "{}", method: "POST" }
+    );
+    expect(response.status).toBe(403);
+    const parsed = (await response.json()) as {
+      error: { message: string; type: string };
+    };
+    expect(parsed.error.type).toBe("FreeTierError");
+    expect(parsed.error.message).toContain("from within OpenCode");
   });
 
   it("injects origin headers and dynamic session ID for zen requests", async () => {
