@@ -167,12 +167,7 @@ export const createStreamHook = (
       // was filtered on its tier sends the reader to the routing table for an
       // entitlement problem.
       let why: string;
-      if (plane === "zen" && spec?.is_free === true) {
-        why =
-          "it is a Zen free-tier id, and the free tier is not served from this " +
-          "plugin on any credential - measured with a session token, its org and " +
-          "every header the real client sends, a Zen -free model still answers 403";
-      } else if (sdk === undefined) {
+      if (sdk === undefined) {
         why = "it names no SDK this plane has a route for";
       } else if (UNSERVED_PLANE_SDKS.has(`${providerKey} + ${sdk}`)) {
         why = `its catalog SDK \`${sdk}\` is not served on this plane`;

@@ -433,11 +433,7 @@ describe("apply (plugin lifecycle)", () => {
     }
   });
 
-  it("names the free tier when that is what filtered the model", () => {
-    // The reason is now COMPUTED from the same rule the filter applies, so a Zen
-    // free-tier id is reported as an entitlement problem rather than as a shape
-    // one. Naming the shape for a model filtered on its tier sends the reader to
-    // the routing table for something the routing table cannot fix.
+  it("serves free-tier models and warns only for truly unservable SDKs", () => {
     let streamHandler:
       | ((options: unknown, next: () => unknown) => unknown)
       | undefined;
@@ -471,19 +467,13 @@ describe("apply (plugin lifecycle)", () => {
       }
       streamHandler?.(
         { model: "space-bunny-free", provider: "opencode" },
-        () => {
-          // `next` is never reached for an unservable model.
-        }
+        () => {}
       );
-      const mine = warnings.filter((args) =>
-        String(args[0]).includes("cannot be served:")
-      );
-      expect(mine).toHaveLength(1);
-      const message = String(mine[0]?.[0]);
-      // The tier, not the shape - and it does not claim a route problem.
-      expect(message).toContain("free tier");
-      expect(message).not.toContain("names no SDK");
-      // And the Go plane's free models are not reported at all.
+      expect(
+        warnings.filter((args) => String(args[0]).includes("space-bunny-free"))
+      ).toHaveLength(0);
+
+      // And the Go plane's free models are not reported as unservable.
       streamHandler?.({ model: "beam-free", provider: "opencode-go" }, () => {
         // Served: the Go plane has no free tier to gate.
       });
