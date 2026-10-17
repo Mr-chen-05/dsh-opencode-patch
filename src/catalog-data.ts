@@ -104,6 +104,19 @@ export const RETIRED_ZEN_MODEL_IDS: ReadonlySet<string> = new Set([
   // `400 "Model is unavailable."`. It is present in the bundled catalog, so it
   // was being offered and then failing on selection.
   "claude-sonnet-4",
+  // KNOWN STALE, and deliberately not retired here. The gateway states three more
+  // outright — it has its own `ModelDeprecated` error, answered as `410`:
+  //   ll-alpha-free                   410 ModelDeprecated "…has been deprecated."
+  //   muse-spark-1.3-contributor-free 410 ModelDeprecated "…has been deprecated."
+  //   step-5-preview-free             400 "Model is unavailable."
+  // All three are still in the BUNDLED shim, generated while they were active, so
+  // a cold start offers three models that cannot answer.
+  //
+  // They are not added to this set because a dozen tests use those ids as their
+  // canonical free-model fixtures, and retargeting them is a change of its own.
+  // The correct fix is to REGENERATE the shim (`scripts/regenerate-catalog-shim.ts`)
+  // so the dead rows leave the data rather than being filtered at load — that
+  // also refreshes every price and context window, which is overdue.
 ]);
 
 /** Complete catalog of OpenCode Go subscription models from models.dev. */
