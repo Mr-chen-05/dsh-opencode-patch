@@ -24,6 +24,8 @@
  * @module dsh-opencode-patch/responses-routes
  */
 
+import { findModelSpecOn } from "./models-catalog.ts";
+
 /** The SDK whose presence means "this model is served on the Responses API". */
 export const RESPONSES_SDK = "@ai-sdk/openai";
 
@@ -231,23 +233,33 @@ export const internalRouteFor = (
   // The plane comes from the route the caller selected, and it must BE a plane:
   // a redirected call arrives back here with `provider` already set to an
   // internal route, which is not a key in this table, so it cannot recurse.
-  const plane = ROUTE_FOR_PLANE_PROTOCOL[provider];
+  // If a model is Go-only (e.g. `muse-spark-1.3-contributor`), route it on the
+  // Go plane where its endpoint actually serves it:
+  let planeKey = provider;
+  if (
+    planeKey === "opencode" &&
+    findModelSpecOn("zen", model) === undefined &&
+    findModelSpecOn("go", model) !== undefined
+  ) {
+    planeKey = "opencode-go";
+  }
+  const plane = ROUTE_FOR_PLANE_PROTOCOL[planeKey];
   if (plane === undefined) {
     return undefined;
   }
-  const protocol =
-    typeof providerNpm === "string" ? PROTOCOL_FOR_SDK[providerNpm] : undefined;
-  if (protocol !== undefined) {
-    return plane.routes[protocol];
+  if (providerNpm !== undefined) {
+    if (typeof providerNpm !== "string") {
+      return undefined;
+    }
+    const protocol = PROTOCOL_FOR_SDK[providerNpm];
+    return protocol === undefined ? undefined : plane.routes[protocol];
   }
   // A model the catalog carries names its SDK and that is always the answer.
   // A model it has never heard of - listed by hand in a deployment's config -
   // carries none, and `undefined` reads as the completions DEFAULT: right for a
   // model that omits its SDK, wrong for one nobody has described, and the two are
-  // indistinguishable here. So the id is asked, and only for the two families
-  // whose protocol the vendor fixes by name. Measured against the live gateway:
-  // gemini-3.8-flash and claude-sonnet-4-6 both answer 400 on the completions
-  // endpoint and 200 on their own.
+  // indistinguishable here. So the id is asked, and only for the families
+  // whose protocol the vendor fixes by name.
   const byId = protocolFromModelId(model);
   return byId === undefined ? undefined : plane.routes[byId];
 };
@@ -273,6 +285,9 @@ export const protocolFromModelId = (model: string): string | undefined => {
   }
   if (model.startsWith("claude-")) {
     return "anthropic-messages";
+  }
+  if (model.startsWith("muse-") || model.startsWith("gpt-")) {
+    return "openai-responses";
   }
   return undefined;
 };

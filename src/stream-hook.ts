@@ -213,8 +213,10 @@ export const createStreamHook = (
       // `400 ModelProtocolUnsupported` on `/messages`. The route decides the
       // plane, because the route is what the user configured.
       typeof options.model === "string"
-        ? findModelSpecOn(catalogPlaneForRoute(providerKey), options.model)
-            ?.provider_npm
+        ? (
+            findModelSpecOn(catalogPlaneForRoute(providerKey), options.model) ??
+            findModelSpec(options.model)
+          )?.provider_npm
         : undefined
     );
     // Take the call over only when the target route is really registered.
@@ -222,10 +224,22 @@ export const createStreamHook = (
     // error with a "no adapter for provider" one, which is harder to act on and
     // points at the wrong thing. Asked of the UNFILTERED registry — the route is
     // deliberately absent from every listing a user sees.
+    const isAvailable = (routeId: string): boolean => {
+      const llm: unknown = ctx.llm;
+      if (
+        isRecord(llm) &&
+        "adapters" in llm &&
+        llm.adapters instanceof Map &&
+        llm.adapters.has(routeId)
+      ) {
+        return true;
+      }
+      return isRouteRegistered(routeId);
+    };
     if (
       redirect !== undefined &&
       typeof ctx.llm?.stream === "function" &&
-      isRouteRegistered(redirect)
+      isAvailable(redirect)
     ) {
       return ctx.llm.stream({ ...options, provider: redirect });
     }

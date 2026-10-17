@@ -12,6 +12,7 @@ import {
   ANTHROPIC_SDK,
   GOOGLE_INTERNAL_ROUTE,
   GOOGLE_SDK,
+  GO_RESPONSES_ROUTE,
   MISTRAL_SDK,
   catalogPlaneForRoute,
   findModelSpec,
@@ -58,6 +59,18 @@ describe("responses-routes: the SDK mapping", () => {
     // And a catalog SDK still wins, because it is the better answer.
     expect(internalRouteFor("opencode", "claude-opus-4-7", RESPONSES_SDK)).toBe(
       RESPONSES_ROUTE
+    );
+    // muse-* and gpt-* models automatically route to Responses API even when no SDK is passed
+    expect(internalRouteFor("opencode", "gpt-5.4")).toBe(RESPONSES_ROUTE);
+    expect(
+      internalRouteFor("opencode", "muse-spark-1.3-contributor-free")
+    ).toBe(RESPONSES_ROUTE);
+    // A Go-only model (e.g. muse-spark-1.3-contributor) routes to the Go Responses route
+    expect(internalRouteFor("opencode", "muse-spark-1.3-contributor")).toBe(
+      GO_RESPONSES_ROUTE
+    );
+    expect(internalRouteFor("opencode-go", "muse-spark-1.3-contributor")).toBe(
+      GO_RESPONSES_ROUTE
     );
   });
 

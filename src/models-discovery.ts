@@ -197,10 +197,23 @@ let registeredRoutes: { list: () => unknown; receiver: unknown } | undefined;
  * @returns true when the unfiltered registry still carries the route.
  */
 export const isRouteRegistered = (routeId: string): boolean => {
-  const routes =
-    registeredRoutes === undefined
-      ? undefined
-      : Reflect.apply(registeredRoutes.list, registeredRoutes.receiver, []);
+  if (registeredRoutes === undefined) {
+    return false;
+  }
+  const { receiver } = registeredRoutes;
+  if (
+    isRecord(receiver) &&
+    "adapters" in receiver &&
+    receiver.adapters instanceof Map &&
+    receiver.adapters.has(routeId)
+  ) {
+    return true;
+  }
+  const routes = Reflect.apply(
+    registeredRoutes.list,
+    registeredRoutes.receiver,
+    []
+  );
   return (
     Array.isArray(routes) &&
     routes.some((route) => isRecord(route) && route.id === routeId)
