@@ -349,6 +349,32 @@ node --experimental-strip-types scripts/regenerate-catalog-shim.ts --write
 
 That removes the dead rows from the DATA rather than filtering them at load, and it refreshes every price and context window at the same time — the shim predates the current catalog by enough that 43 of its rows are now deprecated. Expect the `modelsForSdk` counts and the free-tier fixture ids to move when it runs.
 
+## 3.10 The picker never received the protocol-routed models — FIXED
+
+`buildModelCatalog` (the composer's list) is `listProviders()` × `listModels(id)`,
+read from the host's own
+`@deepseek-ai/dsh-api-session-controller/lib/types/catalog.js`. The internal protocol
+routes are hidden from `listProviders`, and each carries only its own protocol's models,
+because `registerResponsesProvider` builds every route with
+`sdksForProtocol(protocol).flatMap(sdk => modelsForSdk(sdk, catalog))`.
+
+So enumerating `opencode` returned the completions bucket alone, and every Responses,
+Messages and Google model — servable, and already redirectable by `internalRouteFor` —
+was absent from the picker. Measured:
+
+| | rows |
+| :-- | --: |
+| adapter's completions bucket | 28 |
+| picker before the join | **27** |
+| picker after the join | **87** |
+| Go route before / after | 20 / 29 |
+
+`listModels` now merges the parent route's list with its plane's catalog via the same
+`mergeDiscoveredModels` the "fetch available models" path already used.
+
+**If the picker ever looks short again, check this join first.** It is invisible from the
+outside: the models are not filtered, not deprecated, just never enumerated.
+
 ## 4. How to re-check any of this
 
 1. Find the upstream source that **produces** the value, not a client that consumes it.
