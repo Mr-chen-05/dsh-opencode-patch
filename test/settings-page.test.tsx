@@ -331,6 +331,8 @@ describe("settings-page: apply & slots", () => {
       },
     };
 
+    (globalThis as Record<string, unknown>).__rootCtx = ctx;
+    (globalThis as Record<string, unknown>).__rootCtx = ctx;
     expect(() => apply(ctx as never)).not.toThrow();
     // Every effect the entry registered handed back a disposer, and each one
     // runs without throwing on a context that has nothing to dispose.
@@ -542,6 +544,81 @@ describe("settings-page: apply & slots", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("registers once even when inject hands a CHILD scope and the mount hands the root", async () => {
+    // The exact console failure, measured in a browser after the previous guard:
+    //
+    //   list slot "conversation.input.right" already has an entry with id
+    //   "dsh-opencode-patch-usage" at priority 0 (registered by registerMeter)
+    //
+    // The scoped inject passes a CHILD scope; the mount-ready path and the
+    // ten-second fallback pass the ROOT `ctx`. A guard keyed on the argument
+    // therefore sees two different objects, both pass, and the host throws on the
+    // duplicate. Keyed on the root context it sees one.
+    // Attempts, not successes: the try/catch swallows the duplicate, so only the
+    // attempt count shows whether the guard held.
+    const attempts: string[] = [];
+    const registrations: string[] = [];
+    const slots = {
+      inject: (_name: string, fn: () => void) => {
+        fn();
+      },
+      register: (entry: Record<string, unknown>) => {
+        const id = String(entry.id);
+        attempts.push(id);
+        if (registrations.includes(id)) {
+          throw new TypeError(
+            `list slot "conversation.input.right" already has an entry with id ${id}`
+          );
+        }
+        registrations.push(id);
+      },
+    };
+    // A child scope with its OWN `slots` facade over the same underlying
+    // registry. That is the shape that broke the previous guard: the facade object
+    // differs, so a guard keyed on the argument sees two registries where the host
+    // has one — and both pass, and the host throws on the duplicate.
+    const childSlots = {
+      inject: (_name: string, fn: () => void) => {
+        fn();
+      },
+      register: (entry: Record<string, unknown>) => {
+        slots.register(entry);
+      },
+    };
+    const childScope = {
+      modelDirectories: { directoryFor: () => ({ store: {} }) },
+      remote: {
+        opencodeGoUsage: { read: async () => ({ ok: true, value: {} }) },
+      },
+      slots: childSlots,
+    };
+    const ctx: Record<string, unknown> = {
+      effect: (fn: () => unknown) => fn(),
+      inject: (_deps: string[], callback: (scope: unknown) => unknown) =>
+        callback(childScope),
+      modelDirectories: { directoryFor: () => ({ store: {} }) },
+      remote: {
+        $mount: async () => () => {
+          /* disposer */
+        },
+        opencodeGoUsage: { read: async () => ({ ok: true, value: {} }) },
+      },
+      slots,
+    };
+
+    (globalThis as Record<string, unknown>).__rootCtx = ctx;
+    expect(() => apply(ctx as never)).not.toThrow();
+    // Let the mount's `ready` promise settle — it awaits `$mount` inside an async
+    // IIFE, so microtasks alone are not enough. A macrotask flushes the chain,
+    // which is the second caller.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(registrations).toEqual(["dsh-opencode-patch-usage"]);
+    // And it was never ATTEMPTED twice — which is what the host logs as an Error.
+    expect(attempts).toEqual(["dsh-opencode-patch-usage"]);
   });
 
   it("degrades to no meter when the model-directory service throws", () => {

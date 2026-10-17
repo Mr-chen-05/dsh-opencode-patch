@@ -550,11 +550,23 @@ export const apply = (ctx: ClientContext): void => {
   // that says why. The registration is also non-throwing now: a duplicate is a
   // no-op, not an exception out of the entry.
   const registerMeter = (meterScope: ClientContext): void => {
-    const registry: object = meterScope.slots ?? meterScope;
-    if (meterRegisteredOn.has(registry)) {
+    // Keyed on the ROOT context, captured in this closure — not on the argument.
+    // The three callers pass different scopes: the scoped inject hands over a
+    // CHILD scope, while the mount-ready path and the ten-second fallback hand
+    // over the root `ctx`. Keying on `meterScope.slots ?? meterScope` therefore
+    // produced two different keys for one activation, both guards passed, and the
+    // host threw on the duplicate:
+    //
+    //   list slot "conversation.input.right" already has an entry with id
+    //   "dsh-opencode-patch-usage" at priority 0 (registered by registerMeter)
+    //
+    // Measured in a browser console after the previous guard was added, which is
+    // what this replaces. Across a genuine re-activation the root context is a
+    // different object, so a fresh registration is still allowed.
+    if (meterRegisteredOn.has(ctx)) {
       return;
     }
-    meterRegisteredOn.add(registry);
+    meterRegisteredOn.add(ctx);
     // `conversation.input.right` renders in the composer bar's trailing controls,
     // immediately BEFORE `conversation.input.model` — so it is the seat beside
     // the model selector. `conversation.input.left` is the far end of the leading
