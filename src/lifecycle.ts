@@ -65,11 +65,17 @@ import { GoUsageService } from "./usage.ts";
  * Models whose SDK no route serves are dropped: offering them would be offering
  * a model that cannot work, and the user has no way to tell that from the row.
  */
-const toDiscovered = (specs: readonly CatalogModelSpec[]) =>
+const toDiscovered = (
+  specs: readonly CatalogModelSpec[],
+  maxContextWindow?: number
+) =>
   specs
     .filter((m) => isServableSdk(m.provider_npm))
     .map((m) => ({
-      contextWindow: m.context_window,
+      contextWindow:
+        typeof maxContextWindow === "number" && maxContextWindow > 0
+          ? Math.min(m.context_window, maxContextWindow)
+          : m.context_window,
       id: m.id,
       inputModalities: sanitizeModalities(m.input_modalities),
       maxTokens: m.max_output_tokens,
@@ -388,14 +394,19 @@ const installModelDiscovery = (
     }
     llm.registerModelDiscovery(name, () =>
       Promise.resolve(
-        toDiscovered([...getLiveGoCatalog(), ...getLiveZenCatalog()])
+        toDiscovered(
+          [...getLiveGoCatalog(), ...getLiveZenCatalog()],
+          config.maxContextWindow
+        )
       )
     );
     llm.registerModelDiscovery("opencode-go", () =>
-      Promise.resolve(toDiscovered(getLiveGoCatalog()))
+      Promise.resolve(toDiscovered(getLiveGoCatalog(), config.maxContextWindow))
     );
     llm.registerModelDiscovery("opencode", () =>
-      Promise.resolve(toDiscovered(getLiveZenCatalog()))
+      Promise.resolve(
+        toDiscovered(getLiveZenCatalog(), config.maxContextWindow)
+      )
     );
   } catch {
     // Model discovery registration is non-fatal

@@ -19,6 +19,7 @@ import {
   mergeDiscoveredModels,
   resolveConfig,
   resolveDiscoveryProvider,
+  resolveEffectiveContextWindow,
   RESPONSES_ROUTE,
   type CordisContext,
   type CatalogModelSpec,
@@ -817,5 +818,87 @@ describe("models-discovery: the Effort row a model reports", () => {
       decorateModelInfo(ctx, resolveConfig({ enrichModels: false }))
     ).toBeUndefined();
     expect(patched(ctx)).toBe(before);
+  });
+
+  it("clamps context window when a deployment maxContextWindow ceiling is configured", async () => {
+    const original = { id: "gpt-5.4", name: "GPT-5.4" };
+    const ctx = llmWith(() => original) as never as CordisContext;
+    // Set deployment context ceiling to 131,072 tokens (clamping gpt-5.4 from 1,050,000)
+    const customConfig = resolveConfig({
+      enrichModels: true,
+      maxContextWindow: 131_072,
+    });
+    const stop = decorateModelInfo(ctx, customConfig);
+
+    const resolved = (await patched(ctx)("opencode", "gpt-5.4")) as {
+      context?: { contextWindow?: number };
+    };
+    expect(resolved.context?.contextWindow).toBe(131_072);
+    stop?.();
+  });
+
+  it("preserves custom properties on existing context objects", async () => {
+    const withCustomContext = {
+      context: { contextWindow: 65_536, reservedTokens: 4096 },
+      id: "gpt-5.4",
+      name: "GPT-5.4",
+    };
+    const ctx = llmWith(() => withCustomContext) as never as CordisContext;
+    const stop = decorateModelInfo(ctx, enrichConfig);
+
+    const resolved = (await patched(ctx)("opencode", "gpt-5.4")) as {
+      context?: { contextWindow?: number; reservedTokens?: number };
+    };
+    // Canonical catalog spec for gpt-5.4 (1,050,000) overrides adapter context window,
+    // while preserving custom fields on context (like reservedTokens).
+    expect(resolved.context?.contextWindow).toBe(1_050_000);
+    // Custom context property is preserved rather than wiped
+    expect(resolved.context?.reservedTokens).toBe(4096);
+    stop?.();
+  });
+});
+
+describe("models-discovery: resolveEffectiveContextWindow", () => {
+  it("returns canonical window when neither requested window nor ceiling is set", () => {
+    expect(resolveEffectiveContextWindow(1_050_000)).toBe(1_050_000);
+    expect(resolveEffectiveContextWindow(200_000)).toBe(200_000);
+  });
+
+  it("clamps requested window to canonical window if requested exceeds physical capability", () => {
+    // If user/caller requests 2,000,000 tokens on a 1,050,000 model, it clamps to physical limit
+    expect(resolveEffectiveContextWindow(1_050_000, 2_000_000)).toBe(1_050_000);
+  });
+
+  it("honors lower requested window when below canonical limit", () => {
+    // If user tunes context down to 64,000 tokens on a 1M model, it uses 64,000
+    expect(resolveEffectiveContextWindow(1_050_000, 64_000)).toBe(64_000);
+  });
+
+  it("clamps to maxCeiling when deployment ceiling is configured", () => {
+    // If deployment configures ceiling of 262,144 tokens, it clamps 1,050,000 down to 262,144
+    expect(resolveEffectiveContextWindow(1_050_000, undefined, 262_144)).toBe(
+      262_144
+    );
+    // If both requested and ceiling exist, it takes the lowest
+    expect(resolveEffectiveContextWindow(1_050_000, 100_000, 262_144)).toBe(
+      100_000
+    );
+    expect(resolveEffectiveContextWindow(1_050_000, 500_000, 262_144)).toBe(
+      262_144
+    );
+  });
+
+  it("ignores invalid, non-positive or non-finite values", () => {
+    expect(resolveEffectiveContextWindow(1_050_000, -100, "invalid")).toBe(
+      1_050_000
+    );
+    expect(resolveEffectiveContextWindow(1_050_000, 0, null)).toBe(1_050_000);
+    expect(
+      resolveEffectiveContextWindow(
+        1_050_000,
+        Number.NaN,
+        Number.POSITIVE_INFINITY
+      )
+    ).toBe(1_050_000);
   });
 });

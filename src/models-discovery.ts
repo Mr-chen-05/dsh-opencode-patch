@@ -526,6 +526,45 @@ const effortsFromLevelMap = (
   }));
 
 /**
+ * Resolve the effective context window for a model by taking into account:
+ * 1. The canonical capability from the catalog (`canonicalWindow`).
+ * 2. Any explicit context limit requested by the user, session, or host (`requestedWindow`).
+ * 3. Any optional deployment ceiling configured by the user (`maxCeiling`).
+ *
+ * It safely clamps so that:
+ * - A requested context cannot exceed the model's physical context limit.
+ * - A configured ceiling clamps any higher context window down to that ceiling.
+ * - Missing or invalid requests cleanly fall back to canonical specs.
+ *
+ * @param canonicalWindow - The physical context limit declared by the model catalog.
+ * @param requestedWindow - Optional requested or configured context window.
+ * @param maxCeiling - Optional deployment-level context ceiling.
+ * @returns The effective context window limit in tokens.
+ */
+export const resolveEffectiveContextWindow = (
+  canonicalWindow: number,
+  requestedWindow?: unknown,
+  maxCeiling?: unknown
+): number => {
+  let effective = canonicalWindow;
+  if (
+    typeof requestedWindow === "number" &&
+    Number.isFinite(requestedWindow) &&
+    requestedWindow > 0
+  ) {
+    effective = Math.min(requestedWindow, canonicalWindow);
+  }
+  if (
+    typeof maxCeiling === "number" &&
+    Number.isFinite(maxCeiling) &&
+    maxCeiling > 0
+  ) {
+    effective = Math.min(effective, maxCeiling);
+  }
+  return effective;
+};
+
+/**
  * Wrap the ADAPTERS behind the plane routes, so a model our catalog carries but
  * pi's installed catalog does not is still resolvable at dispatch.
  *
@@ -614,6 +653,19 @@ export const decoratePlaneAdapters = (
         // Only what the adapter left BLANK. An adapter that answers keeps its
         // answer, because that is what dispatch will honour.
         const record = isRecord(answered) ? answered : {};
+        const existingContext = isRecord(record.context) ? record.context : {};
+        const requestedWindow =
+          typeof existingContext.contextWindow === "number"
+            ? existingContext.contextWindow
+            : undefined;
+        const effectiveWindow =
+          spec.context_window > 0
+            ? resolveEffectiveContextWindow(
+                spec.context_window,
+                requestedWindow,
+                config.maxContextWindow
+              )
+            : undefined;
         // The same pair the picker reads: `thinkingLevelMapFor` decides which
         // levels exist, `effortsFromLevelMap` renders them, so a level offered
         // here is a level the composer shows.
@@ -628,9 +680,14 @@ export const decoratePlaneAdapters = (
           ...(record.inputModalities === undefined
             ? { inputModalities: [...spec.input_modalities] }
             : {}),
-          ...(record.context === undefined && spec.context_window > 0
-            ? { context: { contextWindow: spec.context_window } }
-            : {}),
+          ...(effectiveWindow === undefined
+            ? {}
+            : {
+                context: {
+                  ...existingContext,
+                  contextWindow: effectiveWindow,
+                },
+              }),
           ...(record.defaultMaxTokens === undefined &&
           spec.max_output_tokens > 0
             ? { defaultMaxTokens: spec.max_output_tokens }
@@ -727,8 +784,18 @@ export const decorateModelInfo = (
     // Filling only what the adapter left BLANK let every one of those stale
     // values survive, which is what the surfaces then reported — so the fields
     // our catalog carries are authoritative here rather than advisory.
+    const existingContext = isRecord(resolved.context) ? resolved.context : {};
+
     if (typeof spec.context_window === "number" && spec.context_window > 0) {
-      out.context = { contextWindow: spec.context_window };
+      const effectiveWindow = resolveEffectiveContextWindow(
+        spec.context_window,
+        undefined,
+        config.maxContextWindow
+      );
+      out.context = {
+        ...existingContext,
+        contextWindow: effectiveWindow,
+      };
     }
     // The output cap is the same class of staleness, and a wrong one truncates
     // rather than merely mis-reports.

@@ -24,6 +24,7 @@ import {
   type EndpointFamily,
   type KeySourcePolicy,
   readBoolean,
+  readPositiveInteger,
   readString,
   readStringList,
 } from "./config-values.ts";
@@ -138,6 +139,7 @@ export const CONFIG_DEFAULTS = {
   injectProject: DEFAULT_INJECT_PROJECT,
   injectUserAgent: true,
   keySource: DEFAULT_KEY_SOURCE,
+  maxContextWindow: undefined as number | undefined,
   originClient: DEFAULT_ORIGIN_CLIENT,
   providers: DEFAULT_PROVIDERS,
   readOpencodeStore: false,
@@ -162,6 +164,7 @@ export interface PluginConfig {
   injectProject?: boolean;
   injectUserAgent?: boolean;
   keySource?: KeySourcePolicy;
+  maxContextWindow?: number;
   originClient?: string;
   providers?: string[];
   readOpencodeStore?: boolean;
@@ -209,6 +212,8 @@ export interface ResolvedPluginConfig {
   injectUserAgent: boolean;
   /** Which credential source wins when more than one resolves. */
   keySource: KeySourcePolicy;
+  /** Optional ceiling to clamp model context windows. */
+  maxContextWindow?: number;
   originClient: string;
   providers: Set<string>;
   /**
@@ -315,6 +320,7 @@ export const resolveConfig = (
       CONFIG_DEFAULTS.injectUserAgent
     ),
     keySource: resolvedKeySource(config.keySource),
+    maxContextWindow: readPositiveInteger(config.maxContextWindow),
     originClient:
       readString(config.originClient) ?? CONFIG_DEFAULTS.originClient,
     providers: new Set(
@@ -464,6 +470,12 @@ export const Config = z.object({
         "migration; an unrecognised value falls back to auto."
     )
     .volatile(),
+  maxContextWindow: z
+    .number()
+    .volatile()
+    .description(
+      "Optional ceiling to clamp model context windows (e.g. 131072, 262144)."
+    ),
   usageBaseURL: z
     .string()
     .default(CONFIG_DEFAULTS.usageBaseURL)

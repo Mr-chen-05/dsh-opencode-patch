@@ -176,6 +176,7 @@ export {
   isRouteRegistered,
   mergeDiscoveredModels,
   resolveDiscoveryProvider,
+  resolveEffectiveContextWindow,
   type DiscoveryCandidate,
 } from "./models-discovery.ts";
 export {

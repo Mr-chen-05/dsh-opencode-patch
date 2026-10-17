@@ -150,3 +150,22 @@ export const readStringList = (value: unknown): string[] => {
     )
     .map((item: string) => item.trim());
 };
+
+/**
+ * Read a positive finite integer, or `undefined` when absent/invalid.
+ *
+ * @param value - raw value, possibly a number or string.
+ */
+export const readPositiveInteger = (value: unknown): number | undefined => {
+  const raw: unknown = unwrapNode(value);
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return Math.floor(raw);
+  }
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    const parsed = Number(raw.trim());
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
+  return undefined;
+};

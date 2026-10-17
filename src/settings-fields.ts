@@ -97,6 +97,11 @@ export const CONFIG_ONLY_FIELDS: readonly {
       "and a list of ids nobody should type into a settings form",
   },
   {
+    field: "maxContextWindow",
+    reason:
+      "context ceiling in tokens; an override for deployments tuning context limits",
+  },
+  {
     field: "usageBaseURL",
     reason: "endpoint override; auto-discovered from the composition",
   },

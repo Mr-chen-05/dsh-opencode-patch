@@ -86,6 +86,27 @@ describe("resolveConfig", () => {
     expect(resolved.enrichModels).toBe(true);
   });
 
+  it("resolves and validates maxContextWindow when specified", () => {
+    expect(resolveConfig({}).maxContextWindow).toBeUndefined();
+    expect(resolveConfig({ maxContextWindow: 262_144 }).maxContextWindow).toBe(
+      262_144
+    );
+    expect(
+      resolveConfig({ maxContextWindow: "131072" as unknown as number })
+        .maxContextWindow
+    ).toBe(131_072);
+    expect(
+      resolveConfig({ maxContextWindow: -100 }).maxContextWindow
+    ).toBeUndefined();
+    expect(
+      resolveConfig({ maxContextWindow: 0 }).maxContextWindow
+    ).toBeUndefined();
+    expect(
+      resolveConfig({ maxContextWindow: "invalid" as unknown as number })
+        .maxContextWindow
+    ).toBeUndefined();
+  });
+
   it("preserves custom providers and configuration overrides", () => {
     const resolved = resolveConfig({
       debug: true,
@@ -220,6 +241,7 @@ describe("Config schema", () => {
         "injectProject",
         "injectUserAgent",
         "keySource",
+        "maxContextWindow",
         "originClient",
         "providers",
         "readOpencodeStore",
