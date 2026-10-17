@@ -406,9 +406,25 @@ describe("models-discovery: hiding the internal Responses route", () => {
     const stop = hideResponsesRoute(ctx, resolveConfig());
 
     await expect(ctx.llm?.listModels?.(RESPONSES_ROUTE)).resolves.toEqual([]);
-    await expect(ctx.llm?.listModels?.("opencode")).resolves.toEqual([
-      { id: "opencode-model" },
-    ]);
+    // The parent route's list is now the JOIN: the adapter's own row first, then
+    // every catalog row it lacks. Without that join the models living on the
+    // hidden protocol routes (Responses / Messages / Google) were unreachable
+    // from the picker — enumerating `opencode` returned the completions bucket
+    // alone, so `gpt-5.4`, the Claude rows and the Gemini rows never appeared.
+    const listed = (await ctx.llm?.listModels?.("opencode")) as Array<{
+      id: string;
+    }>;
+    expect(Array.isArray(listed)).toBe(true);
+    expect(listed[0]).toMatchObject({ id: "opencode-model" });
+    // And the catalog's protocol-routed rows are present — one per internal
+    // route, which is the whole point: Responses, Messages and Google models are
+    // each mounted on a hidden route and were therefore unreachable from the
+    // picker. Measured on the live catalog: 27 rows before the join, 87 after.
+    const ids = listed.map((m) => m.id);
+    expect(ids).toContain("gpt-5.4"); // opencode-responses  (@ai-sdk/openai)
+    expect(ids).toContain("claude-sonnet-4-5"); // opencode-anthropic
+    expect(ids.some((id) => id.startsWith("gemini-"))).toBe(true); // opencode-google
+    expect(listed.length).toBeGreaterThan(1);
     expect(seen).toEqual(["opencode"]);
 
     stop?.();

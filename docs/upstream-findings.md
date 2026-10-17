@@ -330,8 +330,7 @@ The session header was accepted every time; the only complaint was the credentia
 
 ## 3.9 The bundled shim is stale, and three dead rows are still offered — OPEN
 
-The gateway answers `410 ModelDeprecated` for retired models, with the reason in the
-body:
+The gateway answers `410 ModelDeprecated` for retired models, with the reason in the body:
 
 ```
 ll-alpha-free                   410 {"type":"error","error":{"type":"ModelDeprecated","message":"Model ll-alpha-free has been deprecated."}}
@@ -340,21 +339,15 @@ step-5-preview-free             400 "Model is unavailable."
 space-bunny-free                403 FreeTierError   <- served
 ```
 
-All three dead ids are still in `src/catalog-data.ts`, because that file was generated
-while they were active. A cold start therefore offers three models that cannot answer.
+All three dead ids are still in `src/catalog-data.ts`, because that file was generated while they were active. A cold start therefore offers three models that cannot answer.
 
-They are NOT added to `RETIRED_ZEN_MODEL_IDS`, because a dozen tests use those ids as
-their canonical free-model fixtures and retargeting them is a change of its own. The
-correct fix is to **regenerate the shim**:
+They are NOT added to `RETIRED_ZEN_MODEL_IDS`, because a dozen tests use those ids as their canonical free-model fixtures and retargeting them is a change of its own. The correct fix is to **regenerate the shim**:
 
 ```sh
 node --experimental-strip-types scripts/regenerate-catalog-shim.ts --write
 ```
 
-That removes the dead rows from the DATA rather than filtering them at load, and it
-refreshes every price and context window at the same time — the shim predates the
-current catalog by enough that 43 of its rows are now deprecated. Expect the
-`modelsForSdk` counts and the free-tier fixture ids to move when it runs.
+That removes the dead rows from the DATA rather than filtering them at load, and it refreshes every price and context window at the same time — the shim predates the current catalog by enough that 43 of its rows are now deprecated. Expect the `modelsForSdk` counts and the free-tier fixture ids to move when it runs.
 
 ## 4. How to re-check any of this
 

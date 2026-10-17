@@ -374,11 +374,26 @@ export const hideResponsesRoute = (
     };
   }
   if (typeof originalListModels === "function") {
-    // Filtering `listModels` is not about hiding the internal routes — nothing
-    // reaches it for those, because `listProviders` no longer names them. It is
-    // about what a user CAN pick: the `opencode` route's own list may name a
-    // model whose SDK no route serves, and selecting it would fail with nothing
-    // in the row to say why.
+    // **This is the JOIN, and without it most of the catalog is unreachable from
+    // the picker.** `buildModelCatalog` (the composer's model list) is
+    // `listProviders()` × `listModels(id)`. The internal protocol routes are
+    // hidden from `listProviders`, and each of them carries ONLY its own
+    // protocol's models — `opencode-responses` holds the `@ai-sdk/openai` rows,
+    // `opencode-anthropic` the Anthropic ones, `opencode-google` the Google ones
+    // (`registerResponsesProvider` builds each with `sdksForProtocol` +
+    // `modelsForSdk`). So enumerating `opencode` returned the completions bucket
+    // alone and every Responses / Messages / Google model — perfectly servable,
+    // redirectable by `internalRouteFor` — simply never appeared. That is the
+    // "they didn't join" failure: not filtered, not deprecated, just absent.
+    //
+    // So the parent route's list is merged with its plane's catalog, which is the
+    // union across protocols. `mergeDiscoveredModels` keeps the adapter's own
+    // rows (and their extra fields) and appends the rows it lacks, which is the
+    // same merge the "fetch available models" path already did.
+    //
+    // Only the two plane routes are joined. A deployment's own relay is not ours
+    // to populate: its catalog is the one it declares.
+    const planeRoots = new Set(["opencode", "opencode-go"]);
     patched.listModels = async function listModels(
       this: unknown,
       provider: string
@@ -387,13 +402,23 @@ export const hideResponsesRoute = (
         return [];
       }
       const models = await Reflect.apply(originalListModels, this, [provider]);
-      return Array.isArray(models)
-        ? models.filter(
-            (model) =>
-              !isRecord(model) ||
-              isServableModel(model.id, provider, config.hiddenModels)
+      if (!Array.isArray(models)) {
+        return models;
+      }
+      const listed = planeRoots.has(provider)
+        ? mergeDiscoveredModels(
+            models,
+            catalogPlaneForRoute(provider),
+            catalogPlaneForRoute(provider) === "go"
+              ? getLiveGoCatalog()
+              : getLiveZenCatalog()
           )
         : models;
+      return listed.filter(
+        (model) =>
+          !isRecord(model) ||
+          isServableModel(model.id, provider, config.hiddenModels)
+      );
     };
   }
 
