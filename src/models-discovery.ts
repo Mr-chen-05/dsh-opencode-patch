@@ -652,12 +652,14 @@ export const decoratePlaneAdapters = (
         }
         // Only what the adapter left BLANK. An adapter that answers keeps its
         // answer, because that is what dispatch will honour.
+        const override = config.modelOverrides[model];
         const record = isRecord(answered) ? answered : {};
         const existingContext = isRecord(record.context) ? record.context : {};
         const requestedWindow =
-          typeof existingContext.contextWindow === "number"
+          override?.contextWindow ??
+          (typeof existingContext.contextWindow === "number"
             ? existingContext.contextWindow
-            : undefined;
+            : undefined);
         const effectiveWindow =
           spec.context_window > 0
             ? resolveEffectiveContextWindow(
@@ -666,38 +668,71 @@ export const decoratePlaneAdapters = (
                 config.maxContextWindow
               )
             : undefined;
+        const modelName =
+          override?.name ??
+          (typeof record.name === "string" ? record.name : spec.name);
+        const { defaultMaxTokens: recordMaxTokens } = record;
+        let inputModalities: ("text" | "image")[] = sanitizeModalities(
+          spec.input_modalities
+        );
+        if (override?.inputModalities !== undefined) {
+          inputModalities = [...override.inputModalities];
+        } else if (Array.isArray(record.inputModalities)) {
+          inputModalities = sanitizeModalities(record.inputModalities);
+        }
+
+        let defaultMaxTokens: number | undefined;
+        if (override?.maxTokens !== undefined) {
+          defaultMaxTokens = override.maxTokens;
+        } else if (typeof recordMaxTokens === "number") {
+          defaultMaxTokens = recordMaxTokens;
+        } else if (spec.max_output_tokens > 0) {
+          defaultMaxTokens = spec.max_output_tokens;
+        }
+
         // The same pair the picker reads: `thinkingLevelMapFor` decides which
         // levels exist, `effortsFromLevelMap` renders them, so a level offered
         // here is a level the composer shows.
-        const map = thinkingLevelMapFor(spec);
-        const supports =
-          map === undefined ? undefined : effortsFromLevelMap(map);
-        return {
+        let supports: { id: string; name: string }[] | undefined;
+        if (override?.reasoningEfforts !== undefined) {
+          supports = override.reasoningEfforts.map((id) => ({
+            id,
+            name:
+              id === "off"
+                ? "Off"
+                : `${id.charAt(0).toUpperCase()}${id.slice(1)}`,
+          }));
+        } else if (record.reasoning === undefined) {
+          const map = thinkingLevelMapFor(spec);
+          if (map !== undefined) {
+            supports = effortsFromLevelMap(map);
+          }
+        }
+
+        const outRecord: Record<string, unknown> = {
           ...record,
-          ...(record.provider === undefined ? { provider } : {}),
-          ...(record.id === undefined ? { id: model } : {}),
-          ...(record.name === undefined ? { name: spec.name } : {}),
-          ...(record.inputModalities === undefined
-            ? { inputModalities: [...spec.input_modalities] }
-            : {}),
-          ...(effectiveWindow === undefined
-            ? {}
-            : {
-                context: {
-                  ...existingContext,
-                  contextWindow: effectiveWindow,
-                },
-              }),
-          ...(record.defaultMaxTokens === undefined &&
-          spec.max_output_tokens > 0
-            ? { defaultMaxTokens: spec.max_output_tokens }
-            : {}),
-          ...(record.reasoning === undefined &&
-          supports !== undefined &&
-          supports.length > 0
-            ? { reasoning: { efforts: supports } }
-            : {}),
+          inputModalities,
+          name: modelName,
         };
+        if (record.provider === undefined) {
+          outRecord.provider = provider;
+        }
+        if (record.id === undefined) {
+          outRecord.id = model;
+        }
+        if (effectiveWindow !== undefined) {
+          outRecord.context = {
+            ...existingContext,
+            contextWindow: effectiveWindow,
+          };
+        }
+        if (defaultMaxTokens !== undefined) {
+          outRecord.defaultMaxTokens = defaultMaxTokens;
+        }
+        if (supports !== undefined && supports.length > 0) {
+          outRecord.reasoning = { efforts: supports };
+        }
+        return outRecord;
       };
       adapter[method] = wrapped;
       restored.push(() => {
@@ -784,12 +819,14 @@ export const decorateModelInfo = (
     // Filling only what the adapter left BLANK let every one of those stale
     // values survive, which is what the surfaces then reported — so the fields
     // our catalog carries are authoritative here rather than advisory.
+    const override = config.modelOverrides[model];
     const existingContext = isRecord(resolved.context) ? resolved.context : {};
+    const requestedWindow = override?.contextWindow;
 
     if (typeof spec.context_window === "number" && spec.context_window > 0) {
       const effectiveWindow = resolveEffectiveContextWindow(
         spec.context_window,
-        undefined,
+        requestedWindow,
         config.maxContextWindow
       );
       out.context = {
@@ -799,21 +836,41 @@ export const decorateModelInfo = (
     }
     // The output cap is the same class of staleness, and a wrong one truncates
     // rather than merely mis-reports.
-    if (
+    if (override?.maxTokens !== undefined) {
+      out.defaultMaxTokens = override.maxTokens;
+    } else if (
       typeof spec.max_output_tokens === "number" &&
       spec.max_output_tokens > 0
     ) {
       out.defaultMaxTokens = spec.max_output_tokens;
     }
-    const map = thinkingLevelMapFor(spec);
-    const efforts = map === undefined ? [] : effortsFromLevelMap(map);
-    if (efforts.length > 0) {
-      out.reasoning = { efforts };
+    if (override?.name !== undefined) {
+      out.name = override.name;
+    }
+    if (override?.inputModalities !== undefined) {
+      out.inputModalities = [...override.inputModalities];
+    }
+    if (override?.reasoningEfforts === undefined) {
+      const map = thinkingLevelMapFor(spec);
+      const efforts = map === undefined ? [] : effortsFromLevelMap(map);
+      if (efforts.length > 0) {
+        out.reasoning = { efforts };
+      } else {
+        // The model takes no thinking level. Leaving the adapter's `reasoning`
+        // here would offer a control the model refuses — and for a model our
+        // catalog marks non-reasoning, that is exactly the stale shape.
+        delete out.reasoning;
+      }
     } else {
-      // The model takes no thinking level. Leaving the adapter's `reasoning`
-      // here would offer a control the model refuses — and for a model our
-      // catalog marks non-reasoning, that is exactly the stale shape.
-      delete out.reasoning;
+      out.reasoning = {
+        efforts: override.reasoningEfforts.map((id) => ({
+          id,
+          name:
+            id === "off"
+              ? "Off"
+              : `${id.charAt(0).toUpperCase()}${id.slice(1)}`,
+        })),
+      };
     }
     return out;
   };

@@ -28,6 +28,7 @@ import {
   readString,
   readStringList,
 } from "./config-values.ts";
+import { isRecord } from "./guards.ts";
 
 export {
   DEFAULT_ENDPOINT_FAMILY,
@@ -38,6 +39,30 @@ export {
   type EndpointFamily,
   type KeySourcePolicy,
 };
+
+/**
+ * Optional user-defined overrides for a specific model in configuration.
+ * Allows tuning contextWindow, maxTokens, name, reasoningEfforts, etc. per model.
+ */
+export interface ModelOverrideConfig {
+  /** Custom context window limit in tokens. */
+  readonly contextWindow?: number;
+  /** Custom maximum output generation tokens. */
+  readonly maxTokens?: number;
+  /** Custom display name. */
+  readonly name?: string;
+  /** Custom reasoning efforts to offer. */
+  readonly reasoningEfforts?: readonly string[];
+  /** Custom input modalities (e.g. ["text", "image"]). */
+  readonly inputModalities?: readonly ("text" | "image")[];
+  /** Custom token pricing override. */
+  readonly cost?: {
+    readonly input: number;
+    readonly output: number;
+    readonly cache_read?: number;
+    readonly cache_write?: number;
+  };
+}
 
 /**
  * URL substrings that mark a request as OpenCode gateway traffic even when no
@@ -140,6 +165,7 @@ export const CONFIG_DEFAULTS = {
   injectUserAgent: true,
   keySource: DEFAULT_KEY_SOURCE,
   maxContextWindow: undefined as number | undefined,
+  modelOverrides: {} as Readonly<Record<string, ModelOverrideConfig>>,
   originClient: DEFAULT_ORIGIN_CLIENT,
   providers: DEFAULT_PROVIDERS,
   readOpencodeStore: false,
@@ -165,6 +191,7 @@ export interface PluginConfig {
   injectUserAgent?: boolean;
   keySource?: KeySourcePolicy;
   maxContextWindow?: number;
+  modelOverrides?: Record<string, ModelOverrideConfig>;
   originClient?: string;
   providers?: string[];
   readOpencodeStore?: boolean;
@@ -214,6 +241,8 @@ export interface ResolvedPluginConfig {
   keySource: KeySourcePolicy;
   /** Optional ceiling to clamp model context windows. */
   maxContextWindow?: number;
+  /** Optional per-model configuration overrides. */
+  readonly modelOverrides: Readonly<Record<string, ModelOverrideConfig>>;
   originClient: string;
   providers: Set<string>;
   /**
@@ -280,6 +309,77 @@ const resolveCredentialPool = (
   };
 };
 
+const resolveModelOverrides = (
+  raw: unknown
+): Readonly<Record<string, ModelOverrideConfig>> => {
+  if (!isRecord(raw)) {
+    return {};
+  }
+  const result: Record<string, ModelOverrideConfig> = {};
+  for (const [modelId, value] of Object.entries(raw)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    const contextWindow = readPositiveInteger(
+      value.contextWindow ?? value.context_window
+    );
+    const maxTokens = readPositiveInteger(
+      value.maxTokens ?? value.max_output_tokens
+    );
+    const name = readString(value.name);
+    const reasoningEfforts = readStringList(
+      value.reasoningEfforts ?? value.efforts
+    );
+    let rawModalities: readonly unknown[] | undefined;
+    if (Array.isArray(value.inputModalities)) {
+      rawModalities = value.inputModalities;
+    } else if (Array.isArray(value.modalities)) {
+      rawModalities = value.modalities;
+    }
+    const inputModalities =
+      rawModalities === undefined
+        ? undefined
+        : rawModalities.filter(
+            (m: unknown): m is "text" | "image" => m === "text" || m === "image"
+          );
+    const cost = isRecord(value.cost)
+      ? {
+          input: typeof value.cost.input === "number" ? value.cost.input : 0,
+          output: typeof value.cost.output === "number" ? value.cost.output : 0,
+          ...(typeof value.cost.cache_read === "number"
+            ? { cache_read: value.cost.cache_read }
+            : {}),
+          ...(typeof value.cost.cache_write === "number"
+            ? { cache_write: value.cost.cache_write }
+            : {}),
+        }
+      : undefined;
+
+    const entry: ModelOverrideConfig = {};
+    if (contextWindow !== undefined) {
+      Object.assign(entry, { contextWindow });
+    }
+    if (maxTokens !== undefined) {
+      Object.assign(entry, { maxTokens });
+    }
+    if (name !== undefined) {
+      Object.assign(entry, { name });
+    }
+    if (reasoningEfforts.length > 0) {
+      Object.assign(entry, { reasoningEfforts });
+    }
+    if (inputModalities !== undefined) {
+      Object.assign(entry, { inputModalities });
+    }
+    if (cost !== undefined) {
+      Object.assign(entry, { cost });
+    }
+
+    result[modelId] = entry;
+  }
+  return result;
+};
+
 export const resolveConfig = (
   rawInput: PluginConfig = {}
 ): ResolvedPluginConfig => {
@@ -321,6 +421,7 @@ export const resolveConfig = (
     ),
     keySource: resolvedKeySource(config.keySource),
     maxContextWindow: readPositiveInteger(config.maxContextWindow),
+    modelOverrides: resolveModelOverrides(config.modelOverrides),
     originClient:
       readString(config.originClient) ?? CONFIG_DEFAULTS.originClient,
     providers: new Set(
@@ -475,6 +576,13 @@ export const Config = z.object({
     .volatile()
     .description(
       "Optional ceiling to clamp model context windows (e.g. 131072, 262144)."
+    ),
+  modelOverrides: z
+    .any()
+    .default({})
+    .volatile()
+    .description(
+      "Optional per-model overrides for contextWindow, maxTokens, and metadata."
     ),
   usageBaseURL: z
     .string()

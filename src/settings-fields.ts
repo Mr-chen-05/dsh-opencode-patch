@@ -102,6 +102,11 @@ export const CONFIG_ONLY_FIELDS: readonly {
       "context ceiling in tokens; an override for deployments tuning context limits",
   },
   {
+    field: "modelOverrides",
+    reason:
+      "per-model overrides for contextWindow, maxTokens, and metadata in YAML config",
+  },
+  {
     field: "usageBaseURL",
     reason: "endpoint override; auto-discovered from the composition",
   },

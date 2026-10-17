@@ -107,6 +107,58 @@ describe("resolveConfig", () => {
     ).toBeUndefined();
   });
 
+  it("resolves and validates modelOverrides when specified", () => {
+    expect(resolveConfig({}).modelOverrides).toEqual({});
+    const overrides = {
+      "gpt-5.4": {
+        contextWindow: 131_072,
+        cost: { cache_read: 0.1, input: 1.5, output: 8 },
+        inputModalities: ["text" as const, "image" as const],
+        maxTokens: 32_000,
+        name: "GPT-5.4 Custom",
+        reasoningEfforts: ["none", "high"],
+      },
+    };
+    const resolved = resolveConfig({ modelOverrides: overrides });
+    expect(resolved.modelOverrides["gpt-5.4"]).toEqual(overrides["gpt-5.4"]);
+
+    // Test alias keys and edge cases
+    const aliasOverrides = {
+      "gemini-3.8-flash": {
+        context_window: 262_144,
+        cost: { cache_write: 0.2, input: 0.5, output: 2 },
+        efforts: ["minimal", "medium"],
+        max_output_tokens: 16_384,
+        modalities: ["text", "image"],
+      },
+      "invalid-entry": null,
+    };
+    const resolvedAliases = resolveConfig({
+      modelOverrides: aliasOverrides as unknown as Record<
+        string,
+        ModelOverrideConfig
+      >,
+    });
+    expect(resolvedAliases.modelOverrides["gemini-3.8-flash"]).toEqual({
+      contextWindow: 262_144,
+      cost: { cache_write: 0.2, input: 0.5, output: 2 },
+      inputModalities: ["text", "image"],
+      maxTokens: 16_384,
+      reasoningEfforts: ["minimal", "medium"],
+    });
+    expect(resolvedAliases.modelOverrides["invalid-entry"]).toBeUndefined();
+
+    // Invalid non-record input yields empty record
+    expect(
+      resolveConfig({
+        modelOverrides: "invalid" as unknown as Record<
+          string,
+          ModelOverrideConfig
+        >,
+      }).modelOverrides
+    ).toEqual({});
+  });
+
   it("preserves custom providers and configuration overrides", () => {
     const resolved = resolveConfig({
       debug: true,
@@ -242,6 +294,7 @@ describe("Config schema", () => {
         "injectUserAgent",
         "keySource",
         "maxContextWindow",
+        "modelOverrides",
         "originClient",
         "providers",
         "readOpencodeStore",

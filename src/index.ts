@@ -61,6 +61,7 @@ export {
   resolveConfig,
   type EndpointFamily,
   type KeySourcePolicy,
+  type ModelOverrideConfig,
   type PluginConfig,
   type ResolvedPluginConfig,
 } from "./config.ts";

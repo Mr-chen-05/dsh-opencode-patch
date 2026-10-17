@@ -21,6 +21,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { appendFileSync } from "node:fs";
 
 import {
+  type ModelOverrideConfig,
   type PluginConfig,
   type ResolvedPluginConfig,
   resolveConfig,
@@ -67,20 +68,29 @@ import { GoUsageService } from "./usage.ts";
  */
 const toDiscovered = (
   specs: readonly CatalogModelSpec[],
-  maxContextWindow?: number
+  maxContextWindow?: number,
+  modelOverrides?: Readonly<Record<string, ModelOverrideConfig>>
 ) =>
   specs
     .filter((m) => isServableSdk(m.provider_npm))
-    .map((m) => ({
-      contextWindow:
+    .map((m) => {
+      const override = modelOverrides?.[m.id];
+      const baseContext = override?.contextWindow ?? m.context_window;
+      const contextWindow =
         typeof maxContextWindow === "number" && maxContextWindow > 0
-          ? Math.min(m.context_window, maxContextWindow)
-          : m.context_window,
-      id: m.id,
-      inputModalities: sanitizeModalities(m.input_modalities),
-      maxTokens: m.max_output_tokens,
-      name: m.name,
-    }));
+          ? Math.min(baseContext, maxContextWindow)
+          : baseContext;
+      return {
+        contextWindow,
+        id: m.id,
+        inputModalities:
+          override?.inputModalities === undefined
+            ? sanitizeModalities(m.input_modalities)
+            : [...override.inputModalities],
+        maxTokens: override?.maxTokens ?? m.max_output_tokens,
+        name: override?.name ?? m.name,
+      };
+    });
 
 /** Tell a row still configured under the pre-rename id/package to update. */
 const logRenameNotice = (ctx: CordisContext): void => {
@@ -396,16 +406,27 @@ const installModelDiscovery = (
       Promise.resolve(
         toDiscovered(
           [...getLiveGoCatalog(), ...getLiveZenCatalog()],
-          config.maxContextWindow
+          config.maxContextWindow,
+          config.modelOverrides
         )
       )
     );
     llm.registerModelDiscovery("opencode-go", () =>
-      Promise.resolve(toDiscovered(getLiveGoCatalog(), config.maxContextWindow))
+      Promise.resolve(
+        toDiscovered(
+          getLiveGoCatalog(),
+          config.maxContextWindow,
+          config.modelOverrides
+        )
+      )
     );
     llm.registerModelDiscovery("opencode", () =>
       Promise.resolve(
-        toDiscovered(getLiveZenCatalog(), config.maxContextWindow)
+        toDiscovered(
+          getLiveZenCatalog(),
+          config.maxContextWindow,
+          config.modelOverrides
+        )
       )
     );
   } catch {

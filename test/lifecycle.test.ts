@@ -58,6 +58,54 @@ describe("apply (plugin lifecycle)", () => {
     expect(registered).toContain("opencode");
   });
 
+  it("applies modelOverrides and maxContextWindow to discovered models", async () => {
+    let discoverZen: (() => Promise<unknown>) | undefined;
+    const ctx = {
+      effect: () => {},
+      llm: {
+        registerModelDiscovery: (ns: string, fn: () => Promise<unknown>) => {
+          if (ns === "opencode") {
+            discoverZen = fn;
+          }
+        },
+      },
+      on: () => {},
+    } as unknown as CordisContext;
+
+    apply(ctx, {
+      enrichModels: true,
+      maxContextWindow: 262_144,
+      modelOverrides: {
+        "gpt-5.4": {
+          contextWindow: 131_072,
+          inputModalities: ["text"],
+          maxTokens: 16_384,
+          name: "GPT-5.4 Lifecycle Override",
+        },
+      },
+    });
+
+    expect(discoverZen).toBeDefined();
+    const discovered = (await discoverZen!()) as {
+      contextWindow: number;
+      id: string;
+      inputModalities: string[];
+      maxTokens: number;
+      name: string;
+    }[];
+    const gpt = discovered.find((m) => m.id === "gpt-5.4");
+    expect(gpt).toBeDefined();
+    expect(gpt?.contextWindow).toBe(131_072);
+    expect(gpt?.name).toBe("GPT-5.4 Lifecycle Override");
+    expect(gpt?.maxTokens).toBe(16_384);
+    expect(gpt?.inputModalities).toEqual(["text"]);
+
+    // Another model has its context clamped to maxContextWindow (262,144)
+    const sonnet = discovered.find((m) => m.id === "claude-sonnet-4-5");
+    expect(sonnet).toBeDefined();
+    expect(sonnet?.contextWindow).toBe(262_144);
+  });
+
   it("registers the usage service only while the meter is on", () => {
     // The meter toggle is ONE switch with two halves in two processes: the Host
     // registers the remote face here, and the client's meter injector mounts

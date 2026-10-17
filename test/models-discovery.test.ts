@@ -580,6 +580,50 @@ describe("models-discovery: the adapter behind a plane route", () => {
     stop?.();
   });
 
+  it("applies modelOverrides in decoratePlaneAdapters when declared", async () => {
+    const raw = {
+      context: { contextWindow: 1_000_000 },
+      defaultMaxTokens: 32_000,
+      id: "gpt-5.4",
+      name: "GPT-5.4",
+    };
+    const llm = llmWithAdapters(() => raw);
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({
+        enrichModels: true,
+        modelOverrides: {
+          "gpt-5.4": {
+            contextWindow: 65_536,
+            inputModalities: ["text"],
+            maxTokens: 8_192,
+            name: "GPT-5.4 Adapter Override",
+            reasoningEfforts: ["none", "medium"],
+          },
+        },
+      })
+    );
+    const resolved = (await resolveOn(llm, "opencode")(
+      "opencode",
+      "gpt-5.4"
+    )) as {
+      context?: { contextWindow?: number };
+      defaultMaxTokens?: number;
+      inputModalities?: string[];
+      name?: string;
+      reasoning?: { efforts: { id: string }[] };
+    };
+    expect(resolved.context?.contextWindow).toBe(65_536);
+    expect(resolved.defaultMaxTokens).toBe(8_192);
+    expect(resolved.name).toBe("GPT-5.4 Adapter Override");
+    expect(resolved.inputModalities).toEqual(["text"]);
+    expect(resolved.reasoning?.efforts.map((e) => e.id)).toEqual([
+      "none",
+      "medium",
+    ]);
+    stop?.();
+  });
+
   it("restores the adapter's own methods on dispose", () => {
     const llm = llmWithAdapters(() => ({}));
     const before = llm.adapters.get("opencode-go")?.adapter.resolveModel;
@@ -854,6 +898,53 @@ describe("models-discovery: the Effort row a model reports", () => {
     expect(resolved.context?.contextWindow).toBe(1_050_000);
     // Custom context property is preserved rather than wiped
     expect(resolved.context?.reservedTokens).toBe(4096);
+    stop?.();
+  });
+
+  it("applies per-model configuration overrides for context window, caps, and metadata", async () => {
+    const original = (_provider: string, model: string) => ({
+      id: model,
+      name: model === "gpt-5.4" ? "GPT-5.4" : "Claude Sonnet 4.5",
+    });
+    const ctx = llmWith(original) as never as CordisContext;
+    const configWithOverrides = resolveConfig({
+      enrichModels: true,
+      modelOverrides: {
+        "gpt-5.4": {
+          contextWindow: 65_536,
+          inputModalities: ["text"],
+          maxTokens: 16_384,
+          name: "GPT-5.4 Custom Name",
+          reasoningEfforts: ["none", "high"],
+        },
+      },
+    });
+    const stop = decorateModelInfo(ctx, configWithOverrides);
+
+    const resolved = (await patched(ctx)("opencode", "gpt-5.4")) as {
+      context?: { contextWindow?: number };
+      defaultMaxTokens?: number;
+      inputModalities?: string[];
+      name?: string;
+      reasoning?: { efforts: { id: string; name: string }[] };
+    };
+    expect(resolved.context?.contextWindow).toBe(65_536);
+    expect(resolved.defaultMaxTokens).toBe(16_384);
+    expect(resolved.name).toBe("GPT-5.4 Custom Name");
+    expect(resolved.inputModalities).toEqual(["text"]);
+    expect(resolved.reasoning?.efforts).toEqual([
+      { id: "none", name: "None" },
+      { id: "high", name: "High" },
+    ]);
+
+    // Unrelated models keep their canonical specs
+    const sonnet = (await patched(ctx)("opencode", "claude-sonnet-4-5")) as {
+      context?: { contextWindow?: number };
+      name?: string;
+    };
+    expect(sonnet.context?.contextWindow).toBe(1_000_000);
+    expect(sonnet.name).toBe("Claude Sonnet 4.5");
+
     stop?.();
   });
 });
