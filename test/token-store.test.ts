@@ -105,8 +105,8 @@ describe("token-store: absent when a token could not be kept", () => {
       scope: "dsh-opencode-patch",
     });
     expect(store?.key).toBe("dsh-opencode-patch/opencode");
-    // The pool's references and this plugin's records are different address
-    // spaces: a write here lands under this plugin's scope alone.
+    // Another plugin's references and this plugin's records are different
+    // address spaces: a write here lands under this plugin's scope alone.
     expect([...records.keys()]).toEqual([]);
     expect(store?.key.startsWith("llm-pi-ai/")).toBe(false);
   });

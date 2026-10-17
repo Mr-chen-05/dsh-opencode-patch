@@ -176,5 +176,5 @@ Step 3 is the reason this is a specification rather than a patch: routing curren
 
 - **The free tier is not reachable by adding a header.** Measured: the org id and the key together still answer `403`. Any plan that assumed a header fix is wrong.
 - **The device-flow client already written is the right shape.** Its endpoints, its grant type, its client id and its reading of the discriminated error all match the source. Its refresh window is 120s where the client uses 300s, which is a number to reconcile rather than a design to change.
-- **The paid path is unchanged in every respect**, endpoint included: both paths are one gateway and answer a paid model identically, so the pool, the bridge and the protocol table keep their value and their addresses. This is an addition, not a replacement.
+- **The paid path is unchanged in every respect**, endpoint included: both paths are one gateway and answer a paid model identically, so the bridge and the protocol table keep their value and their addresses. This is an addition, not a replacement.
 - **The user-agent is a version behind.** We claim `provider-utils/4.0.40`; the captured request sends `4.0.23`. Worth reconciling when the rest is settled, since the gateway groups usage by it — and the same capture is where to check the claim rather than trusting the constant.

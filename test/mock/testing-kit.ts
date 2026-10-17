@@ -2,7 +2,7 @@
  * Comprehensive Testing Kit & Simulator Utilities for dsh-opencode-patch.
  *
  * Provides full end-to-end testing fixtures and simulators covering:
- * - Authentication Methods (API key, OAuth grants, local SQLite store across channels, credential pools)
+ * - Authentication Methods (API key, OAuth grants, local SQLite store across channels)
  * - API Endpoints (LLM streaming/unary, models catalog, console auth, usage)
  * - Response Types (SSE streams, unary JSON, error formats 400/401/403/404/429/500, tool fallbacks)
  * - OpenCode Client Types & Channels (stable, insider, dev, custom, user-agents, session affinity)
@@ -74,12 +74,7 @@ const redirectUrl = (url: string, origin: string): string => {
 /*                               Auth Simulator                               */
 /* -------------------------------------------------------------------------- */
 
-export type AuthMethodType =
-  | "apiKey"
-  | "credentialPool"
-  | "localStore"
-  | "missing"
-  | "oauthGrant";
+export type AuthMethodType = "apiKey" | "localStore" | "missing" | "oauthGrant";
 
 export interface LocalStoreChannelOptions {
   activeOrgId?: string;

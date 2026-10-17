@@ -263,7 +263,7 @@ describe("login-service: the device flow a card drives", () => {
         return Response.json(CODE_RESPONSE);
       }
       if (path === "/auth/device/token") {
-        return await new Promise<Response>((_resolve, reject) => {
+        return new Promise<Response>((_resolve, reject) => {
           init?.signal?.addEventListener(
             "abort",
             () => reject(new DOMException("aborted", "AbortError")),

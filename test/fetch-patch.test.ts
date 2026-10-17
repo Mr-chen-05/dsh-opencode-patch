@@ -46,45 +46,6 @@ afterEach(() => {
 });
 
 describe("patchFetch", () => {
-  it("reports a refused credential so a pool can rotate, and only for those", async () => {
-    // Rotation is driven from here because this interceptor is the only place
-    // that sees the answers of routes the WRAPPER serves and of the Go plane -
-    // neither of which passes through a route of ours. So the statuses that mean
-    // "this credential is spent" have to arrive here.
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const seen: { plane: string; status: number }[] = [];
-
-    for (const [status, plane] of [
-      [401, "opencode"],
-      [429, "opencode-go"],
-    ] as const) {
-      seen.length = 0;
-      const failing = vi.fn(async () =>
-        Response.json({ error: { message: "no" } }, { status })
-      );
-      const patched = patchFetch(
-        failing as unknown as typeof fetch,
-        als,
-        resolveConfig(),
-        {
-          onCredentialFailure: (seenPlane, seenStatus) => {
-            seen.push({ plane: seenPlane, status: seenStatus });
-          },
-        }
-      );
-      const url =
-        plane === "opencode"
-          ? "https://opencode.ai/zen/v1/chat/completions"
-          : "https://opencode.ai/zen/go/v1/chat/completions";
-      await patched(url, {
-        body: JSON.stringify({ messages: [] }),
-        headers: {},
-        method: "POST",
-      });
-      expect(seen, `status ${status}`).toEqual([{ plane, status }]);
-    }
-  });
-
   it("names the sources it consulted when no credential resolves", async () => {
     // The guard for the tier bug. A mis-classified tier made a captured key
     // invisible, the adapter's placeholder went out, and the only symptom was a
@@ -209,60 +170,6 @@ describe("patchFetch", () => {
       .map((args) => args.map(String).join(" "))
       .find((text) => text.includes("no credential resolved"));
     expect(line).toBeUndefined();
-  });
-
-  it("does not report a status that is not about the credential", async () => {
-    // 403 is the gateway's answer for a model the account has not enabled, and
-    // rotating a working credential over that would move a deployment off a
-    // good key for a model problem. 200 is obviously not one either.
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const seen: { plane: string; status: number }[] = [];
-    for (const status of [200, 403, 404, 500]) {
-      seen.length = 0;
-      const answering = vi.fn(async () =>
-        Response.json({ error: { message: "no" } }, { status })
-      );
-      const patched = patchFetch(
-        answering as unknown as typeof fetch,
-        als,
-        resolveConfig(),
-        {
-          onCredentialFailure: (plane, seenStatus) => {
-            seen.push({ plane, status: seenStatus });
-          },
-        }
-      );
-      await patched("https://opencode.ai/zen/v1/chat/completions", {
-        body: JSON.stringify({ messages: [] }),
-        headers: {},
-        method: "POST",
-      });
-      expect(seen, `status ${status}`).toEqual([]);
-    }
-  });
-
-  it("never reports a request that is not gateway traffic, even on a 401", async () => {
-    // Stronger than checking the plane is empty: a URL that is not ours is not
-    // examined at all, so there is nothing to mis-attribute. Rotation is a side
-    // effect and the safest one is the one that does not happen.
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const seen: { plane: string; status: number }[] = [];
-    const failing = vi.fn(async () => new Response("{}", { status: 401 }));
-    const patched = patchFetch(
-      failing as unknown as typeof fetch,
-      als,
-      resolveConfig(),
-      {
-        onCredentialFailure: (plane, status) => {
-          seen.push({ plane, status });
-        },
-      }
-    );
-    await patched("https://api.deepseek.com/v1/chat/completions", {
-      body: "{}",
-      method: "POST",
-    });
-    expect(seen).toEqual([]);
   });
 
   it("reports each claimed request to the debug hook, presence not values", async () => {
@@ -417,6 +324,86 @@ describe("patchFetch", () => {
     expect(headerOf(capture.init, "x-opencode-client")).toBeNull();
     expect(headerOf(capture.init, "x-opencode-project")).toBeNull();
     expect(headerOf(capture.init, SESSION_HEADER)).toBeNull();
+  });
+
+  it("rewrites an inference 403 to a 400 the classifier reads as a refusal, never as a bad key", async () => {
+    // DSH's error classifier maps 403 to AUTH, so every entitlement answer used
+    // to reach the user as "API key is invalid" with a key that was working.
+    // Measured on the live gateway: a free-tier refusal, `Model access is
+    // disabled` and Cloudflare's 1010 are all 403 and none is about the
+    // credential, so each comes back as 400 — the free tier through a fixed
+    // explanation that names the gateway's error, the others through the
+    // gateway's own type and message.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const answer = async (body: string): Promise<Response> => {
+      const patched = patchFetch(
+        (async () =>
+          new Response(body, { status: 403 })) as unknown as typeof fetch,
+        als,
+        resolveConfig()
+      );
+      return patched("https://opencode.ai/zen/v1/chat/completions", {
+        body: "{}",
+        method: "POST",
+      });
+    };
+    const refusal = async (response: Response) =>
+      (await response.json()) as { error: { message: string; type: string } };
+
+    const free = await answer(
+      JSON.stringify({
+        error: {
+          message: "OpenCode's free tier can only be used from within OpenCode",
+          type: "FreeTierError",
+        },
+      })
+    );
+    expect(free.status).toBe(400);
+    const freeRefusal = await refusal(free);
+    expect(freeRefusal.error.type).toBe("free_tier_restricted");
+    expect(freeRefusal.error.message).toContain("403 FreeTierError");
+
+    // The same refusal with no `error` wrapper: a flat `{ type, message }` is
+    // what several gateway errors look like, and it is an entitlement answer —
+    // the credential was accepted and the account lacks the model.
+    const entitlement = await answer(
+      JSON.stringify({
+        message: "Upstream request failed: Model access is disabled",
+        type: "server_error",
+      })
+    );
+    expect(entitlement.status).toBe(400);
+    const entitlementRefusal = await refusal(entitlement);
+    expect(entitlementRefusal.error.type).toBe("entitlement_restricted");
+
+    // A JSON refusal with neither field: nothing is invented — the raw body is
+    // kept as the message and the type says only that it was a refusal.
+    const untyped = await answer(
+      JSON.stringify({ error: { note: "no message" } })
+    );
+    expect(untyped.status).toBe(400);
+    const untypedRefusal = await refusal(untyped);
+    expect(untypedRefusal.error.message).toContain("403 refusal: ");
+
+    // Cloudflare's WAF answers with plain text rather than JSON, so this shape
+    // is only reachable through the text fallback.
+    const waf = await answer("error code: 1010");
+    expect(waf.status).toBe(400);
+    const wafRefusal = await refusal(waf);
+    expect(wafRefusal.error.type).toBe("client_identity_blocked");
+
+    // `/usage` 403s for "subscription required" and the meter READS that
+    // status, so the rewrite is scoped to inference and this one passes through.
+    const patched = patchFetch(
+      (async () =>
+        new Response("{}", { status: 403 })) as unknown as typeof fetch,
+      als,
+      resolveConfig()
+    );
+    const usage = await patched("https://opencode.ai/zen/go/v1/usage", {
+      method: "GET",
+    });
+    expect(usage.status).toBe(403);
   });
 
   it("injects origin headers and dynamic session ID for zen requests", async () => {

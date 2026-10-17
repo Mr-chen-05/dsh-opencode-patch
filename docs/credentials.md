@@ -1,6 +1,8 @@
-# Credentials: the pool, the login, and the rotation
+# Credentials: the resolution chain, the logins, and the installation store
 
-The plugin's default is the deployment's own credential: whatever `apiKeyEnv` the profile already declares keeps resolving exactly as it does today. The pool is a SEPARATE credential the deployment opts into by pointing a route at it, and nothing about that happens as a side effect of adding an entry. A user who logs in with OAuth has taken an action; the plugin still resolves exactly what the profile names until the profile names the pool's reference.
+The plugin's default is the deployment's own credential: whatever `apiKeyEnv` the profile already declares keeps resolving exactly as it does today. A login, and the installation's own store, are fallbacks for a credential that is missing, placeholder or unnamed — a route that declares what it wants is never overridden by something the plugin found on its own.
+
+**The multi-key pool is not part of `main`.** Several credential references per plane, rotated as the gateway refuses them, lives on the `v2` branch; what follows resolves one credential per route, and the logins are consulted only where a route named none.
 
 ## Current request wiring
 
@@ -25,23 +27,18 @@ These contracts are exercised with fixture grants and SQLite databases through `
 
 ## The resolution chain
 
-One reference resolves per route, and the pool only enters the picture when the route names the pool's reference:
+One reference resolves per route:
 
 1. **The route's `apiKeyEnv`** — the reference the deployment declared, resolved through the credentials service with the launch environment as fallback. This is the zero-configuration default, and the whole behavior for a deployment that declares nothing else.
-2. **The pool's reference** — the same resolution, for a deployment that named `OPENCODE_POOL_KEY` or `OPENCODE_GO_POOL_KEY` instead. The value behind it is the pool's current key, which the plugin rotates; the wrapper and this plugin both read it per operation, so a rotation reaches the next call without a restart.
-3. **Nothing** — a named reference that misses fails loud. Never hand pi an `undefined` for a named ref: it would pick up an unrelated ambient key (`OPENAI_API_KEY` and friends) and bill another tenant.
+2. **A named reference that misses fails loud.** Never hand pi an `undefined` for a named ref: it would pick up an unrelated ambient key (`OPENAI_API_KEY` and friends) and bill another tenant.
 
-## The pools are per plane
+Where a route names no reference at all, the chain continues into the login and the installation's store — "The handoff" below is where that order lives.
+
+## The planes are separate, so their credentials are
 
 Zen credentials serve Zen calls, Go credentials serve Go calls, and never the other way: the planes are different accounts with different keys, different endpoints and different catalogs.
 
-A pool holds **API keys**, and that is a measured constraint rather than a first choice — the section below shows a login token is refused by the model endpoints the same way a wrong key is. So:
-
-| Entry   | Origin                                                  | Refresh |
-| :------ | :------------------------------------------------------ | :------ |
-| API key | a reference in the credential store, or the environment | none    |
-
-A pool of two or more keys is what rotation means here: a deployment past a rate limit or a per-key spend cap names the keys it holds, and the plugin serves the next one.
+A route's credential is an **API key** — a reference in the credential store, or the environment — and that is a measured constraint rather than a first choice: the section below shows a login token is refused by the model endpoints the same way a wrong key is.
 
 ## An OAuth token is not an API key on the Zen model endpoint (measured)
 
@@ -55,9 +52,9 @@ The login flows produce an access token. Whether that token can authenticate a M
 
 The last two are indistinguishable. The Bearer slot on that endpoint reads an API key and nothing else, so a token presented there is an invalid API key. **This is about `/chat/completions` on the Zen base and nothing wider** — measured later, the account's own token does authenticate on `/inference/openai/v1`, which is a different endpoint with a different credential slot. Read the two together: an API-key slot refuses a login token, and the account plane accepts it.
 
-So the pool's entries are API keys, and a login is not one of them. What a login IS good for is the Console's own API — the per-account catalog at `/api/config`, the account and organization context at `/api/user` and `/api/orgs` — and a deployment that wants a login's models needs the Console to exchange it for a key, which is the vendor's flow, not this plugin's.
+So the credential a model endpoint wants is an API key, and a login is not one of them. What a login IS good for is the Console's own API — the per-account catalog at `/api/config`, the account and organization context at `/api/user` and `/api/orgs` — and a deployment that wants a login's models needs the Console to exchange it for a key, which is the vendor's flow, not this plugin's.
 
-Recording this because the alternative is building a rotation that silently sends an access token to an endpoint that answers "Invalid API key" for it, and debugging that as a routing fault.
+Recording this because the alternative is wiring a login's token into a model request that answers "Invalid API key" for it, and debugging that as a routing fault.
 
 ## What the logins are (measured from OpenCode's own source)
 
@@ -66,52 +63,28 @@ Both are device flows against the same Console, differing in what they store and
 - `POST {console}/auth/device/code` with `client_id: "opencode-cli"` returns a `device_code`, a `user_code` and a `verification_uri_complete`.
 - Polling `POST {console}/auth/device/token` with the device grant returns the `access_token`, `refresh_token` and `expires_in`.
 - The refresh grant against the same endpoint returns a NEW refresh token with every access token — the stored pair must be replaced atomically, or the next refresh uses a token the server has already rotated away.
-- `GET {console}/api/config` — the authoritative per-account model and price catalog — answers to a plain API key, so the pool does not gate it.
+- `GET {console}/api/config` — the authoritative per-account model and price catalog — answers to a plain API key.
 
 v1 (`console login`) additionally reads `/api/user` and `/api/orgs`, stores the account and org context, and can switch among them; v2 (`auth login opencode`) stores the provider credential with org metadata but no switching. The plugin implements the flows itself, from those measured endpoints, and stores the results in its own settings — never in the CLI's `auth.json`, which belongs to a program the plugin does not own.
 
-## What the pool never touches
+## What the plugin never touches
 
 - **The `google` route name.** A real deployment may configure Google AI Studio under that id; the plugin's internal route is named `opencode-google` precisely so that name stays free.
-- **The CLI's `auth.json`.** Reading it couples the plugin to another program's private file format; writing it collides with the program that owns it.
-- **Silent rotation.** Adding a credential changes nothing until the switch is on. This is the contract: zero configuration by default, opt-in by statement.
+- **The CLI's `auth.json`.** Reading it couples the plugin to another program's private file format; writing it collides with the program that owns it. The database that replaced it is read only when `readOpencodeStore` is on, and is never written.
 
-## The reference the pool owns
-
-The pool does not write behind anyone's key. Writing the user's own reference (`OPENCODE_API_KEY`) is dead on both sides: if nothing shadows it, the write replaces the credential the deployment declared, and if the environment satisfies it, the write is shadowed. The seam refuses that second case out loud — `set` "rejects while a read-only source shadows the reference", because the write would otherwise appear to succeed while resolution kept returning the shadowing value. So the failure is not merely impolite; it is already guarded.
-
-The pool owns a reference of its own instead:
-
-- A dedicated name per plane — `OPENCODE_POOL_KEY`, `OPENCODE_GO_POOL_KEY` — which nothing shadows, so it is writable.
-- Rotation writes the next key with `set(ref, value)`, and every route that names that reference resolves it on its next operation, because the seam resolves per call. That includes the routes the wrapper serves: it reads whatever reference the profile declares, so pointing a route at the pool's reference is the whole opt-in.
-- Opting in is therefore a configuration statement, which is what the contract in this file asks for. A deployment that leaves `apiKeyEnv` alone keeps the environment's credential and the pool never runs.
-
-What this does not need: a takeover, a record another plugin owns, or any write to a reference the deployment declared. It needs one fresh reference name and the seam's own write path.
-
-## The opt-in assertion, measured
-
-The load-bearing claim in this file is that pointing a route at the pool's reference is the whole opt-in — the wrapper resolves whatever reference the profile names, per operation, so a rotation reaches it without a restart. Two requests to the same endpoint, differing only in the credential, answer differently in a way that confirms it:
-
-| Credential | Answer |
-| :-- | :-- |
-| the deployment's real key | `403 Model access is disabled` — accepted; that model is not enabled for the account |
-| a made-up value in the pool's position | `401 AuthError: Invalid API key.` |
-
-So the gateway validates whatever sits in the slot, which makes rotation safe by construction rather than by promise: a key the pool cycles in that the gateway refuses answers `401`, and that is a credential to mark failed and skip, not a routing fault to debug. The pool's failure-skip is therefore load-bearing on the first request, not a nicety.
-
-## Verified, not assumed
+## What the seam enforces about writes (verified, not assumed)
 
 Run against the real `dsh-credentials-local` provider on a temporary document, so the measurement never touched a real `~/.dsh/.credentials.yaml`:
 
 | Claim | Result |
 | :-- | :-- |
 | a fresh reference is writable | `set` then `resolve` returns the value, `source=file`; `describe` reports `configured` and `writable` |
-| rotation reaches the next operation | a second `set` makes the next `resolve` return the NEW value, with no restart |
+| a write reaches the next operation | a second `set` makes the next `resolve` return the NEW value, with no restart |
 | the deployment's own reference is protected | writing a name the launching environment supplies is REFUSED: "is supplied read-only by the launching environment, so set would be shadowed" |
 | `unset` returns to unconfigured | yes |
 | the store is the document the routes resolve from | the written file is `version: 1` with a `refs:` map — the same shape `~/.dsh/.credentials.yaml` already has |
 
-The third row is the one that matters most: the objection that a pool would overwrite the deployment's key is not merely avoided by this design, it is enforced by the implementation.
+The third row is the one that matters most: nothing this plugin writes can shadow a credential the deployment declared, because the seam refuses that write outright. The second row is why a grant written while the process runs is visible to the next request with no restart — which is what the org cache and the token reader both depend on.
 
 ## The credential the user already has, and this plugin does not read
 
@@ -174,13 +147,13 @@ So the reported `401 Invalid API key` on a route with no reference is not this f
 
 **The gap that is real is the other one.** A login's token is not usable as a route's credential: `warmOrg` reads the stored grant for the plane's ORG and nothing else, so a deployment that has signed in still needs `apiKeyEnv` on every route. Wiring the grant's access token into the same resolution is what would make a login sufficient on its own, which is the point of having one — and it is the half of the core model that is still missing.
 
-**Where that wiring goes, and in what order.** The bridge already assembles the resolution for every route it serves (`resolveApiKey` in `google-bridge.ts`): the pool first when one is enabled, then `resolveGatewayKey` for the route's own reference. The login's token belongs at the END of that chain, never the start:
+**Where that wiring goes, and in what order.** The bridge already assembles the resolution for every route it serves (`resolveApiKey` in `google-bridge.ts`): `resolveGatewayKey` for the route's own reference, and nothing else where one was named. The login's token belongs at the END of that chain, never the start:
 
-    pool (when enabled)  →  the route's named reference  →  the stored login
+    the route's named reference  →  the stored login
 
 which is the user's rule stated as code — everything they declared explicitly outranks anything the plugin found on its own — and it is the same `orElse` shape 2.0 uses. `warmOrg` already reads the grant per plane and keeps the org; the same read yields the access token, so this is a return value that is currently discarded rather than a new lookup.
 
-**Two files, one new input.** `warmOrg` lives in `lifecycle.ts` and reads the grant per plane; `resolveApiKey` lives in `google-bridge.ts` and resolves a route's key. The bridge already takes an `inputs` object (the pool is one of them), so the token arrives the same way: `lifecycle.ts` passes a `loginToken(plane)` alongside `pool`, and the bridge calls it only where a reference was not named. That keeps the read in the module that already knows how to make it, and keeps the bridge from learning about the credential store.
+**Two files, one new input.** `warmOrg` lives in `lifecycle.ts` and reads the grant per plane; `resolveApiKey` lives in `google-bridge.ts` and resolves a route's key. The bridge already takes an `inputs` object, so the token arrives the same way: `lifecycle.ts` passes a `loginToken(plane)` in it, and the bridge calls it only where a reference was not named. That keeps the read in the module that already knows how to make it, and keeps the bridge from learning about the credential store.
 
 **Attempted once and reverted, and the two obstacles are worth writing down** so the next attempt is a single pass rather than a lint loop:
 
@@ -200,7 +173,7 @@ which is the user's rule stated as code — everything they declared explicitly 
 
     responses-provider.ts
       imports: createTokenStore from "./token-store.ts", name from "./identity.ts"
-      beside the existing `pool: poolFor("opencode")`:
+      in the object the bridge is registered with:
         loginToken: async (plane) => {
           const store = createTokenStore({
             credentials: readCredentialsWriter(ctx), plane, scope: name,
@@ -217,7 +190,7 @@ No try/catch is needed: the store's `read` is documented to answer `undefined` w
 
 **And the second attempt got one step further, which narrows the test precisely.** With the edit applied and a test that mirrors the stream test, `vp check` passed and 16 of 17 tests passed — the new one failed on `expected undefined to be 'Bearer st_from_login'`, meaning the captured headers were EMPTY: the request never reached the patched `fetch` at all, so the stream had already failed before the key mattered.
 
-**And one hypothesis is ruled out for the next attempt.** `registerGoogleBridge` destructures `const { ctx, host, llm, specs } = inputs` and then reads `inputs.pool` directly, so `inputs.loginToken` reaches `resolveApiKey` the same way the pool does — the field is not dropped, and the edit needs no change on that account. The failure is in the test's route to `fetch`, not in the wiring.
+**And one hypothesis is ruled out for the next attempt.** `registerGoogleBridge` destructures `const { ctx, host, llm, specs } = inputs` and then reads the rest of `inputs` directly, so `inputs.loginToken` reaches `resolveApiKey` without being dropped — the edit needs no change on that account. The failure is in the test's route to `fetch`, not in the wiring.
 
 **And one gap the wiring opens, which the next pass should close with it.** The grants are keyed per plane, and both sides derive the plane with the same rule — `opencode-go` for a Go route, `opencode` otherwise. But the sign-in card defaults to `opencode`, so a user who signs in once has a grant the Go routes never ask for, and those routes fall through to `undefined` exactly as before.
 
@@ -248,14 +221,6 @@ Everything else is in place: the bridge's `resolveApiKey` already has the exact 
 ## Status
 
 Built, in the order this file sets out:
-
-- **The pool and its rotation.** `src/credential-pool.ts`: entries are credential references per plane, selection is round-robin among the entries that are neither failed nor unresolved, an exhausted pool falls through rather than failing a request, and **rotation writes** the active key under the reference the pool owns — on every rotation, not once at mount. A route this plugin serves asks the pool directly, so two streams through the bridge arrive with two different keys; the write is what carries a rotation to the routes the wrapper serves.
-
-  That last clause is a correction rather than a detail. The first build published at mount and only selected afterwards, so a rotation reached the routes this plugin serves and nothing else — every route the wrapper serves kept reading the key that happened to be current at startup. Since the wrapper resolves per operation, a rotation that does not write is a rotation nobody else sees, and selection alone would have left this file's central claim false while every test passed. Hence the guard asserts the SECOND rotation publishes, not only the first, and reverting the fix turns three of them red.
-
-  A publish the seam refuses is reported and does not fail the rotation: the caller asked for a key for a request it is making itself and already holds it.
-
-- **The switch, and its default.** `credentialPool` carries `enabled`, `zen` and `go`. The defaults are `false` with empty lists, `createCredentialPool` answers `undefined` for that, and every caller then resolves exactly what it resolved before the pool existed. Listing credentials without turning the switch on changes nothing, which is the contract.
 
 - **The device-flow client.** `src/console-auth.ts`: one client serves both logins, written against the measured responses. `start` asks for a code, `poll` reads the Console's own error field rather than its status, and `awaitAuthorization` waits at the endpoint's interval — doubling it after a `slow_down`, which is what that error asks for. The verification URI is resolved against the Console, because the endpoint answers a relative path and opening that verbatim opens nothing. `refresh` returns the pair together, because the Console rotates the refresh token with every access token and the caller must write both halves at once. It also reads what the login must know before it stores anything: `GET /api/user` for the account and `GET /api/orgs` for its organizations, both with the session token as a bearer credential, which is the same pair the client itself reads. Verified against the live Console: this module's own client obtained a code, read the interval, and reported two pending polls.
 

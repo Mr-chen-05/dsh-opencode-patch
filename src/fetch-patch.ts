@@ -276,20 +276,6 @@ const restrictedResponse = (message: string, type: string): Response =>
  * @param config - resolved plugin configuration.
  */
 /**
- * Told when the gateway refused a credential, so a pool can rotate.
- *
- * The interceptor is the only place in this plugin that sees EVERY gateway
- * response, including the ones made by routes the wrapper serves and by the Go
- * plane — which is why rotation is driven from here rather than from a route.
- * A rotation triggered by a route only reaches that route's plane; a
- * credential failure happens wherever the credential was used.
- *
- * @param plane - the gateway plane the request went to.
- * @param status - the HTTP status the gateway answered with.
- */
-export type CredentialFailureObserver = (plane: string, status: number) => void;
-
-/**
  * What the interceptor needs from the plugin beyond its configuration.
  *
  * An object rather than more positional parameters, because these are the
@@ -298,8 +284,6 @@ export type CredentialFailureObserver = (plane: string, status: number) => void;
  * what the running plugin knows.
  */
 export interface FetchPatchHooks {
-  /** Told when the gateway refused a credential, so a pool can rotate. */
-  readonly onCredentialFailure?: CredentialFailureObserver;
   /**
    * The org a plane's credential belongs to, when it has one.
    *
@@ -597,21 +581,6 @@ export const patchFetch = (
       url,
       userAgent: headers.get("User-Agent") ?? null,
     });
-
-    // A refused credential or an exhausted rate limit is the one moment a pool
-    // can do something useful, and this is the only place that sees the answers
-    // of routes the wrapper serves — so the rotation is driven from here. The
-    // current request has already failed; this is about the next one.
-    //
-    // 403 is NOT included: the gateway answers a model the account has not
-    // enabled with 403, and rotating a key over that would move a deployment
-    // off a working credential for a model problem.
-    if (
-      hooks.onCredentialFailure !== undefined &&
-      (response.status === 401 || response.status === 429)
-    ) {
-      hooks.onCredentialFailure(gatewayPlaneFor(url), response.status);
-    }
 
     // **403 is never a credential answer on this gateway.** It answers 401 for a
     // credential it will not accept (`Missing API key`, `Invalid API key`, `Go

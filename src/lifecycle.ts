@@ -28,7 +28,6 @@ import {
 import { ConsoleAuthClient } from "./console-auth.ts";
 import {
   type CordisContext,
-  readCredentialPoolRotator,
   readCredentialsWriter,
   readEntryOptions,
 } from "./cordis-context.ts";
@@ -168,7 +167,7 @@ const installUsageService = (
     // `ctx.provide` publishes the same service under the same name, which is what
     // the client looks for - and a meter that cannot mount is otherwise a
     // silence with no way to tell it from a meter whose service answered
-    // nothing. The pool rotator took this route for the same reason.
+    // nothing.
     mountByProvide(ctx, "opencodeGoUsage", GoUsageService, usageOptions);
     return;
   }
@@ -265,11 +264,6 @@ const installFetchPatch = (
     return false;
   }
 
-  // Rotation is driven by the credential failures this interceptor is the only
-  // place to see — including the ones from routes the WRAPPER serves and from
-  // the Go plane, neither of which passes through a route of ours. The pool
-  // itself lives with the provider mount, so this asks it for a rotator and
-  // reports what it saw.
   /**
    * The org each plane's credential belongs to, read once and kept.
    *
@@ -299,17 +293,6 @@ const installFetchPatch = (
       setOrg(plane, undefined);
     }
   };
-  const rotateAfterFailure = async (
-    plane: string,
-    status: number
-  ): Promise<void> => {
-    const rotate = readCredentialPoolRotator(ctx);
-    if (rotate === undefined) {
-      return;
-    }
-    await rotate(plane, status);
-  };
-
   // Use the unpatched fetch for refresh: a refresh inherits the active turn,
   // so running it through this patch could recursively ask for the same login.
   const loginCredential = createLoginCredentialReader(
@@ -319,9 +302,6 @@ const installFetchPatch = (
   );
   const patched = patchFetch(originalFetch, als, config, {
     loginCredential,
-    onCredentialFailure: (plane, status) => {
-      void rotateAfterFailure(plane, status);
-    },
     // The org is part of the credential, not a setting: it comes from the stored
     // login for the plane the request is bound for, and a plane whose credential
     // is a plain key has none.
@@ -393,8 +373,8 @@ const installFetchPatch = (
       stopResponsesProvider = undefined;
     };
     void (async () => {
-      // The resolved config rides in: the credential pool is opt-in through
-      // it, and a mount without it can only serve the profile's own key.
+      // The resolved config rides in: the mount reads the endpoint family and
+      // the installation-store switch from it.
       const stop = await registerResponsesProvider(
         ctx,
         config,

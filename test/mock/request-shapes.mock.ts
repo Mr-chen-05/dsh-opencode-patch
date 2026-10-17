@@ -373,25 +373,19 @@ describe("the request shape per configuration", () => {
     expect(payload.error.message).toContain("1010");
   });
 
-  it("passes a 401 through and reports the plane to the rotation hook", async () => {
+  it("passes a 401 through", async () => {
     forced = {
       body: JSON.stringify({ error: { message: "Invalid API key" } }),
       status: 401,
     };
-    const failures: { plane: string; status: number }[] = [];
     const response = await als.run(sessionTurn(), () =>
       post(
-        patchedWith(resolveConfig(), {
-          onCredentialFailure: (plane, status) => {
-            failures.push({ plane, status });
-          },
-        }),
+        patchedWith(resolveConfig()),
         responsesUrl(),
         responsesBody("gpt-5.4")
       )
     );
     expect(response.status).toBe(401);
-    expect(failures).toEqual([{ plane: "opencode", status: 401 }]);
   });
 
   it("sends no credential and warns when none resolves", async () => {

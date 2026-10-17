@@ -17,9 +17,9 @@
  * has already rotated away — the failure mode this module exists to prevent.
  *
  * **Keys are scoped, so this plugin cannot write behind another.** The record
- * key is `<scope>/<id>` with the scope being a registered plugin name; the pool's
- * references and this plugin's records therefore live in different address
- * spaces, and nothing here can name `llm-pi-ai/opencode`.
+ * key is `<scope>/<id>` with the scope being a registered plugin name; another
+ * plugin's references and this plugin's records therefore live in different
+ * address spaces, and nothing here can name `llm-pi-ai/opencode`.
  *
  * @module dsh-opencode-patch/token-store
  */

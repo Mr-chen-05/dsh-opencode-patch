@@ -287,7 +287,6 @@ describe("Config schema", () => {
     expect(Object.keys(validated).sort()).toEqual(
       [
         "credentialOrg",
-        "credentialPool",
         "debug",
         "enrichModels",
         "endpoint",
@@ -312,10 +311,7 @@ describe("Config schema", () => {
       ].sort()
     );
     expect(resolveConfig(validated as PluginConfig)).toMatchObject({
-      // The pool's default is the whole contract: with no configuration at all,
-      // nothing about a credential pool runs.
       credentialOrg: undefined,
-      credentialPool: { enabled: false, go: [], zen: [] },
       debug: false,
       enrichModels: true,
       endpoint: "auto",

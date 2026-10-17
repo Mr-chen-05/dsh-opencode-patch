@@ -53,13 +53,6 @@ export const CONFIG_ONLY_FIELDS: readonly {
       "elsewhere and has no UI to belong to",
   },
   {
-    field: "credentialPool",
-    reason:
-      "several credentials and their rotation; a card for it comes with the " +
-      "logins that fill it, and until then the row is the honest place for a " +
-      "list of credential references nobody should type into a settings form",
-  },
-  {
     field: "debug",
     reason: "diagnostic JSONL logging, not a behaviour a user tunes in the UI",
   },

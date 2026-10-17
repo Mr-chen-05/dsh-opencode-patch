@@ -66,7 +66,6 @@ To maintain long-term stability and prevent regressions, the codebase enforces s
 │    • src/turn-store.ts: AsyncLocalStorage for active turn attribution  │
 │    • src/token-store.ts: Atomic JSON store for OAuth credentials       │
 │    • src/opencode-store.ts: Read-only SQLite query engine (node:sqlite)│
-│    • src/credential-pool.ts: Multi-key rotation & failover state       │
 └────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
