@@ -503,6 +503,46 @@ describe("settings-page: apply & slots", () => {
     expect(attempts).toEqual(["dsh-opencode-patch-usage"]);
   });
 
+  it("registers the meter even when the inject deps never resolve", () => {
+    // `ctx.inject` is a HARD gate: the callback runs only once ALL of the named
+    // services exist. A host that mounts no remote face never satisfies it, and
+    // the meter is then absent with nothing to tell that from a host that serves
+    // no usage service. The documented second path is a bounded fallback that
+    // registers anyway so the read can report its own reason; the comment still
+    // described it while the code had lost it.
+    vi.useFakeTimers();
+    try {
+      const registered: string[] = [];
+      const ctx = {
+        effect: (fn: () => unknown) => {
+          fn();
+        },
+        // Never calls back: the gate stays closed.
+        inject: () => {
+          /* the gate stays closed */
+        },
+        modelDirectories: { directoryFor: () => ({ store: {} }) },
+        remote: {},
+        slots: {
+          inject: (_name: string, fn: () => void) => {
+            fn();
+          },
+          register: (entry: Record<string, unknown>) => {
+            registered.push(String(entry.id));
+          },
+        },
+      };
+
+      apply(ctx as never);
+      expect(registered).toHaveLength(0);
+
+      vi.advanceTimersByTime(10_000);
+      expect(registered).toEqual(["dsh-opencode-patch-usage"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("degrades to no meter when the model-directory service throws", () => {
     // `directoryFor` throws for a session it cannot resolve yet (a composer
     // rendered before its session is bound). The injector must swallow that

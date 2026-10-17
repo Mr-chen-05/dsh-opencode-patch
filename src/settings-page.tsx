@@ -607,6 +607,20 @@ export const apply = (ctx: ClientContext): void => {
   // namespace lazily at render time, when it is there.
   if (typeof ctx.inject === "function") {
     ctx.inject(["modelDirectories", "remote", "slots"], registerMeter);
+    // `ctx.inject` is a HARD gate: the callback runs only once ALL of those
+    // names exist. If one of them never appears — a host that mounts no remote
+    // face is the ordinary case — the meter is then absent with nothing to tell
+    // it from a host that serves no usage service. This is the documented second
+    // path ("a ten-second fallback calls it anyway so the read can report its
+    // own reason"); the comment still described it, but the code had lost it.
+    // The registration is idempotent per registry, so whichever path wins, the
+    // meter is registered once and a duplicate can never throw.
+    const fallback = setTimeout(() => {
+      registerMeter(ctx);
+    }, 10_000);
+    ctx.effect?.(() => () => {
+      clearTimeout(fallback);
+    });
   } else {
     registerMeter(ctx);
   }
