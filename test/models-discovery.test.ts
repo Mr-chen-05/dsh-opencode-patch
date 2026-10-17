@@ -817,6 +817,42 @@ describe("models-discovery: the Effort row a model reports", () => {
     (ctx.llm as { resolveModelInfo: (...a: unknown[]) => Promise<unknown> })
       .resolveModelInfo;
 
+  it("survives a model the route's adapter refuses to resolve", async () => {
+    // The Host builds a provider's group with `Promise.all` over `listModels`, and
+    // a rejection there is caught per PROVIDER — so ONE unresolvable model removes
+    // EVERY model on that route from the picker. That became reachable when
+    // `listModels` started publishing the whole catalog on the parent route: the
+    // route's own adapter never carried the Responses / Messages / Google models,
+    // so it may refuse an id it does not know.
+    const ctx = {
+      llm: {
+        // Refuses every id, which is what an adapter does for a model its
+        // installed catalog does not carry — and is the worst case for the group.
+        resolveModelInfo: async () => {
+          throw new Error("unknown model");
+        },
+      },
+    } as never as CordisContext;
+    const stop = decorateModelInfo(ctx, enrichConfig);
+
+    // The unknown-to-the-adapter model answers from OUR catalog instead of
+    // throwing, so the group survives.
+    const resolved = (await patched(ctx)("opencode", "gpt-5.4")) as {
+      context?: { contextWindow?: number };
+      reasoning?: { efforts: unknown[] };
+    };
+    expect(resolved.context?.contextWindow).toBeGreaterThan(0);
+    expect(resolved.reasoning?.efforts.length).toBeGreaterThan(0);
+
+    // A model the catalog cannot describe either still throws: inventing an answer
+    // for an id nobody knows would hide a real problem.
+    await expect(patched(ctx)("opencode", "not-a-real-model")).rejects.toThrow(
+      "unknown model"
+    );
+
+    stop?.();
+  });
+
   it("fills the reasoning a plane route's adapter does not report", async () => {
     const ctx = llmWith(() => ({
       id: "minimax-m3",

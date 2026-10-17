@@ -806,11 +806,29 @@ export const decorateModelInfo = (
     model: string,
     signal?: AbortSignal
   ): Promise<unknown> => {
-    const resolved: unknown = await Reflect.apply(original, llm, [
-      provider,
-      model,
-      signal,
-    ]);
+    let resolved: unknown;
+    try {
+      resolved = await Reflect.apply(original, llm, [provider, model, signal]);
+    } catch (error) {
+      // **One throw removes the WHOLE provider group from the picker.** The Host
+      // builds a group with `Promise.all` over `listModels`, and a rejection
+      // there is caught per PROVIDER, not per model — so the user loses every
+      // model on that route, not one row.
+      //
+      // That became reachable when `listModels` started publishing the catalog on
+      // the parent route: the route's own adapter never carried the Responses,
+      // Messages or Google models, so `resolveModelInfo` may refuse an id it does
+      // not know. Our catalog does know it, so answer from there rather than
+      // letting one unknown id take the group down.
+      //
+      // A model the catalog cannot describe either is rethrown: inventing an
+      // answer for an id nobody knows would hide a real problem.
+      const spec = findModelSpecOn(catalogPlaneForRoute(provider), model);
+      if (isInternalRoute(provider) || spec === undefined) {
+        throw error;
+      }
+      resolved = {};
+    }
     // Our own routes carry the real metadata already, and an answer that is not
     // a record has nothing to fill in.
     if (isInternalRoute(provider) || !isRecord(resolved)) {
