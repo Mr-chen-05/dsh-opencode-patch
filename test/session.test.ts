@@ -313,21 +313,36 @@ describe("session: a session id the gateway will accept", () => {
     expect(isOpenCodeSessionId("ses_ed62aae61ffeA6UwzEFN9YNKk8")).toBe(true);
   });
 
-  it("lands the low twelve time bits in the gateway's pass band", () => {
-    // Measured live (OmniRoute #16571): low-12 hex in f[c-f]x passes,
-    // anything else 403s — a uniform 12-bit counter passes ~1.5% of
-    // sessions and dooms the rest at mint. Every derived id must land in
-    // [0xFC0, 0xFFE], across many inputs and both timestamp paths.
+  it("uses the whole low twelve bits, because there is no pass band", () => {
+    // The claim this replaces was that the gateway admits only low-12 values in
+    // `f[c-f]x` and 403s the rest. It was refuted three ways, and the last one is
+    // the gateway itself:
+    //
+    //   1. the vendor's own generator resets `counter` to 0 each millisecond and
+    //      starts at 1, so a real OpenCode session id has low-12 `0x001`;
+    //   2. 200,000 simulated upstream ids landed in the claimed band zero times;
+    //   3. LIVE, five ids with low-12 `0xfc5`, `0x001`, `0xffe`, `0x000` and
+    //      `0xfff` were each accepted identically — all five answered the same
+    //      `401 Go requires a credential`, which is about the credential and not
+    //      the session.
+    //
+    // A rule admitting only the band would have rejected the vendor's own client.
+    // So the counter is uniform, and this pins that the clamp is GONE: over many
+    // inputs the low twelve bits must spread out rather than sit in 63 values.
     const low12 = (id: string): number =>
       Number.parseInt(id.slice(4, 16), 16) % 0x1000;
-    for (let i = 0; i < 50; i += 1) {
-      const derived = low12(openCodeSessionIdFor(`band-check-${i}`));
-      expect(derived >= 0xfc0 && derived <= 0xffe).toBe(true);
-      const timed = low12(
-        openCodeSessionIdFor(`band-timed-${i}`, 1792000000000 + i)
+    const seen = new Set<number>();
+    for (let i = 0; i < 200; i += 1) {
+      seen.add(low12(openCodeSessionIdFor(`band-check-${i}`)));
+      seen.add(
+        low12(openCodeSessionIdFor(`band-timed-${i}`, 1792000000000 + i))
       );
-      expect(timed >= 0xfc0 && timed <= 0xffe).toBe(true);
     }
+    // A clamped counter can only ever produce 63 distinct values.
+    expect(seen.size).toBeGreaterThan(63);
+    // And it is not concentrated in the old band.
+    const inBand = [...seen].filter((v) => v >= 0xfc0 && v <= 0xffe).length;
+    expect(inBand).toBeLessThan(seen.size / 2);
   });
 
   it("rejects a pinned header that merely starts with ses_", () => {

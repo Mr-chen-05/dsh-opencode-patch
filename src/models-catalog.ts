@@ -94,7 +94,24 @@ export const CATALOG_REVALIDATION_TTL_MS = 60 * 60 * 1000;
  * nobody can age out, so each carries one.
  */
 const RETAINED_MODEL_IDS: ReadonlySet<string> = new Set([
-  "step-5-preview-free",
+  // Measured 2026-10-17 by POSTing one token to `/zen/v1/chat/completions` per
+  // id and reading the answer: `400 "Model is unavailable"` means gone, and
+  // `401`/`403` means the model is there and only the credential is missing.
+  // That is the "until it stops ANSWERING" probe this comment has always asked
+  // for, and it overturned every previous entry:
+  //
+  //   exo-free                        403  -> retained
+  //   cat-jam-free                    403  -> retained
+  //   muse-spark-1.2-contributor-free 403  -> retained
+  //   step-5-preview-free             400  -> REMOVED, it no longer answers
+  //
+  // The `deprecated` flag is not a substitute for this: 36 of the 43 deprecated
+  // zen ids answered `400` and are genuinely gone, 4 answered `410 Gone`, and 3
+  // still answer — so the flag is right most of the time and wrong exactly where
+  // it costs a working model.
+  "cat-jam-free",
+  "exo-free",
+  "muse-spark-1.2-contributor-free",
 ]);
 
 const FALLBACK_CONTEXT_WINDOW = 1_000_000;

@@ -141,7 +141,7 @@ describe("mergeDiscoveredModels", () => {
     expect(ids).toContain("adapter-only");
   });
 
-  it("keeps adapter rows, appends missing rows, and retires Zen 1.2", () => {
+  it("keeps adapter rows, appends missing rows, and drops an empty id", () => {
     const merged = mergeDiscoveredModels(
       [
         {
@@ -161,8 +161,12 @@ describe("mergeDiscoveredModels", () => {
       ]
     );
 
+    // `muse-spark-1.2-contributor-free` is KEPT now: it answers on the zen plane
+    // (measured `403 FreeTierError`), so it is not retired. It used to be dropped
+    // here, which is one of the working models that went missing.
     expect(merged.map((model) => model.id)).toEqual([
       "adapter-model",
+      "muse-spark-1.2-contributor-free",
       "space-bunny-free",
     ]);
     // The adapter’s own capacities win over the canonical catalog.
@@ -301,7 +305,7 @@ describe("decorateModelDiscovery", () => {
     expect(ctx.llm?.discoverModels).toBe(original);
   });
 
-  it("adds Space Bunny and removes retired 1.2 from an OpenCode answer", async () => {
+  it("adds Space Bunny and keeps the 1.2 row the zen plane serves", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockRejectedValue(new Error("offline catalog test"))
@@ -332,7 +336,9 @@ describe("decorateModelDiscovery", () => {
       undefined
     );
     expect(ids).toContain("space-bunny-free");
-    expect(ids).not.toContain("muse-spark-1.2-contributor-free");
+    // Kept, not removed: it answers on zen (measured `403 FreeTierError`), so it
+    // is not retired. Removing it was hiding a working model.
+    expect(ids).toContain("muse-spark-1.2-contributor-free");
     stop?.();
     expect(ctx.llm?.discoverModels).toBe(original);
   });

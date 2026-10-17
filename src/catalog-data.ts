@@ -88,9 +88,17 @@ export interface CatalogModelSpec {
  * retired everywhere.
  */
 export const RETIRED_ZEN_MODEL_IDS: ReadonlySet<string> = new Set([
-  "muse-spark-1.2",
+  // Measured 2026-10-17 against the live gateway, not read off a CLI listing:
+  // `muse-spark-1.2` answers `401 Missing API key` on the zen plane (the model
+  // is there; only the credential is missing), and
+  // `muse-spark-1.2-contributor-free` answers `403 FreeTierError`. Both were
+  // retired here and both are served, which hid two working models. Only the
+  // contributor row that is genuinely absent from the zen catalog stays.
+  //
+  // Retirement is provider-scoped because OpenCode itself is provider-scoped:
+  // `muse-spark-1.2-contributor` is absent from zen while the Go plane serves
+  // it, so this set names it and `isRetiredModel` applies to zen only.
   "muse-spark-1.2-contributor",
-  "muse-spark-1.2-contributor-free",
 ]);
 
 /** Complete catalog of OpenCode Go subscription models from models.dev. */

@@ -97,24 +97,26 @@ export const openCodeSessionIdFor = (
   // nibble of `hash[1]`. Arithmetic, not bitwise — the lint forbids the
   // operators, and the value only has to be stable, not well distributed.
   //
-  // The low twelve bits are ALSO the gate's pass band. Measured live
-  // (OmniRoute #16571 probes): low-12 hex in `f[c-f]x` passes, anything else
-  // 403s — so a uniform counter passes ~1.5% of sessions and dooms the rest
-  // at mint. Clamp into [0xFC0, 0xFFE]: the pass band, minus 0xFFF (all-ones
-  // reads as a degenerate counter).
-  const rawCounter = (hash[0] ?? 0) * 16 + Math.floor((hash[1] ?? 0) / 16);
-  const counter = 0xf_c0 + (rawCounter % 63);
+  // **There is no "pass band" to clamp into, and that is measured three ways.**
+  // The claim used to live here — that the gateway admits only low-12 values in
+  // `f[c-f]x` and 403s the rest — was refuted against the vendor's own generator
+  // (`counter` resets to 0 each millisecond and starts at 1, so a real OpenCode
+  // session id has low-12 `0x001`), against 200,000 simulated upstream ids (none
+  // landed in the band), and finally LIVE against the gateway itself: five ids
+  // with low-12 `0xfc5`, `0x001`, `0xffe`, `0x000` and `0xfff` were each accepted
+  // identically — all five answered the same `401 Go requires a credential`,
+  // which is about the credential and not the session. A rule that admitted only
+  // the band would have rejected the vendor's own client.
+  //
+  // So the counter is uniform again. The clamp that replaced it cost real
+  // entropy — 4096 possible values down to 63 — in the one part of the id the
+  // vendor reads back with `timestamp(id)`.
+  const counter = (hash[0] ?? 0) * 16 + Math.floor((hash[1] ?? 0) / 16);
 
   const time =
     createdAt !== undefined && Number.isSafeInteger(createdAt) && createdAt >= 0
       ? (BigInt(createdAt) * 4096n + BigInt(counter)) % 2n ** 48n
-      : // No creation time: the hash fills the high bits, but the low twelve
-        // are the gateway's pass band (see the counter clamp above) — a
-        // uniform hash lands there ~1.5% of the time, dooming the rest.
-        (BigInt(`0x${hash.subarray(0, 6).toString("hex")}`) -
-          (BigInt(`0x${hash.subarray(0, 6).toString("hex")}`) % 4096n) +
-          BigInt(counter)) %
-        2n ** 48n;
+      : BigInt(`0x${hash.subarray(0, 6).toString("hex")}`);
 
   let random = "";
   for (let i = 6; i < 20; i += 1) {

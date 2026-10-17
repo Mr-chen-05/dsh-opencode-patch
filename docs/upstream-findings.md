@@ -275,17 +275,63 @@ A throw out of the entry is a meter that disappears with no message. The guard i
 
 ## 3.7 The Go quota endpoint has exactly one public route — VERIFIED
 
-`packages/console/app/src/routes/zen/go/v1/usage.ts` is the **only** quota route in
-either major version (checked 1.19.3 and 2.0.32), and the inference proxy's path table
-(`packages/console/app/src/lib/inference-proxy.ts`) lists
-`"GET /zen/go/v1/usage": "/go/v1/usage"` with **no** `/inference/.../usage` counterpart.
+`packages/console/app/src/routes/zen/go/v1/usage.ts` is the **only** quota route in either major version (checked 1.19.3 and 2.0.32), and the inference proxy's path table (`packages/console/app/src/lib/inference-proxy.ts`) lists `"GET /zen/go/v1/usage": "/go/v1/usage"` with **no** `/inference/.../usage` counterpart.
 
-That matters because the live catalog names the INFERENCE family for the `opencode`
-provider (`api: https://opencode.ai/inference/openai/v1`). `toGoBaseURL` rewrote only
-the `zen/v1` form, so a base discovered from a provider row passed through untouched and
-the meter asked `…/inference/openai/v1/usage` — a path that does not exist, which is an
-unavailable meter with no explanation. Both families now resolve to
-`https://opencode.ai/zen/go/v1`.
+That matters because the live catalog names the INFERENCE family for the `opencode` provider (`api: https://opencode.ai/inference/openai/v1`). `toGoBaseURL` rewrote only the `zen/v1` form, so a base discovered from a provider row passed through untouched and the meter asked `…/inference/openai/v1/usage` — a path that does not exist, which is an unavailable meter with no explanation. Both families now resolve to `https://opencode.ai/zen/go/v1`.
+
+## 3.8 Probing the gateway: 401/403 means SERVED, 400 means GONE — MEASURED
+
+`POST /zen/v1/chat/completions` with one token and no credential answers distinctly
+enough to classify every id:
+
+| answer | meaning |
+| :-- | :-- |
+| `401 AuthError "Missing API key."` | the model EXISTS, the credential is missing |
+| `403 FreeTierError` | the model EXISTS and is free |
+| `400 "Model is unavailable."` | the model is GONE |
+| `410 Gone` | the model is GONE |
+| `400 "Request is missing x-opencode-session…"` | Go plane needs the session header first |
+
+That is the "kept until it stops ANSWERING" probe the source comments kept asking for
+and never ran. Run 2026-10-17 over the 43 zen ids the registry marks `deprecated`:
+
+- **36 answered `400`, 4 answered `410`** — genuinely gone. The `deprecated` flag is
+  right for these.
+- **3 still answered**: `exo-free` (`403`), `cat-jam-free` (`403`),
+  `muse-spark-1.2-contributor-free` (`403`). The flag is wrong for these, and dropping
+  them hid working models.
+- `step-5-preview-free`, which `RETAINED_MODEL_IDS` was pinning by hand, answered
+  **`400` — it is gone**. The pin had outlived the model.
+
+`GET /zen/v1/models` is also incomplete: it omits `deepseek-v4-flash-vision-exp`
+(`401`) and `nemotron-3-ultra-free` (`403`), both of which answer. So neither the
+registry's flag nor the gateway's own listing is authoritative — only a probe is.
+
+### What that changed
+
+- `RETAINED_MODEL_IDS` → `cat-jam-free`, `exo-free`, `muse-spark-1.2-contributor-free`;
+  `step-5-preview-free` removed.
+- `RETIRED_ZEN_MODEL_IDS` → `muse-spark-1.2-contributor` only. `muse-spark-1.2`
+  answered `401` on zen and `muse-spark-1.2-contributor-free` answered `403`, so both
+  were being hidden while being served.
+
+### The session "pass band" is refuted LIVE
+
+Five session ids were minted with low-12 values `0xfc5`, `0x001`, `0xffe`, `0x000` and
+`0xfff` and sent to `POST /zen/go/v1/chat/completions`. All five answered identically:
+
+```
+BAND      low12=0xfc5  401  Go requires a credential
+UPSTREAM  low12=0x001  401  Go requires a credential
+BAND2     low12=0xffe  401  Go requires a credential
+ZERO      low12=0x000  401  Go requires a credential
+MAX       low12=0xfff  401  Go requires a credential
+```
+
+The session header was accepted every time; the only complaint was the credential. So
+the low twelve bits do not decide admission, and the clamp in `src/session.ts` is gone.
+That is the third independent refutation, after the vendor's generator and the 200k-id
+simulation.
 
 ## 4. How to re-check any of this
 
