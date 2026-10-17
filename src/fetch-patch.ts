@@ -597,6 +597,14 @@ export const patchFetch = (
     // All three are remapped to 400 so the classifier reads them as a request
     // problem rather than a key problem, and each keeps the gateway's own words so
     // the reader can search them. The `type` is what tells them apart.
+    //
+    // **The status alone is not enough.** `classifyPiAiError` (dsh-llm-pi-ai)
+    // tests the MESSAGE for `\b(?:401|403)\b` before it looks at anything else,
+    // so a rewritten body that quotes the original code is still classified
+    // AUTH. Measured: this remap shipped and refusals still reached the user as
+    // "API key is invalid", because the rewritten text carried the code it was
+    // rewriting away. The text below therefore names the gateway's error, says
+    // 400, and never repeats 401/403.
     // Scoped to INFERENCE requests. `/usage` answers 403 for "subscription
     // required", and `GoUsageService` reads that status to say so — remapping it
     // would leave the panel describing a permission problem as a bad request.
@@ -628,22 +636,32 @@ export const patchFetch = (
             message.includes("from within OpenCode")
           ) {
             return restrictedResponse(
-              "The gateway refused this model for the credential in use (403 FreeTierError). If it is a free-tier id the refusal is about this request rather than the key - the same credential answers 200 for a paid model on the same endpoint. Reported as 400 so DSH does not read it as an invalid API key.",
+              "The gateway refused this model for the credential in use (FreeTierError). If it is a free-tier id the refusal is about this request rather than the key - the same credential answers 200 for a paid model on the same endpoint. DSH reports this as a request problem (400), not as an invalid API key.",
               "free_tier_restricted"
             );
           }
           // Everything else the gateway refuses with a JSON 403 is an
           // entitlement answer: the key was accepted, the account does not have
           // this model. `Model access is disabled` is the common one.
+          //
+          // The gateway's own words are kept, so the reader can search the answer
+          // - with one exception: a bare status token IN them would put the
+          // sentence straight back into `AUTH`, because the classifier reads the
+          // text before it reads the status. Generalizing the token keeps the
+          // sentence readable and keeps the answer about the refusal.
+          const refusal = `${type || "refusal"}: ${message.replaceAll(
+            /\b(?:401|403)\b/gu,
+            "4xx"
+          )}`;
           return restrictedResponse(
-            `The gateway refused this model for this account (403 ${type || "refusal"}: ${message}). The credential was accepted - this is about what the account may use, not about the key. Reported as 400 so DSH does not read it as an invalid API key.`,
+            `The gateway refused this model for this account (${refusal}). The credential was accepted - this is about what the account may use, not about the key. DSH reports this as a request problem (400), not as an invalid API key.`,
             "entitlement_restricted"
           );
         }
 
         if (text.includes("1010")) {
           return restrictedResponse(
-            "Cloudflare refused this request (403 error code 1010): it did not look like the OpenCode client. This plugin restores the client User-Agent, so this means that restoration did not apply to this request. Reported as 400 so DSH does not read it as an invalid API key.",
+            "Cloudflare refused this request (error code 1010): it did not look like the OpenCode client. This plugin restores the client User-Agent, so this means that restoration did not apply to this request. DSH reports this as a request problem (400), not as an invalid API key.",
             "client_identity_blocked"
           );
         }

@@ -334,6 +334,12 @@ describe("patchFetch", () => {
     // credential, so each comes back as 400 — the free tier through a fixed
     // explanation that names the gateway's error, the others through the
     // gateway's own type and message.
+    //
+    // The status is only half of it. `classifyPiAiError` tests the MESSAGE for
+    // `\b(?:401|403)\b` before anything else, so the rewritten body has to be
+    // free of those tokens as well - the first version of this remap quoted the
+    // code it was rewriting away and stayed AUTH.
+    const authToken = /\b(?:401|403)\b/u;
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const answer = async (body: string): Promise<Response> => {
       const patched = patchFetch(
@@ -361,7 +367,9 @@ describe("patchFetch", () => {
     expect(free.status).toBe(400);
     const freeRefusal = await refusal(free);
     expect(freeRefusal.error.type).toBe("free_tier_restricted");
-    expect(freeRefusal.error.message).toContain("403 FreeTierError");
+    // The gateway's own error name survives; the status token does not.
+    expect(freeRefusal.error.message).toContain("FreeTierError");
+    expect(authToken.test(freeRefusal.error.message)).toBe(false);
 
     // The same refusal with no `error` wrapper: a flat `{ type, message }` is
     // what several gateway errors look like, and it is an entitlement answer —
@@ -375,6 +383,10 @@ describe("patchFetch", () => {
     expect(entitlement.status).toBe(400);
     const entitlementRefusal = await refusal(entitlement);
     expect(entitlementRefusal.error.type).toBe("entitlement_restricted");
+    expect(entitlementRefusal.error.message).toContain(
+      "Upstream request failed: Model access is disabled"
+    );
+    expect(authToken.test(entitlementRefusal.error.message)).toBe(false);
 
     // A JSON refusal with neither field: nothing is invented — the raw body is
     // kept as the message and the type says only that it was a refusal.
@@ -383,7 +395,27 @@ describe("patchFetch", () => {
     );
     expect(untyped.status).toBe(400);
     const untypedRefusal = await refusal(untyped);
-    expect(untypedRefusal.error.message).toContain("403 refusal: ");
+    expect(untypedRefusal.error.message).toContain("refusal: ");
+    expect(authToken.test(untypedRefusal.error.message)).toBe(false);
+
+    // The gateway's own words are kept, but an upstream can name a status in
+    // them, and that name is exactly what the classifier greps for: left as it
+    // arrived, the answer would be AUTH again through the gateway's voice
+    // rather than ours.
+    const upstreamNamed = await answer(
+      JSON.stringify({
+        error: {
+          message: "upstream answered 403 to the relay",
+          type: "relay_error",
+        },
+      })
+    );
+    expect(upstreamNamed.status).toBe(400);
+    const upstreamRefusal = await refusal(upstreamNamed);
+    expect(upstreamRefusal.error.message).toContain(
+      "upstream answered 4xx to the relay"
+    );
+    expect(authToken.test(upstreamRefusal.error.message)).toBe(false);
 
     // Cloudflare's WAF answers with plain text rather than JSON, so this shape
     // is only reachable through the text fallback.
@@ -391,6 +423,7 @@ describe("patchFetch", () => {
     expect(waf.status).toBe(400);
     const wafRefusal = await refusal(waf);
     expect(wafRefusal.error.type).toBe("client_identity_blocked");
+    expect(authToken.test(wafRefusal.error.message)).toBe(false);
 
     // `/usage` 403s for "subscription required" and the meter READS that
     // status, so the rewrite is scoped to inference and this one passes through.
