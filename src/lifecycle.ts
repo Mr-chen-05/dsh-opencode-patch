@@ -18,7 +18,6 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { appendFileSync } from "node:fs";
 
 import {
   type ModelOverrideConfig,
@@ -151,14 +150,6 @@ const installUsageService = (
   ctx: CordisContext,
   config: ResolvedPluginConfig
 ): void => {
-  // TEMPORARY diagnostic: the meter renders nothing when this service is
-  // absent, and "absent" has two causes — the switch is off, or the composition
-  // has no `plugin`. Say which. Remove once the meter renders.
-  ctx.logger?.info?.(
-    "[dsh-opencode-patch] usage service: enabled=%s plugin=%s",
-    config.usageEnabled,
-    typeof ctx.plugin
-  );
   if (!config.usageEnabled) {
     ctx.logger?.info?.(
       "[dsh-opencode-patch] usage service NOT registered; the meter will render nothing"
@@ -480,17 +471,6 @@ export const apply = (
   ctx: CordisContext,
   rawConfig: PluginConfig = {}
 ): void => {
-  // TEMPORARY: the host terminal has shown none of this plugin's output, so a
-  // file is the one channel that can be read back — and it answers whether the
-  // host half runs at all. Remove once the meter renders.
-  try {
-    appendFileSync(
-      "/tmp/dsh-opencode-patch.log",
-      `[dsh-opencode-patch] apply() ran; providers=[${[...resolveConfig(rawConfig).providers].join(",")}]\n`
-    );
-  } catch {
-    // A missing /tmp write must not stop the plugin.
-  }
   const config = resolveConfig(rawConfig);
   const als = new AsyncLocalStorage<ActiveTurnState>();
 

@@ -458,6 +458,51 @@ describe("settings-page: apply & slots", () => {
     });
   });
 
+  it("registers the meter once per slot registry, so a second activation cannot throw", () => {
+    // The host may run a plugin's client entry more than once in a page's life.
+    // The slot registry THROWS on a duplicate id
+    //   list slot "conversation.input.right" already has an entry with id
+    //   "dsh-opencode-patch-usage"
+    // and that throw happened inside a render — a meter that vanishes rather
+    // than one that says why. The guard used to be a per-`apply` boolean, which
+    // reset on the second run and let the duplicate through.
+    // Attempts, not successes: the guard and the try/catch are different
+    // defences, and only the guard stops the second call from happening at all.
+    const attempts: string[] = [];
+    const registered: string[] = [];
+    const slots = {
+      inject: (_name: string, fn: () => void) => fn(),
+      register: (entry: Record<string, unknown>) => {
+        const id = String(entry.id);
+        attempts.push(id);
+        if (registered.includes(id)) {
+          throw new TypeError(
+            `list slot "conversation.input.right" already has an entry with id ${id}`
+          );
+        }
+        registered.push(id);
+      },
+    };
+    const ctx: Record<string, unknown> = {
+      effect: (fn: () => unknown) => fn(),
+      inject: (_deps: string[], callback: (scope: unknown) => unknown) =>
+        callback(ctx),
+      modelDirectories: { directoryFor: () => ({ store: {} }) },
+      remote: {
+        opencodeGoUsage: { read: async () => ({ ok: true, value: {} }) },
+      },
+      slots,
+    };
+
+    expect(() => apply(ctx as never)).not.toThrow();
+    // The second activation is the case that used to throw.
+    expect(() => apply(ctx as never)).not.toThrow();
+    expect(registered).toEqual(["dsh-opencode-patch-usage"]);
+    // And it was never even ATTEMPTED twice: a try/catch alone would hide the
+    // duplicate, and hiding it is not the same as not making it.
+    expect(attempts).toEqual(["dsh-opencode-patch-usage"]);
+  });
+
   it("degrades to no meter when the model-directory service throws", () => {
     // `directoryFor` throws for a session it cannot resolve yet (a composer
     // rendered before its session is bound). The injector must swallow that

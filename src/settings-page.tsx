@@ -315,6 +315,19 @@ const noopDisposer = (): void => {
 };
 
 /**
+ * The slot registries this bundle has already put the meter into.
+ *
+ * Keyed on the REGISTRY, not on a boolean and not on the `apply` call. The host
+ * may run a plugin's client entry more than once in a page's life and the slot
+ * registry throws on a duplicate id, so a per-`apply` flag resets on the second
+ * run and turns that throw into a meter that disappears. A module-level boolean
+ * would fix that and then refuse a genuinely fresh registry — a second
+ * conversation surface, or a test's own slots — so the identity that matters is
+ * the registry itself.
+ */
+const meterRegisteredOn = new WeakSet<object>();
+
+/**
  * The session's model-directory store, or `undefined` when the service cannot
  * resolve one yet.
  *
@@ -529,28 +542,47 @@ export const apply = (ctx: ClientContext): void => {
   //   list slot "conversation.input.right" already has an entry with id
   //   "dsh-opencode-patch-usage" ... (registered by registerMeter)
   // Measured in a browser, after a restart, as the whole of the reported symptom.
-  let registered = false;
+  //
+  // The flag is MODULE-level, not per-`apply`. It was per-`apply`, and the host
+  // re-runs a plugin's client entry on a page load and on a rebind — so the
+  // second run started from `registered = false`, registered the same id again,
+  // and threw inside a render, which is a meter that vanishes rather than one
+  // that says why. The registration is also non-throwing now: a duplicate is a
+  // no-op, not an exception out of the entry.
   const registerMeter = (meterScope: ClientContext): void => {
-    if (registered) {
+    const registry: object = meterScope.slots ?? meterScope;
+    if (meterRegisteredOn.has(registry)) {
       return;
     }
-    registered = true;
+    meterRegisteredOn.add(registry);
     // `conversation.input.right` renders in the composer bar's trailing controls,
     // immediately BEFORE `conversation.input.model` — so it is the seat beside
     // the model selector. `conversation.input.left` is the far end of the leading
     // tools group instead, a whole row away. Both are list slots, so both are
     // open to a plugin; this is the requested position.
-    meterScope.slots?.inject?.("conversation.input.right", () =>
-      meterScope.slots?.register?.(
-        {
-          id: "dsh-opencode-patch-usage",
-          inject: createUsageInjector(meterScope),
-          name: "conversation.input.right",
-          order: 50,
-        },
-        UsagePill
-      )
-    );
+    try {
+      meterScope.slots?.inject?.("conversation.input.right", () =>
+        meterScope.slots?.register?.(
+          {
+            id: "dsh-opencode-patch-usage",
+            inject: createUsageInjector(meterScope),
+            name: "conversation.input.right",
+            order: 50,
+          },
+          UsagePill
+        )
+      );
+    } catch (error) {
+      // Already registered by an earlier activation of this same bundle. The
+      // meter is present; a second registration is the thing that is not, and
+      // it must not become an exception out of the plugin entry. The client
+      // context carries no logger, so this reports the way the rest of the
+      // bundle does.
+      console.warn(
+        "[dsh-opencode-patch] the usage meter was already registered",
+        error
+      );
+    }
   };
 
   // `ctx.inject` is the host's own idiom for a cross-plugin service

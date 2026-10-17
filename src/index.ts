@@ -159,6 +159,7 @@ export {
   getLiveCatalog,
   getLiveGoCatalog,
   getLiveZenCatalog,
+  isDeprecatedModelOn,
   isGoModelsListingUrl,
   isModelsListingUrl,
   isRetiredModel,

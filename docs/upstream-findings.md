@@ -244,6 +244,35 @@ The contract test covers both routes. Whether a _paid_ completions body without 
 
 ---
 
+## 3.5 The registry's `deprecated` flag vs the adapter's installed snapshot — MEASURED DRIFT
+
+Checked 2026-10-17 against `https://models.opencode.ai/api.json` and against pi's installed catalog at `@earendil-works/pi-ai/dist/providers/data/opencode.json`.
+
+|  | count |
+| :-- | :-- |
+| live `opencode` models | 127 |
+| of those `status: "deprecated"` | 43 |
+| live active | 84 |
+| pi's installed `opencode` ids | 85 |
+| pi ids the live catalog has since retired | **5** (`exo-free`, `ling-3.0-flash-fin-free`, `ling-3.1-flash-free`, `step-5-preview-free`, `muse-spark-1.3-contributor-free`) |
+| live-active ids pi does not have | **6** (`gpt-5.3-codex-spark`, `glm-5.3-flash-free`, `nemotron-3.5-super-vl-free`, `deepseek-v4.1-flash-free`, `beam-free`, `gemini-4-argon`) |
+
+**Why this matters.** `mergeDiscoveredModels` merges the ADAPTER's rows first and appends catalog rows after. Our parser already drops `status: "deprecated"`, but the adapter's snapshot still lists those ids — so the merge put all 5 back, and the picker led with models the vendor has retired while the 6 current ones sat at the bottom.
+
+**Fixed** by recording retired ids during parse (`isDeprecatedModelOn`) and having the merge drop an adapter row the registry has retired. A model ABSENT from the catalog is still kept: absent is not the same as retired, and the adapter's own row is its answer for a model the catalog does not describe.
+
+Note the pi snapshot is keyed by PROTOCOL bucket (`openai-completions`, `openai-responses`, `anthropic-messages`, `google-generative-ai`, `typesafe-system-one`) with `chat:` / `classifier:` prefixes on each id — not a flat model map.
+
+## 3.6 The composer meter's registration guard was per-`apply` — VERIFIED DEFECT
+
+`lib/client.js` registered the meter under a `let registered = false` declared **inside** `apply`. The host may run a plugin's client entry more than once in a page's life, so the second run started from `false`, called `slots.register` with the same id, and threw:
+
+```
+list slot "conversation.input.right" already has an entry with id "dsh-opencode-patch-usage"
+```
+
+A throw out of the entry is a meter that disappears with no message. The guard is now keyed on the slot REGISTRY (`WeakSet`), so a re-activation against the same registry is a no-op while a genuinely fresh registry still registers, and the registration itself is wrapped so a duplicate can never become an exception.
+
 ## 4. How to re-check any of this
 
 1. Find the upstream source that **produces** the value, not a client that consumes it.

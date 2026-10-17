@@ -24,6 +24,7 @@ import {
   catalogPlaneForRoute,
   findModelSpecOn,
   getLiveZenCatalog,
+  isDeprecatedModelOn,
   isRetiredModel,
   sanitizeModalities,
   type CatalogModelSpec,
@@ -139,6 +140,14 @@ export const mergeDiscoveredModels = (
         continue;
       }
       if (isRetiredModel(provider, candidate.id)) {
+        continue;
+      }
+      // Retired by the REGISTRY, not by our own list. The adapter's installed
+      // snapshot is older than the live catalog and still lists ids the vendor
+      // has retired; merging it unchanged is a picker led by models that no
+      // longer answer. Our catalog drops them during parse, so without this the
+      // merge is what puts them back.
+      if (isDeprecatedModelOn(provider, candidate.id)) {
         continue;
       }
       seen.add(candidate.id);

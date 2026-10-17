@@ -17,6 +17,8 @@ import {
   hideResponsesRoute,
   isRouteRegistered,
   mergeDiscoveredModels,
+  isDeprecatedModelOn,
+  parseModelsDevCatalog,
   resolveConfig,
   resolveDiscoveryProvider,
   resolveEffectiveContextWindow,
@@ -90,6 +92,55 @@ describe("resolveDiscoveryProvider", () => {
 });
 
 describe("mergeDiscoveredModels", () => {
+  it("drops an adapter row the registry has retired", () => {
+    // The adapter's installed snapshot is older than the live catalog and still
+    // lists ids the vendor has retired — measured: 5 of pi's 85 opencode ids are
+    // deprecated in the live catalog, and 6 live-active ids it lacks. Our own
+    // catalog drops the retired ones during parse, so without this filter the
+    // MERGE is what puts them back, and the picker leads with models that no
+    // longer answer.
+    parseModelsDevCatalog({
+      opencode: {
+        api: "https://opencode.ai/zen/v1",
+        models: {
+          "still-here": { name: "Still Here" },
+          "retired-one": { name: "Retired One", status: "deprecated" },
+        },
+      },
+    });
+
+    // The parser saw the retirement…
+    expect(isDeprecatedModelOn("zen", "retired-one")).toBe(true);
+    expect(isDeprecatedModelOn("zen", "still-here")).toBe(false);
+
+    // …and the merge honours it for a row the ADAPTER offers.
+    const merged = mergeDiscoveredModels(
+      [
+        {
+          contextWindow: 1,
+          id: "retired-one",
+          inputModalities: ["text"],
+          maxTokens: 2,
+          name: "Retired One",
+        },
+        {
+          contextWindow: 1,
+          id: "adapter-only",
+          inputModalities: ["text"],
+          maxTokens: 2,
+          name: "Adapter Only",
+        },
+      ],
+      "zen",
+      []
+    );
+    const ids = merged.map((m) => m.id);
+    expect(ids).not.toContain("retired-one");
+    // A model the catalog does not describe is NOT dropped: absent-from-catalog
+    // is not the same as retired, and an adapter's own row is still its answer.
+    expect(ids).toContain("adapter-only");
+  });
+
   it("keeps adapter rows, appends missing rows, and retires Zen 1.2", () => {
     const merged = mergeDiscoveredModels(
       [

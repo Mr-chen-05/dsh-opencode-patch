@@ -130,6 +130,17 @@ let activeZenCatalog = new Map<string, CatalogModelSpec>(
     m,
   ])
 );
+/**
+ * Ids the most recent parse saw as `status: "deprecated"`, per plane.
+ *
+ * Kept beside the active maps because the ADAPTER's own discovery needs it:
+ * `mergeDiscoveredModels` merges adapter rows before catalog rows, and pi's
+ * installed snapshot still carries ids the live catalog has retired. Dropping
+ * them from our catalog alone is not enough — the merge puts them back.
+ */
+const deprecatedGoIds = new Set<string>();
+const deprecatedZenIds = new Set<string>();
+
 let lastRefreshedAt = 0;
 let refreshPromise:
   | Promise<{
@@ -191,7 +202,8 @@ const sanitizeReasoningOptions = (
 
 const extractSpecs = (
   modelsObj: Record<string, unknown>,
-  defaultContext = 1_000_000
+  defaultContext = 1_000_000,
+  deprecated?: Set<string>
 ): CatalogModelSpec[] => {
   const results: CatalogModelSpec[] = [];
   for (const [id, rawModel] of Object.entries(modelsObj)) {
@@ -214,6 +226,13 @@ const extractSpecs = (
     // says so, and each one carries the date it was pinned so a reader can see
     // how long the disagreement has stood.
     if (rawModel.status === "deprecated" && !RETAINED_MODEL_IDS.has(id)) {
+      // Recorded, not merely dropped. A model the registry has retired must not
+      // come back through the ADAPTER's own discovery: `mergeDiscoveredModels`
+      // merges adapter rows first, and pi's installed snapshot still lists ids
+      // the live catalog has retired (measured: 5 of them, and 6 live-active
+      // ids it lacks). Without this set the merge re-adds every one, which is a
+      // picker led by models the vendor has retired.
+      deprecated?.add(id);
       continue;
     }
     const name =
@@ -354,15 +373,31 @@ export const parseModelsDevCatalog = (data: unknown): ParsedCatalogs => {
       ? data.opencode.models
       : {};
 
+  deprecatedGoIds.clear();
+  deprecatedZenIds.clear();
   return {
     api: {
       go: providerApiFor(data["opencode-go"]),
       zen: providerApiFor(data.opencode),
     },
-    go: extractSpecs(goObj, 1_000_000),
-    zen: extractSpecs(zenObj, 1_000_000),
+    go: extractSpecs(goObj, 1_000_000, deprecatedGoIds),
+    zen: extractSpecs(zenObj, 1_000_000, deprecatedZenIds),
   };
 };
+
+/**
+ * Whether the most recent catalog parse saw `id` as retired on `plane`.
+ *
+ * The complement of {@link findModelSpecOn}: a model can be absent from the
+ * catalog because it is NEW or because it is RETIRED, and the two want opposite
+ * treatment in a merge. This is what tells them apart.
+ *
+ * @param plane - `zen` or `go`.
+ * @param id - the model id to test.
+ * @returns whether the registry has retired it.
+ */
+export const isDeprecatedModelOn = (plane: "go" | "zen", id: string): boolean =>
+  (plane === "go" ? deprecatedGoIds : deprecatedZenIds).has(id);
 
 /**
  * Fetch and merge the latest live model specifications from `models.dev`.
