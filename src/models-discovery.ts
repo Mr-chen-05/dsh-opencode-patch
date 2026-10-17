@@ -875,7 +875,6 @@ export const decoratePlaneAdapters = (
 };
 
 /**
- * Wrap the Host's `resolveModelInfo` so a plane route's model reports the/**
  * Wrap the Host's `resolveModelInfo` so a plane route's model reports the
  * thinking level the catalog declares and the context window it names.
  *
@@ -886,15 +885,27 @@ export const decoratePlaneAdapters = (
  * symptom this exists for: `MiniMax-M3` and `MiniMax-M2.7` declare
  * `reasoning: true` in the catalog and still offered no thinking level.
  *
- * The plane routes are the user's own (`opencode`, `opencode-go`), declared in
- * their profile with no `models` list, so their adapter falls back to the
- * installed catalog — which knows nothing about these ids — and reports
- * `reasoning: false`. The INTERNAL routes this plugin mounts already carry the
- * right metadata through {@link reasoningEffortsFor}, and are passed through
- * untouched so the two never disagree.
+ * A plane route is a profile's own (`opencode`, `opencode-go`), and its adapter
+ * materializes each declared row OVER the installed catalog's entry for the same
+ * id: a row that declares no `reasoningEfforts` reports what that snapshot says
+ * of the id — `reasoning: false`, with no level map, for every id it does not
+ * carry — beside the row's own window and output cap.
  *
- * Only MISSING fields are filled. An adapter that reports its own `reasoning` or
- * `context` keeps it, because that is what dispatch will honour.
+ * The fields our catalog carries are therefore AUTHORITATIVE here rather than
+ * advisory: filling only what the adapter left blank let a stale snapshot report
+ * itself on every surface that showed it, measured as 272k for `gpt-5.4` where
+ * the vendor and our shim both say 1.05M. Only a model the catalog cannot
+ * describe is passed through untouched, which is what keeps an id that only the
+ * installed catalog knows — and a `reasoningEfforts` the row declares beside it
+ * — reporting its own truth. A `modelOverrides` entry decides the fields it
+ * names, its window being a request clamped by `maxContextWindow`. The INTERNAL
+ * routes this plugin mounts already carry the right metadata through
+ * {@link reasoningEffortsFor}, and are passed through so the two never disagree.
+ *
+ * That authority has a cost dispatch still pays: the requested level is
+ * validated against the ADAPTER's object, not this one, so a level offered here
+ * and refused there fails the turn — {@link decoratePlaneAdapters} fills that
+ * object from the same catalog derivation so the two cannot disagree.
  *
  * @param ctx - host context carrying the LLM registry.
  * @param config - the resolved plugin config.
