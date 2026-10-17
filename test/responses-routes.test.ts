@@ -24,7 +24,9 @@ import {
   parseModelsDevCatalog,
   RESPONSES_ROUTE,
   RESPONSES_SDK,
+  ROUTE_FOR_PLANE_PROTOCOL,
 } from "../src/index.ts";
+import { isServableModel } from "../src/models-discovery.ts";
 
 const MUSE = "muse-spark-1.2-contributor-free";
 
@@ -268,5 +270,44 @@ describe("responses-routes: the SDK is read from the plane the request is on", (
     const absent: unknown = undefined;
     expect(catalogPlaneForRoute("my-relay")).toBe("zen");
     expect(catalogPlaneForRoute(absent)).toBe("zen");
+  });
+});
+
+describe("responses-routes: every model the picker offers is dispatchable", () => {
+  it("resolves each servable catalog model to a route the plugin mounts", () => {
+    // The picker now publishes the whole catalog on the parent route (see
+    // `models-discovery` and the join), which is the first time the Responses,
+    // Messages and Google models have been visible there. Visibility without a
+    // route would be worse than absence: the user picks a model and gets
+    // "no adapter for provider".
+    //
+    // So: every model `isServableModel` admits must either stay on its own route
+    // (`undefined`) or name a route this plugin actually mounts. The mount set is
+    // the plane table plus the two plane roots — `opencode-google` is mounted by
+    // the Google bridge rather than the wrapper, and is in the table for exactly
+    // that reason.
+    const mounted = new Set<string>(["opencode", "opencode-go"]);
+    for (const plane of Object.values(ROUTE_FOR_PLANE_PROTOCOL)) {
+      for (const route of Object.values(plane.routes)) {
+        mounted.add(route);
+      }
+    }
+
+    const unroutable: string[] = [];
+    for (const [route, catalog] of [
+      ["opencode", OPENCODE_ZEN_CATALOG],
+      ["opencode-go", OPENCODE_GO_CATALOG],
+    ] as const) {
+      for (const model of catalog) {
+        if (!isServableModel(model.id, route)) {
+          continue;
+        }
+        const target = internalRouteFor(route, model.id, model.provider_npm);
+        if (target !== undefined && !mounted.has(target)) {
+          unroutable.push(`${route}/${model.id} -> ${target}`);
+        }
+      }
+    }
+    expect(unroutable).toEqual([]);
   });
 });
