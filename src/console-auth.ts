@@ -89,9 +89,11 @@ export interface ConsoleTokens {
 /**
  * The account a session token belongs to.
  *
- * Read once at login, because the token cannot be interpreted without it: the
- * gateway gates the free tier on an account and an org, so a stored token that
- * has forgotten whose it is can only reach the paid models.
+ * Read once at login, because the token cannot be interpreted without it: a
+ * session token needs the org it belongs to — measured, a paid model answers
+ * `200` with the org and `403` without it — so a stored token that has
+ * forgotten whose it is has no usable credential. (The org never unlocked the
+ * free tier; nothing sent from a request does.)
  */
 export interface ConsoleAccount {
   /** The account id, `acc_…`. */

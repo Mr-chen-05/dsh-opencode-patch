@@ -39,9 +39,10 @@ interface StoredGrant {
   /**
    * The account this login belongs to.
    *
-   * Read at login from `/api/user`, and stored here rather than re-derived: the
-   * gateway gates the free tier on an account and an org, so a token whose owner
-   * has been forgotten can only reach the paid models.
+   * Read at login from `/api/user`, and stored here rather than re-derived: a
+   * session token needs the org it belongs to — measured, a paid model answers
+   * `200` with the org and `403` without it — so a token whose owner has been
+   * forgotten has no usable credential.
    */
   readonly owner: ConsoleAccount | undefined;
   /** The organizations this login may act within, from `/api/orgs`. */

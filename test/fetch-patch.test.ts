@@ -260,10 +260,10 @@ describe("patchFetch", () => {
   });
 
   it("carries the credential's org, and nothing when it has none", async () => {
-    // A session token is half a credential: the gateway gates the free tier on
-    // the org that arrived with it, so a request carrying one without the other
-    // is answered as though it carried a plain key. And a key deployment has no
-    // org, which must not become an empty header.
+    // A session token needs the org it belongs to — measured, a paid model
+    // answers `200` with the org and `403` without — while the free tier is
+    // refused with or without one. And a key deployment has no org, which must
+    // not become an empty header.
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const sent: Record<string, string> = {};
     const capture = vi.fn(

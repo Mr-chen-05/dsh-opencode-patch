@@ -29,12 +29,14 @@ export type KeyTier = "go" | "zen" | "unknown";
  * key with a dummy one, and every later lookup then re-injects the dummy.
  *
  * `public` is not an adapter placeholder — it is the gateway's own literal for a
- * keyless request. A free-tier model is admitted with no key at all or with the
- * literal `public`, and the proxy strips it before forwarding
- * (`packages/console/app/src/lib/inference-proxy.ts`, both 1.19 and 2.x:
- * `const anonymous = !key || key === "public"`). Treating it as a credential
- * would capture it, forward it as a Bearer, and turn an admitted free request
- * into an authenticated one. See `docs/upstream-findings.md` §1.5.
+ * keyless request, the vendor's own path for a model whose entry allows
+ * anonymous use. The proxy treats no key and the literal alike, strips it and
+ * forwards keylessly (`packages/console/app/src/lib/inference-proxy.ts`, both
+ * 1.19 and 2.x: `const anonymous = !key || key === "public"`). What the service
+ * behind the proxy answers is its own decision — the Zen free tier is refused
+ * there — but the sentinel must never become a credential: capturing it would
+ * forward `Bearer public`, turning an anonymous request into an authenticated
+ * one. See `docs/upstream-findings.md` §1.5.
  */
 const PLACEHOLDER_API_KEYS: ReadonlySet<string> = new Set([
   "null",

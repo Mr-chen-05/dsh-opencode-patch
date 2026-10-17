@@ -33,6 +33,7 @@ import {
 } from "./models-catalog.ts";
 import {
   fallbackSessionId,
+  isOpenCodeMessageId,
   isOpenCodeSessionId,
   OPENCODE_UA,
   PARENT_SESSION_ALT_HEADER,
@@ -487,9 +488,9 @@ export const patchFetch = (
     }
 
     // 2b. The org, when this plane's credential belongs to one. A session token
-    // is only half a credential: the gateway gates the free tier on the org that
-    // arrived with it, and a request carrying one without the other is answered
-    // as though it carried a plain key.
+    // needs the org it belongs to — measured on a paid model: `200` with it,
+    // `403` without — and the free tier is refused with or without one, which is
+    // a gate no header cleared.
     // A selected login uses its own org, not a mutable cache that another
     // request or a previous account may have populated. An explicit override
     // still wins; absent login metadata must not revive a stale cached org.
@@ -507,6 +508,18 @@ export const patchFetch = (
     // 3. Client & Project origin headers: injected when enabled
     if (config.injectOriginHeaders) {
       headers.set("x-opencode-client", config.originClient);
+
+      // The message id, the one header of the captured set this block omitted.
+      // Read from v1.19.3's `request.ts`: `"x-opencode-request": input.user.id`,
+      // in the same branch as the client and project headers. The console reads
+      // it for per-request metrics and rewrites it to `x-opencode-request-id`
+      // before the request reaches the inference service
+      // (`inference-proxy.ts`); the turn store carries the value because a
+      // request cannot know its own message id.
+      const requestValue = state?.requestValue;
+      if (requestValue !== undefined && isOpenCodeMessageId(requestValue)) {
+        headers.set("x-opencode-request", requestValue);
+      }
 
       if (config.injectProject) {
         const project =
@@ -574,6 +587,7 @@ export const patchFetch = (
       claimed: true,
       org: headers.get("x-opencode-org-id") ?? null,
       plane: gatewayPlaneFor(url),
+      request: headers.get("x-opencode-request") ?? null,
       session: headers.get(SESSION_HEADER) ?? null,
       sessionFormat: isOpenCodeSessionId(headers.get(SESSION_HEADER)),
       status: response.status,

@@ -106,7 +106,7 @@ One model, every stage. The left column is what a user can see; the right column
 | 5 | _(invisible)_ | the session id is derived from `ses_` + the session's real `createdAt` + a hash suffix, and the session's `cwd` becomes the project name | `session.ts` · `cordis-context.ts` |
 | 6 | _(invisible)_ | **the redirect is decided**: `(plane, SDK) → protocol → route`. A model needing a shape other than its route's is re-dispatched to the route that speaks it | `responses-routes.ts` → `stream-hook.ts` |
 | 7 | _(invisible)_ | the route's adapter is the host's own `llm-pi-ai`, mounted by the plugin per route, with that plane's base URL, catalog and credential | `responses-provider.ts` |
-| 8 | _(invisible)_ | the request is intercepted and given what the gateway expects: origin proof, `x-opencode-session` always, parent-session lineage, and the free-tier `read`/`bash` schemas when the body lacks them | `fetch-patch.ts` · `tool-fallback.ts` |
+| 8 | _(invisible)_ | the request is intercepted and given what the gateway expects: origin proof (the client, the project, and the turn's message id), `x-opencode-session` always, parent-session lineage, and the free-tier `read`/`bash` schemas when the body lacks them | `fetch-patch.ts` · `tool-fallback.ts` |
 | 9 | the reply streams in | the gateway answers; the plugin has changed nothing about the response | — |
 | 10 | a spend figure | the turn's usage event is priced per **plane**, so a Go turn and a Zen turn never share one number | `session-cost.ts` · `usage.ts` |
 | 11 | a quota ring or a spend pill | the meter polls the host service and renders the affecting window, or the session spend | `usage-pill.tsx` · `usage-panel.tsx` · `usage-ui.ts` |

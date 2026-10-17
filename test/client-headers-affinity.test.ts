@@ -7,7 +7,8 @@
  * - Subagent parent session lineage: x-opencode-parent-session-id and x-parent-session-id
  * - Session header recovery: patchFetch automatically derives a valid ses_<...> ID when missing
  * - User-Agent customization and injectUserAgent toggle
- * - Origin headers: x-opencode-client and x-opencode-project
+ * - Origin headers: x-opencode-client, x-opencode-project, and the turn's
+ *   x-opencode-request message id
  *
  * @module test/client-headers-affinity.test
  */
@@ -160,6 +161,7 @@ describe("Client Headers, Session Affinity & Lineage", () => {
         model: "gpt-5.4",
         project: "my-project-repo",
         provider: "opencode",
+        requestValue: "msg_0123456789abCDEFGHIJKLMNOP",
         value: MOCK_SESSION,
       },
     });
@@ -168,17 +170,49 @@ describe("Client Headers, Session Affinity & Lineage", () => {
     const req = result.request!;
     expect(req.headers["x-opencode-client"]).toBe("web");
     expect(req.headers["x-opencode-project"]).toBe("my-project-repo");
+    // The turn's message id travels with the origin headers, as in 1.19.3's
+    // `request.ts`, where `x-opencode-request` sits in the same branch as the
+    // client and project headers.
+    expect(req.headers["x-opencode-request"]).toBe(
+      "msg_0123456789abCDEFGHIJKLMNOP"
+    );
   });
 
   it("omits origin headers when injectOriginHeaders is false", async () => {
     const result = await runner.execute("opencode", "/zen/v1/responses", {
       body: { input: [], model: "gpt-5.4", stream: true },
       config: { injectOriginHeaders: false },
+      turnState: {
+        model: "gpt-5.4",
+        provider: "opencode",
+        requestValue: "msg_0123456789abCDEFGHIJKLMNOP",
+        value: MOCK_SESSION,
+      },
     });
 
     expect(result.status).toBe(200);
     const req = result.request!;
     expect(req.headers["x-opencode-client"]).toBeUndefined();
     expect(req.headers["x-opencode-project"]).toBeUndefined();
+    // The message id belongs to the same switch, and the turn HAS one here —
+    // the absence below is the switch, not a missing value.
+    expect(req.headers["x-opencode-request"]).toBeUndefined();
+  });
+
+  it("omits x-opencode-request when the turn carries no message id", async () => {
+    // Outside any tracked turn — the usage and discovery calls — there is no
+    // message to name, and an absent header is correct. An empty
+    // `x-opencode-request:` is a value the client cannot send.
+    const result = await runner.execute("opencode", "/zen/v1/responses", {
+      body: { input: [], model: "gpt-5.4", stream: true },
+      turnState: {
+        model: "gpt-5.4",
+        provider: "opencode",
+        value: MOCK_SESSION,
+      },
+    });
+
+    expect(result.status).toBe(200);
+    expect(result.request?.headers["x-opencode-request"]).toBeUndefined();
   });
 });

@@ -267,12 +267,13 @@ const installFetchPatch = (
   /**
    * The org each plane's credential belongs to, read once and kept.
    *
-   * A session token is only half a credential — the gateway gates the free tier
-   * on the org that arrived with it — so the request path needs this on every
-   * call, and a store read per request would be a file read per request. The
-   * cache is warmed at mount and refreshed when a credential failure suggests it
-   * is stale; `undefined` is a real answer, because a plane whose credential is
-   * a plain key has no org and must not carry a header for one.
+   * A session token needs the org it belongs to — measured, a paid model
+   * answers `200` with the org and `403` without — so the request path needs
+   * this on every call, and a store read per request would be a file read per
+   * request. The cache is warmed at mount and refreshed when a credential
+   * failure suggests it is stale; `undefined` is a real answer, because a plane
+   * whose credential is a plain key has no org and must not carry a header for
+   * one.
    */
   // The cache is shared with the login service, which writes it when a login
   // completes: a grant can appear long after startup, and a value read once would

@@ -175,11 +175,11 @@ export interface ResolvedPluginConfig {
    * The org to send with an account credential, when the credential does not
    * carry one itself.
    *
-   * A session token is only half a credential: the gateway gates the free tier
-   * on the org that arrived with it. A login performed by this plugin stores the
-   * org beside the token, so a deployment that logged in needs nothing here —
-   * this is for one whose token came from somewhere else, which is the case
-   * until the login surface exists.
+   * A session token needs the org it belongs to: measured on a paid model,
+   * `200` with the org and `403` without. It never unlocked the free tier —
+   * nothing sent from a request does. A login performed by this plugin stores
+   * the org beside the token, so a deployment that logged in needs nothing
+   * here — this is for one whose token came from somewhere else.
    */
   readonly credentialOrg: string | undefined;
   debug: boolean;

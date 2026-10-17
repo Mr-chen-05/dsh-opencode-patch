@@ -1097,13 +1097,13 @@ describe("gaps characterised while pinning the policy", () => {
   });
 
   it("treats the gateway's keyless sentinel as not a credential", async () => {
-    // A free-tier model is admitted with no key at all, or with the literal
-    // `public` — the proxy strips it before forwarding
-    // (`packages/console/app/src/lib/inference-proxy.ts`, both 1.19 and 2.x:
-    // `const anonymous = !key || key === "public"`). `docs/upstream-findings.md`
-    // §1.5. Old code omitted it, so the literal was captured, then forwarded as
-    // a real Bearer, which turns an admitted free request into an
-    // authenticated one and answers 401.
+    // A keyless request — no key at all, or the literal `public` — is the
+    // vendor's own anonymous path: the proxy strips the sentinel before
+    // forwarding (`packages/console/app/src/lib/inference-proxy.ts`, both 1.19
+    // and 2.x: `const anonymous = !key || key === "public"`).
+    // `docs/upstream-findings.md` §1.5. Old code omitted it, so the literal was
+    // captured, then forwarded as a real Bearer, turning an anonymous request
+    // into an authenticated one.
     expect(isPlaceholderApiKey("public")).toBe(true);
     expect(isPlaceholderApiKey("PUBLIC")).toBe(true);
 

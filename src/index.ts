@@ -76,8 +76,10 @@ export {
 // ── session identity & turn state ───────────────────────────────────────────
 export {
   fallbackSessionId,
+  isOpenCodeMessageId,
   isOpenCodeSessionId,
   headerValueFor,
+  newOpenCodeMessageId,
   openCodeSessionIdFor,
   OPENCODE_UA,
   PARENT_SESSION_ALT_HEADER,

@@ -15,14 +15,14 @@ The emulated surface was compared tag to tag across the 1.19 line rather than as
 |  | An `oc_…` API key | An `st_…` session token |
 | :-- | :-- | :-- |
 | Paid models | served | served |
-| Free-tier models | `403 FreeTierError` | `403 FreeTierError` — **from a bare HTTP client**. This plugin serves them, because it reaches the gateway through the host's adapter |
+| Free-tier models | `403 FreeTierError` | `403 FreeTierError` — every credential class, header set and endpoint measured, keyless and keyed alike; the ids stay offered and the refusal names itself |
 | Org context | not required | `x-opencode-org-id: wrk_…` |
-| Per-request id | not required | `x-opencode-request: msg_…` |
+| Per-request id | sent — minted per turn, same shape | `x-opencode-request: msg_…` |
 | Where it comes from | a key a deployment pastes or exports | an account login |
 
 **What decides a request is the credential, not the path.** Measured across both paths with one key: `grok-4.7` answers `400 ModelProtocolUnsupported` on `/zen/v1` and on `/inference/openai/v1` alike, and `qwen3.8-max` answers the same `403` upstream error on both. They are two paths into one gateway, and for a paid model the choice between them changes nothing.
 
-The difference is in what a credential can reach — but **not the way this document first claimed.** It said a session token reaches free models because the free tier is gated on the token and the org that comes with it. Measured exhaustively since, and that is false: with the account's session token **and its org**, every Zen `-free` id answers `403 FreeTierError` while a paid model on the same request answers `200`. So does a bare API key, a CLI `User-Agent`, the client header, a valid session id, the `read`/`bash` tool schemas, both endpoints, and no credential at all. The free tier is not gated on anything a request can carry, which is why this plugin does not offer a Zen `-free` id — see the table in `docs/credentials.md`.
+The difference is in what a credential can reach — but **not the way this document first claimed.** It said a session token reaches free models because the free tier is gated on the token and the org that comes with it. Measured exhaustively since, and that is false: with the account's session token **and its org**, every Zen `-free` id answers `403 FreeTierError` while a paid model on the same request answers `200`. So does a bare API key, a CLI `User-Agent`, the client header, a valid session id, the `read`/`bash` tool schemas, both endpoints, and no credential at all. The free tier is not gated on anything a request can carry — and the console's own source says where the refusal comes from: for a model whose entry allows anonymous use it forwards the request keyless to the vendor's inference service, which is where `FreeTierError` is raised. So the ids are offered, never hidden, and the refusal is reported per request in the gateway's own words; the exhaustive tables are in `docs/credentials.md`.
 
 So a deployment's API key keeps working exactly as it does today. **Logging in does not make the free tier reachable** — that was this document's claim and it is false, measured with the account's session token and its org. What a login buys is a credential for paid models; the free tier is not granted to anything sent from here.
 
@@ -67,7 +67,7 @@ x-opencode-session:   ses_ed62aae61ffeA6UwzEFN9YNKk8
 x-opencode-session-id: ses_ed62aae61ffeA6UzEFN9YNKk8
 ```
 
-Against this plugin's headers, the additions are `x-opencode-org-id` and `x-opencode-request`, and the credential differs in kind: `st_…` where we send `oc_…`.
+Against this plugin's headers, the additions were `x-opencode-org-id` and `x-opencode-request`. The org was injected from the start; the request id followed the source pass into `packages/opencode/src/session/llm/request.ts`, and the plugin now mints a `msg_…` id per turn (`newOpenCodeMessageId` in `src/session.ts`) and sends it in the same branch as the client and project headers. The credential differs in kind: `st_…` where we send `oc_…`.
 
 One correction for the record: the `x-opencode-ticket` header this investigation first suspected is `PTY_CONNECT_TOKEN_HEADER` — a terminal websocket ticket, not a model credential. It was read from the binary's strings before the source was available, and the source says otherwise.
 
@@ -88,7 +88,7 @@ The literal `public` is worth recording because the source suggests it: a provid
 
 ## What the free tier's gate is not
 
-The error says the free tier "can only be used from within OpenCode". Everything a request can carry was excluded and the refusal did not move, which leaves the connection as the discriminator — and the sentence is literally true: this plugin, which reaches the gateway through the host's own adapter rather than a bare client, serves these models.
+The error says the free tier "can only be used from within OpenCode". Everything a request can carry was excluded and the refusal did not move — and the console's own source says where the decision actually happens: it does not refuse these requests. For a model whose entry allows anonymous use it deletes the credential, adds its own access headers and forwards the request to the vendor's inference service, which is where `FreeTierError` is raised — the class exists in neither released tree, while the console's own errors name themselves from classes that do. So what remains is what the inference service can see for itself: the connection, and its own state.
 
 | Excluded | How |
 | :-- | :-- |
@@ -96,14 +96,13 @@ The error says the free tier "can only be used from within OpenCode". Everything
 | the credential | `/inference/openai/v1` answers `403 FreeTierError` where `/zen/v1` answers `401 Invalid API key` — the same token is AUTHENTICATED on the new path and refused on the old one |
 | the org | sent, and it is the active org the client itself uses |
 | the endpoint | the new path, which is the one the client uses |
-| the visible headers | every header captured from the client's own request was replicated, including its session and request ids |
-| the client library | Node's fetch and Python's urllib answer identically |
+| the visible headers | every header captured from the client's own request was replicated, including its session and request ids; and again on 2026-10-18 with the complete set, keyless with the literal `public` |
+| the client library | Node's fetch, Python's urllib and Bun's fetch answer identically |
+| the request body | bare bodies and bodies carrying the `read`/`bash` schemas the CLI sends are refused alike |
 
-What is left is something about the client that is not in the HTTP request: a TLS or HTTP/2 fingerprint, or a header the client sends only to the real host — the capture that produced the header list was taken against a local server, which is the one place a host-specific header would not appear.
+What is left is something the client's side of the connection carries that the request does not: a TLS or HTTP/2 fingerprint, a host-specific header the local capture could not have shown (it was taken against a local server, which is the one place such a header would not appear) — or state on the inference service's own side. Telling those apart needs code the vendor has not published.
 
-**Testing that last hypothesis from here is not possible, and the attempt is worth recording so nobody repeats it.** The plan was to read the client's TLS ClientHello and compare it with a plain client's: run a local listener, point the client at it with `HTTPS_PROXY`, and read the first bytes of the handshake. The client ignores `HTTPS_PROXY` — it answered a free-tier request normally while the listener received nothing — so the handshake cannot be observed without intercepting DNS or installing a trusted certificate, and both change the machine the client runs on rather than the question being asked.
-
-That is the boundary of what is measurable from outside. The gate is either a fingerprint or a host-specific header; telling them apart needs the vendor's side of the connection.
+**Testing the fingerprint from here is not possible, and the attempt is worth recording so nobody repeats it.** The plan was to read the client's TLS ClientHello and compare it with a plain client's: run a local listener, point the client at it with `HTTPS_PROXY`, and read the first bytes of the handshake. The client ignores `HTTPS_PROXY` — it answered a free-tier request normally while the listener received nothing — so the handshake cannot be observed without intercepting DNS or installing a trusted certificate, and both change the machine the client runs on rather than the question being asked.
 
 So the honest statement, and the one the plugin is built to, is that the free tier is asked for and not granted. Nothing in this plugin promises it: the paid models work with a key, the account credential is stored with its owner, and whether the gateway ever grants the rest is the vendor's decision to make.
 
@@ -141,7 +140,7 @@ account_state  active_account_id acc_...
 
 **So there is no exchange, and no second credential.** `st_...` IS the device flow's access token — the one this plugin's `console-auth.ts` already obtains, from the same `https://opencode.ai/console` base — and `rt_...` is its refresh token. The org is the one `/api/orgs` answered at login.
 
-That explains the free tier exactly: the gateway gates it on a token tied to an account and an org, which is why a bare `oc_...` key cannot reach it no matter which headers accompany it.
+That reading of the free tier was wrong and is corrected here: measured, the account's own token **with** its own org is refused by the free tier exactly like a bare `oc_...` key. What the login actually buys is the account plane as a working credential for the PAID models — the token plus the org is what makes it usable (`200` with, `403` without) — and the free tier is granted to neither. The exhaustive table, and the console-source account of where the refusal is made, are further up this file.
 
 ## The design this implies: route by credential, not by table
 
@@ -150,12 +149,12 @@ The plugin derives an endpoint from a `(plane, protocol)` table and resolves one
 So the shape that follows:
 
 - **The credential decides the plane, not a hard-coded base URL.** A reference holding an `oc_…` key is the key plane; one holding an `st_…` token is the account plane, and the account plane carries an org with it.
-- **A stored credential carries its owner.** The account, the email and the org are known AT LOGIN — the flow fetches `/api/user` and `/api/orgs` before it stores anything — so they belong in the same record as the token rather than being re-derived later. A session token without its org answers `403 FreeTierError` for a free model, which is the failure this spec exists to explain; keeping the two in one record is what makes that impossible.
+- **A stored credential carries its owner.** The account, the email and the org are known AT LOGIN — the flow fetches `/api/user` and `/api/orgs` before it stores anything — so they belong in the same record as the token rather than being re-derived later. A session token without its org cannot serve a paid model (`200` with, `403` without), which is the failure this spec exists to explain; keeping the two in one record is what makes that impossible. It does not change the free tier, which is refused with or without the org.
 
   This plugin already has the shape for it: `token-store.ts` writes a `grant` whose payload is the owner's to define, and an account and an org are exactly that. What it must NOT do is infer the plane from the token's prefix — `st_...` is a useful confirmation, not a contract, and the login is where the answer is actually known.
 
-- **A model's reachability follows from the plane it resolved on.** Free models on a key plane are refused by the gateway, so the honest thing is for the picker to say so rather than to offer a model that will fail.
-- **Zero configuration survives.** A deployment that pastes a key gets the key plane and today's behaviour; one that logs in gets the account plane and the free tier. Neither names an endpoint.
+- **A model's reachability follows from the plane it resolved on — and a refusal is reported, not hidden.** Zen refuses its free ids by the gateway's own decision; the Go plane has no free tier to gate and serves its free models by subscription key. The picker offers both, and a refusal comes back named (`400 free_tier_restricted`) rather than the row disappearing.
+- **Zero configuration survives.** A deployment that pastes a key gets the key plane and today's behaviour; one that logs in gets the account plane as a working credential for paid models — the free tier is granted to neither. Neither names an endpoint.
 
 The endpoint, notably, is NOT part of this. Both paths answer identically for a paid model, so the plane is a description of what a credential can reach — not a different address. The tables stay as the key plane's description; the account plane is described by what the login returns.
 

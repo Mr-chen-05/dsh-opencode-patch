@@ -177,7 +177,7 @@ const ModelSchema = z.object({
 
 **What this establishes:**
 
-- A free model is admitted with **no key at all**, or with the literal key `public`.
+- A free model is admitted with **no key at all**, or with the literal key `public`. (Admitted into the proxy's forwarding path — not the same as served: see `docs/credentials.md` for what the Zen free tier actually answers.)
 - The gate is a **per-model boolean in the vendor's own model registry**, not a property of the session id, the request headers, or the endpoint family.
 - With `anonymous`, the proxy strips `authorization`, `x-api-key` and `x-goog-api-key` and forwards keyless; 1.19.3 has an extra rule 2.x drops — `if (anonymous && !generation?.anonymous) return undefined` — so **1.19.3 requires the gateway's own generation path to declare the model anonymous**, while 2.x forwards any keyless request straight through.
 - `billingSource` is `"anonymous"`, `"free"`, `"byok"`, `"subscription"`, `"lite"` or `"balance"`, and `"anonymous"` skips accounting entirely.
@@ -190,11 +190,13 @@ const ModelSchema = z.object({
 
 ## 2. DSH host
 
-### 2.1 A per-turn message id — blocks `x-opencode-request`
+### 2.1 A per-turn message id — `x-opencode-request` is sent again (2026-10-18)
 
-Recorded in [`docs/engineering-notes.md`](./engineering-notes.md). OpenCode 1.19.0 sent `x-opencode-request` carrying the user's message id, and 2.x dropped it. The turn state carries no message id — `value` is the session's derived id, a different object — and the hook's options carry none either, because the adapter builds the body after the hook returns.
+Recorded in [`docs/engineering-notes.md`](./engineering-notes.md). OpenCode 1.19.3 sent `x-opencode-request` carrying the user message's id (`input.user.id` in `packages/opencode/src/session/llm/request.ts`, in the same branch as `x-opencode-client` and `x-opencode-project`); 2.x dropped it. This was blocked for a round because the turn state carries no message id — `value` is the session's derived id, a different object — and the hook's options carry none either, because the adapter builds the body after the hook returns.
 
-Needed: the host exposing a per-turn message id. Until then the header is omitted, which is 2.x's own choice.
+**Lifted by minting rather than by plumbing a host value**: `newOpenCodeMessageId` in `src/session.ts` produces a fresh `msg_` + 12 hex + 14 base62 value per turn (clock + counter in the hex field, `randomBytes` in the suffix), `stream-hook.ts` stores it as `requestValue` in the turn state, and `fetch-patch.ts` sends it beside the client and project headers. A minted id is not literally the user's message id, and the trade is deliberate: nothing in either released tree reads the value back the way session affinity reads a session id — the console forwards it to the inference service as `x-opencode-request-id` for per-request accounting — so a well-formed value with the client's own lifecycle is as much as a request can honestly carry. Deriving it from message content was rejected rather than overlooked: a digest of the user's own text travelling in a header is a guessable fingerprint, and the vendor's ids are random.
+
+One divergence worth recording: the client sends ONE id per user message, so a multi-step tool turn repeats the same value; this plugin mints per streamed turn, because nothing on this side of the adapter offers a DSH message id that would make the larger unit reachable. The header is therefore present and well-formed, but its grouping is the turn's rather than the message's.
 
 ### 2.2 Session affinity for subagents — needs a parent-session notion
 
@@ -353,28 +355,27 @@ Verified after: **0 offered models are measured dead**, and the generator report
 
 Fixture ids that pointed at now-dead models were retargeted to served ones: `step-5-preview-free` → `space-bunny-free` (or `cat-jam-free` where both planes are needed), `muse-spark-1.3-contributor-free` → `muse-spark-1.2-contributor-free` (still `@ai-sdk/openai`, still free, still answers `403`).
 
-## 3.10 The picker never received the protocol-routed models — FIXED
+## 3.10 The picker and the protocol-routed models — the fix was withdrawn
 
 `buildModelCatalog` (the composer's list) is `listProviders()` × `listModels(id)`, read from the host's own `@deepseek-ai/dsh-api-session-controller/lib/types/catalog.js`. The internal protocol routes are hidden from `listProviders`, and each carries only its own protocol's models, because `registerResponsesProvider` builds every route with `sdksForProtocol(protocol).flatMap(sdk => modelsForSdk(sdk, catalog))`.
 
-So enumerating `opencode` returned the completions bucket alone, and every Responses, Messages and Google model — servable, and already redirectable by `internalRouteFor` — was absent from the picker. Measured:
+So enumerating a parent route returns that route's own models, and a Responses / Messages / Google model is only listed if the deployment declared it:
 
 |                              |    rows |
 | :--------------------------- | ------: |
 | adapter's completions bucket |      28 |
-| picker before the join       |  **27** |
-| picker after the join        |  **87** |
-| Go route before / after      | 20 / 29 |
+| a declared list of one id    |       1 |
+| after the (withdrawn) join   |  **87** |
 
-`listModels` now merges the parent route's list with its plane's catalog via the same `mergeDiscoveredModels` the "fetch available models" path already used.
+**A join was added here and then withdrawn.** It merged the plane's whole catalog into `listModels` so that models on the hidden routes would be reachable. It did make them reachable — and it silently overrode every explicit `models:` array, which is a configuration decision this plugin is in no position to answer for. The failure was invisible on screen: nobody can tell 27 rows from 87 without counting the config. What surfaced was a user picking a model their deployment never offered, and that model failing for reasons that had nothing to do with the plugin.
 
-**If the picker ever looks short again, check this join first.** It is invisible from the outside: the models are not filtered, not deprecated, just never enumerated.
+The rule that replaced it: **a route's list is not ours to widen.** `listModels` filters (a model the plane cannot serve is dropped, because offering one produces a failure with nothing in the row to explain it) and otherwise returns exactly what the deployment declared. `internalRouteFor` still redirects a *declared* model whose protocol differs, so a Responses / Messages / Google id keeps working — it just has to be listed. `test/picker-integration.test.ts` holds the picker to the declaration, and `models-discovery.test.ts` asserts that a servable catalogued model which was not declared stays out.
 
 ## 3.11 The provider list was wrong in both directions — FIXED
 
 `DEFAULT_PROVIDERS` exists to cover every route this layer mounts; an unclaimed route gets no session header, no origin headers and no key injection, silently and only on the requests that reach it. It was wrong twice:
 
-- **missing `opencode-google`**, which the Google bridge mounts rather than the wrapper (`SELF_MOUNTED_ROUTES` excludes it from the mount loop, which is why it was easy to miss). It matters more now: the picker publishes the whole catalog on the parent route, so a Google model is reachable and dispatched there.
+- **missing `opencode-google`**, which the Google bridge mounts rather than the wrapper (`SELF_MOUNTED_ROUTES` excludes it from the mount loop, which is why it was easy to miss). It matters because a deployment that declares a Google-protocol model gets it dispatched to this route, and an unclaimed route would send it without the gateway headers.
 - **`cordis.patch.yml` claimed `opencode-mistral`**, a route this layer does not mount at all — Mistral is deliberately unserved.
 
 The row's `providers` list REPLACES the code default, so the two drifting apart is exactly how this survived. A manifest test now requires them to be equal.

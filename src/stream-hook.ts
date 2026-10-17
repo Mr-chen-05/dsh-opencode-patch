@@ -28,6 +28,7 @@ import { recordTurnUsage } from "./session-cost.ts";
 import {
   fallbackSessionId,
   headerValueFor,
+  newOpenCodeMessageId,
   SESSION_HEADER,
 } from "./session.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
@@ -146,12 +147,14 @@ export const createStreamHook = (
     // The message states the reason it COMPUTED and nothing it did not. An
     // earlier version blamed the Zen free tier for every unservable id, which was
     // wrong twice over: for an `opencode-go` request that plane has no free tier
-    // at all, and at the time the shape was the only reason left. Both halves are
-    // now computed - the shape AND the tier - because the exclusion was restored
-    // once it was measured that the free tier is not served from here on any
-    // credential this plugin can assemble. A diagnostic that asserts a cause it
-    // never checked is worse than none - it sends the reader to the wrong
-    // subsystem, which is exactly what it did.
+    // at all, and the filter's reasons here are about SHAPE - an SDK this plane
+    // has no route for. The filter did spend a round excluding free-tier ids, and
+    // this message computed that half too; the exclusion was withdrawn again when
+    // the decision was made to offer them (a refused free id answers with the
+    // gateway's own words, which is more use than an empty picker), so the shape
+    // reasons below are what remains. A diagnostic that asserts a cause it never
+    // checked is worse than none - it sends the reader to the wrong subsystem,
+    // which is exactly what it did.
     if (
       typeof options.model === "string" &&
       options.model.length > 0 &&
@@ -362,6 +365,7 @@ export const createStreamHook = (
         ...(parentValue === undefined ? {} : { parentValue }),
         ...(project === undefined ? {} : { project }),
         provider: providerKey,
+        requestValue: newOpenCodeMessageId(),
         value,
       },
       als

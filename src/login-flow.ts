@@ -2,10 +2,11 @@
  * Creating a login: the device flow, and everything it must learn before it can
  * store anything.
  *
- * **A token stored without its owner is a token that can only reach half of what
- * it is entitled to.** The gateway gates the free tier on an account and an org,
- * so a login that keeps only the token pair can serve paid models and nothing
- * else. The client this plugin interoperates with does not make that mistake: it
+ * **A token stored without its owner is a token that cannot be used.** A session
+ * token needs the org it belongs to — measured, a paid model answers `200` with
+ * the org and `403` without it — so a login that keeps only the token pair
+ * serves nothing. The client this plugin interoperates with does not make that
+ * mistake: it
  * reads `/api/user` and `/api/orgs` BEFORE it persists anything, and writes the
  * account, the email and the active org in the same call as the tokens.
  *
@@ -19,7 +20,7 @@
  * **Step 3 is not optional and not deferred.** It is the only moment the account
  * is knowable, because it is the only moment the token exists and is fresh. A
  * caller that skipped it would have to invent the owner later, and the org is
- * what the free tier checks.
+ * what makes the token usable.
  *
  * **The active org is the first one**, matching the client, which activates the
  * first and leaves a choice among several as a TODO of its own. A deployment with

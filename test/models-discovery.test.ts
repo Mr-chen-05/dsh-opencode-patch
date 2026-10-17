@@ -16,7 +16,6 @@ import {
   decorateModelInfo,
   findModelSpecOn,
   hideResponsesRoute,
-  getLiveZenCatalog,
   isRouteRegistered,
   mergeDiscoveredModels,
   isDeprecatedModelOn,
@@ -410,37 +409,25 @@ describe("models-discovery: hiding the internal Responses route", () => {
     const stop = hideResponsesRoute(ctx, resolveConfig());
 
     await expect(ctx.llm?.listModels?.(RESPONSES_ROUTE)).resolves.toEqual([]);
-    // The parent route's list is now the JOIN: the adapter's own row first, then
-    // every catalog row it lacks. Without that join the models living on the
-    // hidden protocol routes (Responses / Messages / Google) were unreachable
-    // from the picker — enumerating `opencode` returned the completions bucket
-    // alone, so `gpt-5.4`, the Claude rows and the Gemini rows never appeared.
-    const listed = (await ctx.llm?.listModels?.("opencode")) as Array<{
-      id: string;
-    }>;
-    expect(Array.isArray(listed)).toBe(true);
-    expect(listed[0]).toMatchObject({ id: "opencode-model" });
-    // And the catalog's protocol-routed rows are present — one per internal
-    // route, which is the whole point: Responses, Messages and Google models are
-    // each mounted on a hidden route and were therefore unreachable from the
-    // picker. Measured on the live catalog: 27 rows before the join, 87 after.
-    const ids = listed.map((m) => m.id);
-    expect(ids).toContain("gpt-5.4"); // opencode-responses  (@ai-sdk/openai)
-    expect(ids).toContain("claude-sonnet-4-5"); // opencode-anthropic
-    expect(ids.some((id) => id.startsWith("gemini-"))).toBe(true); // opencode-google
-    expect(listed.length).toBeGreaterThan(1);
+    // **Exactly the adapter's list — nothing added.** The route's `models:` array
+    // is the operator's decision, and a revision that merged the plane's catalog
+    // in here silently widened every explicit configuration. That join is gone
+    // and this is the guard against it coming back: one declared row in, one row
+    // out, even though the catalog knows hundreds more.
+    await expect(ctx.llm?.listModels?.("opencode")).resolves.toEqual([
+      { id: "opencode-model" },
+    ]);
     expect(seen).toEqual(["opencode"]);
 
     stop?.();
     expect(ctx.llm?.listProviders?.()).toHaveLength(2);
   });
 
-  it("lists EVERY servable catalog model on the parent route", async () => {
-    // The contract the join exists for. The host's picker is
-    // `listProviders()` × `listModels(id)`, and the adapter behind `opencode`
-    // only carries its own protocol's models — so the parent route has to publish
-    // the union, or the Responses / Messages / Google models are unreachable.
-    // Measured on the live catalog: 27 rows before the join, 88 after.
+  it("never widens a configured list, even when the catalog knows more", async () => {
+    // The operator's `models:` array is the whole list. A model the catalog
+    // knows, that the plane could serve, and that the operator did NOT declare
+    // must stay out of the picker — otherwise the plugin answers a question the
+    // deployment already answered.
     const { ctx } = hostWith();
     const stop = hideResponsesRoute(ctx, resolveConfig());
 
@@ -448,13 +435,13 @@ describe("models-discovery: hiding the internal Responses route", () => {
       id: string;
     }>;
     const ids = new Set(listed.map((m) => m.id));
-    const expected = getLiveZenCatalog()
-      .filter((m) => isServableModel(m.id, "opencode"))
-      .map((m) => m.id);
-    // Nothing servable is missing — that is the whole point.
-    expect(expected.filter((id) => !ids.has(id))).toEqual([]);
-    // And the list is the catalog's size, not the adapter's single fake row.
-    expect(ids.size).toBeGreaterThanOrEqual(expected.length);
+    expect(listed).toHaveLength(1);
+    expect(ids.has("opencode-model")).toBe(true);
+    // Every one of these is in the live catalog and servable, and none was
+    // declared, so none may appear.
+    for (const undeclared of ["gpt-5.4", "claude-sonnet-4-5"]) {
+      expect(ids.has(undeclared), undeclared).toBe(false);
+    }
 
     stop?.();
   });

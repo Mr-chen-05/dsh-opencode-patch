@@ -249,13 +249,6 @@ const withoutRoute = (value: unknown, key: "id" | "provider"): unknown =>
  * Exported for its own test: it is the one place I1's second clause lives, and the
  * interesting case is a model no catalog describes.
  */
-/**
- * Whether an id names an OpenCode free-tier model.
- *
- * @param id - the model id.
- * @returns whether it is a free-tier id.
- */
-
 export const isServableModel = (
   id: unknown,
   route: string,
@@ -271,18 +264,24 @@ export const isServableModel = (
   if (hidden.includes(id)) {
     return false;
   }
-  // A free-tier id is OFFERED. It was excluded here for several rounds, on
-  // measurements that sent an API key, the account token, the token with its org,
-  // every client header, both endpoints and no credential at all - each answering
-  // `403 FreeTierError`. What none of those runs had was a deployment that was
-  // signed in: the free tier is served to a session token, which is what the real
-  // client sends, and a deployment that has one can use these models. The
-  // exclusion hid models a signed-in user can run, which is a worse failure than
-  // offering one that refuses.
+  // A free-tier id is OFFERED, and not because it is served from here - measured
+  // since, and it is not: an API key, the account token, the token with its org,
+  // every header the client sends (the message id included), both endpoints and
+  // no credential at all each answer `403 FreeTierError`, while a paid model on
+  // the same request answers `200`. A round of this reasoning claimed a signed-in
+  // deployment would be served; it is not, and the run was made. What the console
+  // source shows is that the refusal is not this request's shape at all: for a
+  // model whose entry allows anonymous use, the console forwards the request to
+  // the inference service keyless and does not refuse it itself, so the gate is
+  // the vendor's service to open or close. Offering the ids is the decision that
+  // follows - hiding would remove a row the vendor may serve, and the refusal is
+  // legible now that it is reported as the model's own answer rather than as a
+  // bad key.
   //
-  // The refusal is not silent when it happens: `stream-hook.ts` reports a model
-  // this plugin cannot serve, once per pair, and that report is what a reader
-  // should be given instead of an empty picker.
+  // The refusal is not silent when it happens: `fetch-patch.ts` maps it to `400
+  // free_tier_restricted` in the gateway's own words, and `stream-hook.ts`
+  // reports a model this plugin cannot serve, once per pair - that report is what
+  // a reader should be given instead of an empty picker.
   const plane = catalogPlaneForRoute(route);
   const spec = findModelSpecOn(plane, id);
   const sdk = spec?.provider_npm;
@@ -386,26 +385,23 @@ export const hideResponsesRoute = (
     };
   }
   if (typeof originalListModels === "function") {
-    // **This is the JOIN, and without it most of the catalog is unreachable from
-    // the picker.** `buildModelCatalog` (the composer's model list) is
-    // `listProviders()` × `listModels(id)`. The internal protocol routes are
-    // hidden from `listProviders`, and each of them carries ONLY its own
-    // protocol's models — `opencode-responses` holds the `@ai-sdk/openai` rows,
-    // `opencode-anthropic` the Anthropic ones, `opencode-google` the Google ones
-    // (`registerResponsesProvider` builds each with `sdksForProtocol` +
-    // `modelsForSdk`). So enumerating `opencode` returned the completions bucket
-    // alone and every Responses / Messages / Google model — perfectly servable,
-    // redirectable by `internalRouteFor` — simply never appeared. That is the
-    // "they didn't join" failure: not filtered, not deprecated, just absent.
+    // **The deployment's model list is the whole list.** This route's `models:`
+    // array is a decision the operator made, and the picker must show it and
+    // nothing else.
     //
-    // So the parent route's list is merged with its plane's catalog, which is the
-    // union across protocols. `mergeDiscoveredModels` keeps the adapter's own
-    // rows (and their extra fields) and appends the rows it lacks, which is the
-    // same merge the "fetch available models" path already did.
+    // An earlier revision merged the plane's whole catalog in here, so that
+    // models living on the hidden protocol routes would be reachable. That was
+    // wrong, and the way it failed is worth keeping: the join was invisible on
+    // screen (nobody can tell 27 rows from 88 unless they counted the config), it
+    // overrode every explicit `models:` list, and it put models the operator never
+    // offered in front of them — which is how a request for a model the account
+    // cannot use became the reported bug. A route's list is not ours to widen.
     //
-    // Only the two plane routes are joined. A deployment's own relay is not ours
-    // to populate: its catalog is the one it declares.
-    const planeRoots = new Set(["opencode", "opencode-go"]);
+    // What remains is a filter, and only that: a model the plane cannot serve is
+    // dropped, because offering one produces a failure with nothing in the row to
+    // explain it. `internalRouteFor` still redirects a DECLARED model whose
+    // protocol differs, so a Responses / Messages / Google id the operator lists
+    // keeps working — it just has to be listed.
     patched.listModels = async function listModels(
       this: unknown,
       provider: string
@@ -414,23 +410,13 @@ export const hideResponsesRoute = (
         return [];
       }
       const models = await Reflect.apply(originalListModels, this, [provider]);
-      if (!Array.isArray(models)) {
-        return models;
-      }
-      const listed = planeRoots.has(provider)
-        ? mergeDiscoveredModels(
-            models,
-            catalogPlaneForRoute(provider),
-            catalogPlaneForRoute(provider) === "go"
-              ? getLiveGoCatalog()
-              : getLiveZenCatalog()
+      return Array.isArray(models)
+        ? models.filter(
+            (model) =>
+              !isRecord(model) ||
+              isServableModel(model.id, provider, config.hiddenModels)
           )
         : models;
-      return listed.filter(
-        (model) =>
-          !isRecord(model) ||
-          isServableModel(model.id, provider, config.hiddenModels)
-      );
     };
   }
 

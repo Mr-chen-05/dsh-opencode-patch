@@ -71,6 +71,7 @@ describe.skipIf(!ENABLED)("patched fetch over a real socket", () => {
   const turn = (overrides: Partial<ActiveTurnState> = {}): ActiveTurnState => ({
     model: "deepseek-v4.1-flash",
     provider: "opencode",
+    requestValue: "msg_e2e0000000abCDEFGHIJKLMNOP",
     value: "ses_e2e00000000",
     ...overrides,
   });
@@ -98,9 +99,13 @@ describe.skipIf(!ENABLED)("patched fetch over a real socket", () => {
     expect(headerOf(0, PARENT_SESSION_HEADER)).toBe("ses_parent00000");
     expect(headerOf(0, PARENT_SESSION_ALT_HEADER)).toBe("ses_parent00000");
 
-    // Origin identity.
+    // Origin identity, including the turn's message id — the header 1.19.3's
+    // `request.ts` sends beside the client and project headers.
     expect(headerOf(0, "x-opencode-client")).toBe("cli");
     expect(headerOf(0, "x-opencode-project")).toBe("dsh-opencode");
+    expect(headerOf(0, "x-opencode-request")).toBe(
+      "msg_e2e0000000abCDEFGHIJKLMNOP"
+    );
     expect(headerOf(0, "user-agent")).toBe(OPENCODE_UA);
   });
 
