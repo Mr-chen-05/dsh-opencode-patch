@@ -16,7 +16,7 @@ import { createRequire } from "node:module";
 import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import semver from "semver";
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { OPENCODE_ZEN_CATALOG } from "../src/catalog-data.ts";
 import {
@@ -27,9 +27,7 @@ import {
   registerGoogleBridge,
   resolveGatewayKey,
 } from "../src/google-bridge.ts";
-import { clearOrgs } from "../src/org-cache.ts";
 import { GOOGLE_INTERNAL_ROUTE, GOOGLE_SDK } from "../src/responses-routes.ts";
-import { createOpencodeStore } from "./test-helpers.ts";
 
 /** The Gemini models of the Zen plane, straight from the generated catalog. */
 const geminiSpecs = OPENCODE_ZEN_CATALOG.filter(
@@ -462,136 +460,5 @@ describe("google-bridge · the pi copy it may load", () => {
     expect(ourVersion).toBeDefined();
     expect(required).toBeDefined();
     expect(semver.satisfies(ourVersion ?? "", required ?? "")).toBe(true);
-  });
-});
-
-describe("google-bridge · the login's token, when a route names no reference", () => {
-  // The org is process-wide state, so a test that asserts it starts from none.
-  beforeEach(() => {
-    clearOrgs();
-  });
-
-  /** Run one stream and hand back the headers the bridge built. */
-  const capturedHeaders = async (
-    apiKeyRef: string,
-    loginToken?: (plane: string) => Promise<string | undefined>,
-    readOpencodeStore?: boolean
-  ): Promise<Record<string, string>> => {
-    const { llm, registered } = recordingLlm();
-    registerGoogleBridge({
-      ...bridgeInputs(llm, apiKeyRef),
-      ...(loginToken === undefined ? {} : { loginToken }),
-      ...(readOpencodeStore === undefined ? {} : { readOpencodeStore }),
-    });
-    const adapter = registered[0]?.adapter as {
-      stream: (options: unknown) => AsyncIterable<unknown>;
-    };
-    const sent: Record<string, string>[] = [];
-    const real = globalThis.fetch;
-    globalThis.fetch = (async (
-      _input: unknown,
-      init?: { headers?: unknown }
-    ) => {
-      const headers: Record<string, string> = {};
-      const candidate = init?.headers;
-      if (candidate instanceof Headers) {
-        for (const [key, value] of candidate.entries()) {
-          headers[key] = value;
-        }
-      } else if (typeof candidate === "object" && candidate !== null) {
-        Object.assign(headers, candidate as Record<string, string>);
-      }
-      sent.push(headers);
-      throw new Error("captured");
-    }) as typeof globalThis.fetch;
-    try {
-      for await (const _ of adapter.stream({
-        messages: [{ content: [{ text: "hi", type: "text" }], role: "user" }],
-        model: "gemini-3.8-flash",
-        provider: GOOGLE_INTERNAL_ROUTE,
-      })) {
-        // The capture refuses the call; nothing arrives.
-      }
-    } finally {
-      globalThis.fetch = real;
-    }
-    return sent[0] ?? {};
-  };
-
-  it("carries it, where the route named no reference", async () => {
-    // The chain is the route's own reference, then the login - so a
-    // deployment that has signed in should not have to name `apiKeyEnv`. The
-    // Google path carries the request key in x-goog-api-key, not Authorization.
-    const headers = await capturedHeaders("", () =>
-      Promise.resolve("st_from_login")
-    );
-    expect(headers["x-goog-api-key"]).toBe("st_from_login");
-  });
-
-  it("answers undefined when there is no login either", async () => {
-    // Which is the adapter's cue to resolve ambient auth, exactly as before.
-    const headers = await capturedHeaders("");
-    expect(headers["x-goog-api-key"]).toBeUndefined();
-  });
-
-  it("falls back to the installation's own store when the row opted in", async () => {
-    // The same chain, one step further: after the route's reference and the
-    // login, the credential OpenCode itself stored. A switch that read the store
-    // for the meter but not for a request would serve nothing here.
-    const store = createOpencodeStore([
-      { integrationId: "opencode", value: "oc_sk_fixture_zen" },
-    ]);
-    process.env.XDG_DATA_HOME = store.root;
-    try {
-      const headers = await capturedHeaders("", undefined, true);
-      expect(headers["x-goog-api-key"]).toBe("oc_sk_fixture_zen");
-      // Off — the default — the same store answers nothing, so the switch is
-      // what decided it rather than the file's presence.
-      const off = await capturedHeaders("");
-      expect(off["x-goog-api-key"]).toBeUndefined();
-    } finally {
-      store.cleanup();
-      delete process.env.XDG_DATA_HOME;
-    }
-  });
-
-  it("prefers a stored login over the installation's own store", async () => {
-    const store = createOpencodeStore([
-      { integrationId: "opencode", value: "oc_sk_fixture_zen" },
-    ]);
-    process.env.XDG_DATA_HOME = store.root;
-    try {
-      const headers = await capturedHeaders(
-        "",
-        () => Promise.resolve("st_from_login"),
-        true
-      );
-      expect(headers["x-goog-api-key"]).toBe("st_from_login");
-    } finally {
-      store.cleanup();
-      delete process.env.XDG_DATA_HOME;
-    }
-  });
-
-  // The three account cases that used to sit here moved to
-  // responses-provider.test.ts, against `loginTokenReader(ctx, true)`. The bridge
-  // no longer reads the installation's account - the login reader answers it one
-  // level up - so keeping them here would have left them covering a branch that
-  // never runs, which is the shape this repository has been audited for.
-
-  it("still answers the installation's key when it holds no login", async () => {
-    // The two halves of one switch: an installation with a key and no session
-    // keeps resolving exactly what it resolved before the login half existed.
-    const store = createOpencodeStore([
-      { integrationId: "opencode", value: "oc_sk_fixture_zen" },
-    ]);
-    process.env.XDG_DATA_HOME = store.root;
-    try {
-      const headers = await capturedHeaders("", undefined, true);
-      expect(headers["x-goog-api-key"]).toBe("oc_sk_fixture_zen");
-    } finally {
-      store.cleanup();
-      delete process.env.XDG_DATA_HOME;
-    }
   });
 });

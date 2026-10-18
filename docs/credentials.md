@@ -1,15 +1,18 @@
-# Credentials: the resolution chain, the logins, and the installation store
+# Credentials: the resolution chain and the installation store
 
-The plugin's default is the deployment's own credential: whatever `apiKeyEnv` the profile already declares keeps resolving exactly as it does today. A login, and the installation's own store, are fallbacks for a credential that is missing, placeholder or unnamed — a route that declares what it wants is never overridden by something the plugin found on its own.
+The plugin's default is the deployment's own credential: whatever `apiKeyEnv` the profile already declares keeps resolving exactly as it does today. The installation's own store is the fallback for a credential that is missing, placeholder or unnamed — a route that declares what it wants is never overridden by something the plugin found on its own.
 
-**The multi-key pool is not part of `main`.** Several credential references per plane, rotated as the gateway refuses them, lives on the `v2` branch; what follows resolves one credential per route, and the logins are consulted only where a route named none.
+**This build carries the API key path only.** The Console login — device flow, the token store, the session reader, the multi-key pool — is `v2` work and is deliberately not in `main`, together with the tests and the settings row that carried it. Nothing here depends on a login service existing, and no request path consults one.
+
+**The login material below is kept as record, not as description.** Sections whose heading carries "(`v2` record)" describe an arrangement that this branch does not implement; they are kept because the measurements in them — an OAuth token is not an API key on the Zen endpoint, the free tier's refusals, the store's schema — remain true and cost real time to establish. Read them as history.
 
 ## Current request wiring
 
-The primary fetch fallback and the Google bridge share `src/login-credential.ts`. The primary path keeps real request auth untouched, then resolves a missing or placeholder credential in this order:
+The primary fetch fallback keeps real request auth untouched, then resolves a missing or placeholder credential in this order:
 
-    captured → declared environment key → DSH grant (requested plane, then other)
-      → installation account (opt-in) → installation key (opt-in) → nothing
+    captured → declared environment key → installation key (opt-in) → nothing
+
+That third step reads the OpenCode installation's own store, and only when the deployment sets `readOpencodeStore`. The Google bridge resolves the route's own reference first and falls back the same way. Two sources that are no longer in this branch — the DSH grant and the login session — are `v2` work.
 
 The `configured` key-source policy still skips captured fallback; an API key already present in a request is never displaced. Empty and placeholder environment values do not block the login fallback. The Google bridge still raises for an unresolved named reference rather than replacing it with a login.
 
@@ -56,7 +59,7 @@ So the credential a model endpoint wants is an API key, and a login is not one o
 
 Recording this because the alternative is wiring a login's token into a model request that answers "Invalid API key" for it, and debugging that as a routing fault.
 
-## What the logins are (measured from OpenCode's own source)
+## (`v2` record) What the logins are (measured from OpenCode's own source)
 
 Both are device flows against the same Console, differing in what they store and what they unlock:
 
@@ -267,7 +270,7 @@ The shape it would read, taken from the schema rather than guessed: `credential(
 
 **It stays opt-in and off by default.** A declared DSH credential is always the first answer, and reading another tool's store is something a user turns on, not something that happens to them.
 
-## The wiring, which is now built
+## (`v2` record) The wiring, which is now built
 
 The two modules existed and were tested before anything called them. The wiring below is built: a config field with no reader is an empty switch, which this repository has already been audited for once, and the edits went together.
 
@@ -301,7 +304,7 @@ Four things about that are decisions rather than details.
 
 One consequence worth stating plainly rather than discovering later: on an endpoint whose credential slot reads an API key, an account token is refused — measured for `/chat/completions` at the top of this file. A deployment that has BOTH a session in the installation's `account` table and a key in its `credential` table therefore now prefers the account token on this route, where before it used the key. That is the precedence this file sets out, and it matches OpenCode's own behaviour — when it is signed in, the session credential is the one it sends — but it is a behaviour change on a machine that has both, and it is not measured for the Google endpoint this bridge serves.
 
-## The handoff: free and paid authentication, stated plainly
+## (`v2` record) The handoff: free and paid authentication, stated plainly
 
 Everything below is measured against the live gateway and a real installation, or is marked as not measured. It is written for whoever picks this up next, so the parts that were wrong once are called out rather than quietly dropped.
 

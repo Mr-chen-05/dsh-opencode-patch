@@ -4,7 +4,7 @@
  * Validates:
  * - Service access patterns: ctx.get(name) vs property access
  * - Scope isolation and child scopes via ctx.inject([services], scope => ...)
- * - Typert remotes availability (opencodeLogin, opencodeGoUsage, modelDirectories)
+ * - Typert remotes availability (opencodeGoUsage, modelDirectories)
  * - Remote error handling, code mapping, and retry flags
  * - Graceful degradation when services or remotes are absent
  *
@@ -52,7 +52,7 @@ describe("Cordis Context & Remote Services", () => {
     });
   });
 
-  it("handles presence of Typert remotes (opencodeGoUsage and opencodeLogin)", async () => {
+  it("handles presence of Typert remotes (opencodeGoUsage and modelDirectories)", async () => {
     const harness = new HarnessSimulator({
       remotes: {
         opencodeGoUsage: {
@@ -64,12 +64,8 @@ describe("Cordis Context & Remote Services", () => {
             },
           }),
         },
-        opencodeLogin: {
-          state: async () => ({
-            email: "dev@company.com",
-            orgId: "wrk_123",
-            signedIn: true,
-          }),
+        modelDirectories: {
+          directoryFor: async (): Promise<unknown> => undefined,
         },
       },
     });
@@ -81,12 +77,12 @@ describe("Cordis Context & Remote Services", () => {
     const usageData = await usageRemote.read();
     expect(usageData.rolling.percent).toBe(42);
 
-    const loginRemote = ctx.remote.opencodeLogin as {
-      state: () => Promise<{ signedIn: boolean; email: string }>;
+    // Arbitrary namespaces pass through: the harness does not know which remote a
+    // plugin reads, and this build reads only the meter's.
+    const directories = ctx.remote.modelDirectories as {
+      directoryFor: () => Promise<unknown>;
     };
-    const loginData = await loginRemote.state();
-    expect(loginData.signedIn).toBe(true);
-    expect(loginData.email).toBe("dev@company.com");
+    expect(await directories.directoryFor()).toBeUndefined();
   });
 
   it("handles absence of remotes gracefully without crashing", () => {
@@ -96,7 +92,6 @@ describe("Cordis Context & Remote Services", () => {
     const { ctx } = harness.createMockContext();
 
     expect(ctx.remote.opencodeGoUsage).toBeUndefined();
-    expect(ctx.remote.opencodeLogin).toBeUndefined();
     expect(ctx.remote.modelDirectories).toBeUndefined();
   });
 });

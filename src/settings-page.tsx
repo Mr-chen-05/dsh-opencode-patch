@@ -16,17 +16,9 @@ import {
 
 import { DEFAULT_PROVIDERS, readStringList } from "./config-values.ts";
 import { isRecord } from "./guards.ts";
-import {
-  parseLoginCancelResult,
-  parseLoginChallenge,
-  parseLoginPoll,
-  parseLoginState,
-  loginRemote,
-} from "./login-contract.ts";
 import { OpencodeCard } from "./settings-card.tsx";
 import { en, zh } from "./settings-copy.ts";
 import { SPECS } from "./settings-fields.ts";
-import type { LoginRemoteCalls } from "./settings-login.tsx";
 import { remoteNamespace } from "./settings-remote.ts";
 import { readGoUsage } from "./settings-usage.tsx";
 import { usageRemote } from "./usage-contract.ts";
@@ -48,14 +40,15 @@ export const LEGACY_NS = "dsh-opencode";
 export const PKG = "dsh-opencode-patch";
 
 /**
- * Combined remote contribution for the plugin.
+ * The plugin's remote contribution: the meter, under the package name `PKG`.
  *
- * Joins `usageRemote` and `loginRemote` under the package name `PKG` so Typert
- * registers the package once, allowing `api-gateway` to mount both namespaces
- * (`opencodeGoUsage` and `opencodeLogin`) without a duplicate package collision.
+ * It is a contribution rather than a bare descriptor list because Typert
+ * enforces unique package names, and this is the one place the package is
+ * registered. The meter's namespace is the only one this build mounts — the
+ * sign-in row and its `opencodeLogin` namespace are v2 work.
  */
 export const patchRemote = {
-  descriptors: [...usageRemote.descriptors, ...loginRemote.descriptors],
+  descriptors: [...usageRemote.descriptors],
   package: PKG,
 };
 
@@ -77,65 +70,6 @@ export const SCOPED_PKG = "@viztor/dsh-opencode-patch";
  * The official client plugins declare it the same way
  * (ui-model-selection/src/client/index.ts:107).
  */
-/**
- * The sign-in remote's three calls, or nothing when the host mounted none.
- *
- * The namespace is read off `ctx.remote` rather than declared as an inject key:
- * declaring `remote.opencodeLogin` would make it a HARD dependency and hold the
- * whole plugin until a host that mounts no login service answered.
- *
- * @param ctx - the settings context.
- * @returns the calls, or undefined when there is no login remote.
- */
-export const loginCalls = (ctx: ClientContext): LoginRemoteCalls => {
-  // Resolved per call rather than once, and the calls are returned even when there
-  // is nothing to resolve.
-  //
-  // The remote is mounted by an asynchronous `$mount` started in an effect, and this
-  // runs while the injector builds the card's props. Asking once answered `undefined`
-  // whenever the mount had not resolved yet, and the card renders nothing when
-  // `login` is undefined - so the row was absent, with no second chance and no retry,
-  // and the warning below blamed a missing service for what was a late one.
-  //
-  // Returning the calls unconditionally is what makes the row render at all, which
-  // has a cost worth stating: a host that mounts no login service now shows a row
-  // that says so rather than showing nothing. That is the better failure - "no row"
-  // and "no service" stop looking identical - and it is the opposite of the meter's
-  // choice, which hides itself instead.
-  const service = () => {
-    const remote = remoteNamespace(ctx.remote, "opencodeLogin");
-    if (remote === undefined) {
-      // Say what the remote DOES expose - the list that distinguishes "the host
-      // mounted no login service" from "this bundle is not the one that knows about
-      // it".
-      console.warn(
-        "[dsh-opencode-patch] login row: no opencodeLogin service on the remote",
-        Object.keys(ctx.remote ?? {})
-      );
-    }
-    return remote;
-  };
-  return {
-    // The plane travels with the call. There are TWO authentication routes - one
-    // per gateway plane - and a login writes its grant to the plane it names, so
-    // a row that never said which one always signed in on Zen and could describe
-    // no other. A login signs an ACCOUNT in and either grant serves both planes
-    // (`login-credential.ts` falls back to the other plane), so choosing here is
-    // about which grant you are writing and reading, not about locking you out.
-    begin: async (plane: string) =>
-      parseLoginChallenge(await unwrapRemote(service()?.begin?.({ plane }))),
-    cancel: async (flowId: string) => {
-      parseLoginCancelResult(
-        await unwrapRemote(service()?.cancel?.({ flowId }))
-      );
-    },
-    poll: async (flowId: string) =>
-      parseLoginPoll(await unwrapRemote(service()?.poll?.({ flowId }))),
-    read: async (plane: string) =>
-      parseLoginState(await unwrapRemote(service()?.state?.({ plane }))),
-  };
-};
-
 /**
  * Read a namespace off the host's remote face, or `undefined` when it is absent.
  *
@@ -266,14 +200,6 @@ export interface ClientContext {
         provider?: string;
         sessionId?: string;
       }) => Promise<unknown>;
-    };
-    // Structural view of the login remote; each answers a Remote result, whose
-    // `value` the caller unwraps.
-    opencodeLogin?: {
-      begin: (query?: { plane?: string }) => Promise<unknown>;
-      cancel: (query?: { flowId?: string }) => Promise<unknown>;
-      poll: (query?: { flowId?: string }) => Promise<unknown>;
-      state: (query?: { plane?: string }) => Promise<unknown>;
     };
   };
   slots?: {
@@ -428,11 +354,10 @@ export const apply = (ctx: ClientContext): void => {
   // Mounting `usageRemote` and `loginRemote` separately with the same package
   // name ("dsh-opencode-patch") causes the second `$mount` call to throw
   // `Remote package "dsh-opencode-patch" is already registered` — dropping the
-  // login remote completely.
+  // remote completely.
   //
-  // Combining descriptors into one contribution registers the package ONCE and
-  // allows `api-gateway` to install both namespaces (`opencodeGoUsage` and
-  // `opencodeLogin`) together.
+  // One contribution registers the package ONCE, which is what lets `api-gateway`
+  // install the meter's namespace.
   ctx.effect?.(() => {
     const remotes = mountRemote(
       ctx,
@@ -690,7 +615,6 @@ export const apply = (ctx: ClientContext): void => {
                 readUsage: () => readGoUsage(ctx),
                 // The sign-in remote, when the host mounted one. Same shape as
                 // the meter's: the card calls, the host holds the credential.
-                login: loginCalls(ctx),
                 ...model.actions(),
               }),
               key: alias.key,

@@ -301,14 +301,6 @@ export interface GoogleBridgeInputs {
   /** The credential reference inherited from the deployment's own route. */
   readonly apiKeyRef: string;
   /**
-   * The stored login's token for a plane, when a route named no reference.
-   *
-   * Last in the chain on purpose: the route's own reference, then this.
-   * Everything a user declared explicitly outranks anything the plugin found
-   * on its own, and it is what lets a signed-in deployment name no `apiKeyEnv`.
-   */
-  readonly loginToken?: (plane: string) => Promise<string | undefined>;
-  /**
    * Whether the installation's own credential store may be read.
    *
    * One switch for both halves of it, because it is one decision: may this
@@ -399,15 +391,9 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
     // `loginTokenReader` masked that by falling back to the other plane; a store
     // lookup keyed by integration id does not, and would have found nothing.
     const plane = String(route) === "opencode-go" ? "opencode-go" : "opencode";
-    const granted = await inputs.loginToken?.(plane);
-    if (granted !== undefined) {
-      return granted;
-    }
-    // The installation's ACCOUNT is deliberately not read here. `loginTokenReader`
-    // answers it one level up, so reading it again would be a second
-    // implementation of the same fallback: covered by its own tests and never
-    // executed, which is the shape this repository has been audited for once
-    // already. This tail is the installation's KEY store and nothing else.
+    // **API key only.** The installation's own store is the last source, behind
+    // the route's declared reference; a login (device flow, session, credential
+    // pool) is v2 work and is not read here.
     return resolveOpencodeStoreKey(plane, inputs.readOpencodeStore === true);
   };
 

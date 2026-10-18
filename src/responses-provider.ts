@@ -45,15 +45,10 @@ import type { CordisContext } from "./cordis-context.ts";
 import { registerGoogleBridge } from "./google-bridge.ts";
 import { isFunctionLike, isRecord } from "./guards.ts";
 import {
-  createLoginCredentialReader,
-  type LoginCredentialReader,
-} from "./login-credential.ts";
-import {
   type CatalogModelSpec,
   getLiveGoCatalog,
   getLiveZenCatalog,
 } from "./models-catalog.ts";
-import { setOrg } from "./org-cache.ts";
 import { baseForProtocol } from "./pi-provider.ts";
 import {
   GOOGLE_INTERNAL_ROUTE,
@@ -729,8 +724,7 @@ const mountScope = (
  */
 export const registerResponsesProvider = async (
   ctx: CordisContext,
-  config?: ResolvedPluginConfig,
-  loginCredential?: LoginCredentialReader
+  config?: ResolvedPluginConfig
 ): Promise<(() => void) | undefined> => {
   const { llm } = ctx;
   if (llm === undefined || typeof llm.registerAdapter !== "function") {
@@ -747,12 +741,6 @@ export const registerResponsesProvider = async (
     ? undefined
     : registerGoogleBridge({
         apiKeyRef: inheritedCredentialRef(ctx),
-        // The credential a login already stored, read the same way the org is.
-        loginToken: loginTokenReader(
-          ctx,
-          config?.readOpencodeStore === true,
-          loginCredential
-        ),
         // And, last, the installation's own store - off unless the deployment
         // opted in, which is what `config` carries here.
         readOpencodeStore: config?.readOpencodeStore === true,
@@ -909,27 +897,3 @@ export const registerResponsesProvider = async (
     return bridgeDispose;
   }
 };
-
-/**
- * The bridge's token-only view of the shared login credential reader.
- *
- * @param ctx - the host context.
- * @param readOpencodeStore - the user's opt-in to the installation's account.
- * @param read - optionally the lifecycle's shared reader, including its sessions.
- * @returns a reader the bridge calls when a route named no reference.
- */
-export const loginTokenReader =
-  (
-    ctx: unknown,
-    readOpencodeStore = false,
-    read: LoginCredentialReader = createLoginCredentialReader(
-      ctx,
-      readOpencodeStore
-    )
-  ): ((plane: string) => Promise<string | undefined>) =>
-  async (plane) => {
-    const credential = await read(plane);
-    // Clear an old org too: it must never survive a change of credential owner.
-    setOrg(plane, credential?.orgId);
-    return credential?.accessToken;
-  };

@@ -1298,14 +1298,13 @@ describe("settings-page: every remote gets a mount", () => {
       setTimeout(resolve, 0);
     });
 
-    // The remotes mount under ONE package contribution so Typert does not reject
-    // a duplicate package registration, while descriptors for both services are carried.
+    // The meter's remote is the only one this build mounts. The sign-in row and
+    // its `opencodeLogin` namespace are v2 work: main carries the API key path
+    // only, so nothing here should depend on a login service existing.
     const services = mounted.flatMap((contribution) =>
       contribution.descriptors.map((d) => d.service)
     );
-    expect(services).toEqual(
-      expect.arrayContaining(["opencodeGoUsage", "opencodeLogin"])
-    );
+    expect(services).toEqual(["opencodeGoUsage"]);
     expect(mounted).toHaveLength(1);
     expect(mounted[0]?.package).toBe("dsh-opencode-patch");
   });

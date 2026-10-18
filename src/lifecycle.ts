@@ -25,20 +25,13 @@ import {
   type ResolvedPluginConfig,
   resolveConfig,
 } from "./config.ts";
-import { ConsoleAuthClient } from "./console-auth.ts";
-import {
-  type CordisContext,
-  readCredentialsWriter,
-  readEntryOptions,
-} from "./cordis-context.ts";
+import { type CordisContext, readEntryOptions } from "./cordis-context.ts";
 import { recordDebug } from "./debug.ts";
 import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
 import { isFetchFunction, isRecord } from "./guards.ts";
 import { LEGACY_NAME, LEGACY_PKG, name } from "./identity.ts";
 import { getCapturedApiKey, isPlaceholderApiKey } from "./key-capture.ts";
-import { createLoginCredentialReader } from "./login-credential.ts";
-import { LoginService } from "./login-service.ts";
 import {
   type CatalogModelSpec,
   getLiveGoCatalog,
@@ -51,11 +44,9 @@ import {
   decoratePlaneAdapters,
   hideResponsesRoute,
 } from "./models-discovery.ts";
-import { orgFor, setOrg } from "./org-cache.ts";
 import { registerResponsesProvider } from "./responses-provider.ts";
 import { isServableSdk } from "./responses-routes.ts";
 import { createStreamHook } from "./stream-hook.ts";
-import { createTokenStore } from "./token-store.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
 import { GoUsageService } from "./usage.ts";
 
@@ -265,54 +256,11 @@ const installFetchPatch = (
     return false;
   }
 
-  /**
-   * The org each plane's credential belongs to, read once and kept.
-   *
-   * A session token needs the org it belongs to — measured, a paid model
-   * answers `200` with the org and `403` without — so the request path needs
-   * this on every call, and a store read per request would be a file read per
-   * request. The cache is warmed at mount and refreshed when a credential
-   * failure suggests it is stale; `undefined` is a real answer, because a plane
-   * whose credential is a plain key has no org and must not carry a header for
-   * one.
-   */
-  // The cache is shared with the login service, which writes it when a login
-  // completes: a grant can appear long after startup, and a value read once would
-  // miss it.
-  const warmOrg = async (plane: string): Promise<void> => {
-    try {
-      const store = createTokenStore({
-        credentials: readCredentialsWriter(ctx),
-        plane,
-        scope: name,
-      });
-      const login = await store?.read();
-      setOrg(plane, login?.orgId);
-    } catch {
-      // A store that cannot be read leaves the plane without an org rather than
-      // failing a request: a key deployment is exactly this case, and it is the
-      // default.
-      setOrg(plane, undefined);
-    }
-  };
-  // Use the unpatched fetch for refresh: a refresh inherits the active turn,
-  // so running it through this patch could recursively ask for the same login.
-  const loginCredential = createLoginCredentialReader(
-    ctx,
-    config.readOpencodeStore,
-    new ConsoleAuthClient({ fetch: originalFetch })
-  );
   const patched = patchFetch(originalFetch, als, config, {
-    loginCredential,
-    // The org is part of the credential, not a setting: it comes from the stored
-    // login for the plane the request is bound for, and a plane whose credential
-    // is a plain key has none.
-    //
     // The configured value wins, because it is the one thing here the user said
-    // out loud. A login's org is inferred from a grant; `credentialOrg` is a
-    // declaration, and the rule this whole file is arranged around is that a
-    // declaration outranks an inference.
-    resolveOrg: (plane) => config.credentialOrg ?? orgFor(plane),
+    // out loud. There is no login to infer an org from: this build carries the
+    // API key path only.
+    resolveOrg: () => config.credentialOrg,
     // One JSONL line per request the interceptor touched, when the deployment
     // asked for debugging. It is the only way to see a request that was patched
     // wrongly: the gateway's answer for a malformed session id reads exactly
@@ -325,13 +273,6 @@ const installFetchPatch = (
         }
       : {}),
   });
-
-  // Warm the org cache before the first request can need it. Best-effort and
-  // deliberately not awaited: a store that cannot be read leaves a plane without
-  // an org, which is the key deployment's normal state.
-  for (const plane of ["opencode", "opencode-go"]) {
-    void warmOrg(plane);
-  }
 
   ctx.effect?.(() => {
     globalThis.fetch = patched;
@@ -381,11 +322,7 @@ const installFetchPatch = (
     void (async () => {
       // The resolved config rides in: the mount reads the endpoint family and
       // the installation-store switch from it.
-      const stop = await registerResponsesProvider(
-        ctx,
-        config,
-        loginCredential
-      );
+      const stop = await registerResponsesProvider(ctx, config);
       if (released) {
         stop?.();
         return;
@@ -509,35 +446,7 @@ const hasPlaneCredential = (plane: string): boolean => {
   ) {
     return true;
   }
-  if (getCapturedApiKey(plane) !== undefined) {
-    return true;
-  }
-  return orgFor(plane) !== undefined;
-};
-
-/**
- * Mount the login service, so a settings card has something to call.
- *
- * Unlike the meter's service this has no switch: a login is an action the user
- * takes, not a behaviour the plugin runs, and mounting a remote that answers
- * "nothing is stored" until they take it is the whole of its default state. What
- * it needs is a composition with `plugin`, the same one the meter needs.
- *
- * @param ctx - the host context.
- */
-const installLoginService = (ctx: CordisContext): void => {
-  if (typeof ctx.plugin !== "function") {
-    mountByProvide(ctx, "opencodeLogin", LoginService, {});
-    return;
-  }
-  try {
-    ctx.plugin(LoginService, {});
-  } catch (error) {
-    ctx.logger?.warn?.(
-      "[dsh-opencode-patch] the login service did not mount",
-      error
-    );
-  }
+  return getCapturedApiKey(plane) !== undefined;
 };
 
 export const apply = (
@@ -549,7 +458,6 @@ export const apply = (
 
   logRenameNotice(ctx);
   installUsageService(ctx, config);
-  installLoginService(ctx);
 
   if (!installFetchPatch(ctx, config, als)) {
     return;

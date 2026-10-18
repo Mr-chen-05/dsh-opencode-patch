@@ -21,10 +21,6 @@ import {
   recordCapturedApiKey,
   tierForRequest,
 } from "./key-capture.ts";
-import type {
-  LoginCredential,
-  LoginCredentialReader,
-} from "./login-credential.ts";
 import {
   enrichModelsResponse,
   findModelSpec,
@@ -285,8 +281,6 @@ export interface FetchPatchHooks {
    * none — which is every key deployment, and the reason this is optional.
    */
   readonly resolveOrg?: (plane: string) => string | undefined;
-  /** Last-resort login lookup; returns the token with its own org. */
-  readonly loginCredential?: LoginCredentialReader;
   /**
    * One entry per claimed request, for the debug file.
    *
@@ -334,7 +328,6 @@ export const patchFetch = (
     }
 
     // Ensure an Authorization header is present if the caller omitted it or provided a dummy value.
-    let login: LoginCredential | undefined;
     const plane = gatewayPlaneFor(url);
     const wireHeader = authHeaderFor(url);
     // **The Anthropic protocol identifies itself by version**, and nothing below
@@ -382,13 +375,11 @@ export const patchFetch = (
         isPlaceholderApiKey(declared)
           ? undefined
           : declared);
-      if (explicit === undefined && plane.length > 0) {
-        login = await hooks.loginCredential?.(plane);
-      }
+      // **API key only.** The credential ladder ends at the installation's own
+      // store: a login (device flow, session, credential pool) is v2 work and does
+      // not live here. `readOpencodeStore` is off unless the deployment opted in.
       const fallbackKey =
-        explicit ??
-        login?.accessToken ??
-        resolveOpencodeStoreKey(plane, config.readOpencodeStore);
+        explicit ?? resolveOpencodeStoreKey(plane, config.readOpencodeStore);
       if (typeof fallbackKey === "string" && fallbackKey.length > 0) {
         headers.set(
           wireHeader,
@@ -433,7 +424,6 @@ export const patchFetch = (
           `${plane === "opencode-go" ? "OPENCODE_GO_API_KEY" : "OPENCODE_API_KEY"}: ${
             declared === undefined || declared.length === 0 ? "unset" : "set"
           }`,
-          `a stored login: ${login === undefined ? "none" : "none resolved"}`,
           `the installation's own store: ${
             config.readOpencodeStore ? "read" : "not enabled"
           }`,
@@ -490,18 +480,13 @@ export const patchFetch = (
     // needs the org it belongs to — measured on a paid model: `200` with it,
     // `403` without — and the free tier is refused with or without one, which is
     // a gate no header cleared.
-    // A selected login uses its own org, not a mutable cache that another
-    // request or a previous account may have populated. An explicit override
-    // still wins; absent login metadata must not revive a stale cached org.
+    // The configured org wins, because it is the one thing here the user said out
+    // loud. The hook is the deployment's own source (an account that ships with
+    // the profile); there is no login to infer one from.
     const org =
-      config.credentialOrg ??
-      (login === undefined
-        ? hooks.resolveOrg?.(gatewayPlaneFor(url))
-        : login.orgId);
+      config.credentialOrg ?? hooks.resolveOrg?.(gatewayPlaneFor(url));
     if (org !== undefined && org.length > 0) {
       headers.set("x-opencode-org-id", org);
-    } else if (login !== undefined) {
-      headers.delete("x-opencode-org-id");
     }
 
     // 3. Client & Project origin headers: injected when enabled

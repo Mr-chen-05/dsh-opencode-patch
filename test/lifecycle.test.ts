@@ -12,7 +12,6 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { name as pluginName } from "../src/identity.ts";
 import {
   apply,
   type CordisContext,
@@ -20,11 +19,8 @@ import {
   clearSessionUsageStore,
   RESPONSES_ROUTE,
 } from "../src/index.ts";
-import { clearCapturedApiKeys } from "../src/key-capture.ts";
-import { createTokenStore } from "../src/token-store.ts";
 import {
   collectUnknown,
-  createCredentialsSeam,
   createMockStream,
   isAsyncIterableLike,
   isRecord,
@@ -200,33 +196,6 @@ describe("apply (plugin lifecycle)", () => {
     ).toBe(true);
   });
 
-  it("registers the login service, which has no switch to be off", () => {
-    // A login is an action the user takes, not a behaviour the plugin runs, so
-    // there is no setting that could turn its remote off: the service answers
-    // "nothing is stored" until someone signs in, and that IS its default state.
-    const mounted: string[] = [];
-    const ctx = {
-      effect: () => {},
-      llm: {},
-      on: () => {},
-      plugin: (component: unknown) => {
-        mounted.push((component as { name?: string })?.name ?? "");
-      },
-    } as unknown as CordisContext;
-
-    apply(ctx);
-    expect(mounted).toContain("LoginService");
-
-    // And a composition with no `plugin` gets no service rather than an error:
-    // the same guard the meter's installer has, for the same reason.
-    const bare = {
-      effect: () => {},
-      llm: {},
-      on: () => {},
-    } as unknown as CordisContext;
-    expect(() => apply(bare)).not.toThrow();
-  });
-
   it("survives a composition with neither mount path, and reports it", () => {
     // The fallback's whole job is to not give up: `ctx.provide` reaches the same
     // lookup the client uses, so a composition with one but not the other still
@@ -311,92 +280,6 @@ describe("apply (plugin lifecycle)", () => {
       disposer();
     }
     expect(globalThis.fetch).toBe(originalFetch);
-  });
-
-  it("uses a refreshed login on primary routes through apply, without recursive fetch", async () => {
-    const { ctx: seamContext, credentials } = createCredentialsSeam();
-    const store = createTokenStore({
-      credentials,
-      plane: "opencode",
-      scope: pluginName,
-    });
-    expect(store).toBeDefined();
-    await store!.write({
-      accessToken: "st_old",
-      refreshToken: "rt_old",
-      expiresInSeconds: 10,
-      orgId: "org_fixture",
-    });
-    const sent: { url: string; headers: Headers }[] = [];
-    const original: typeof fetch = (input, init) => {
-      const url = input instanceof Request ? input.url : input.toString();
-      sent.push({ url, headers: new Headers(init?.headers) });
-      return Promise.resolve(
-        url.endsWith("/auth/device/token")
-          ? Response.json({
-              access_token: "st_refreshed",
-              refresh_token: "rt_refreshed",
-              expires_in: 3600,
-            })
-          : Response.json({ ok: true })
-      );
-    };
-    vi.stubGlobal("fetch", original);
-    vi.stubEnv("OPENCODE_API_KEY", "");
-    vi.stubEnv("OPENCODE_GO_API_KEY", "");
-    clearCapturedApiKeys();
-    let dispose: unknown;
-    let streamHook: unknown;
-    const ctx: CordisContext = {
-      ...seamContext,
-      effect: (fn: () => unknown) => {
-        dispose = fn();
-      },
-      on: (_event, fn) => {
-        streamHook = fn;
-      },
-    };
-    try {
-      apply(ctx);
-      // Run inside an active OpenCode turn: refresh must still bypass the patch.
-      const request = async function* request() {
-        yield await globalThis.fetch(
-          "https://opencode.ai/zen/go/v1/chat/completions",
-          { headers: { Authorization: "Bearer unused" } }
-        );
-      };
-      const hook = streamHook as (
-        options: unknown,
-        next: () => AsyncIterable<unknown>
-      ) => AsyncIterable<unknown>;
-      await collectUnknown(
-        hook(
-          {
-            provider: "opencode",
-            model: "deepseek-v4.1-flash",
-            sessionId: "fixture_session",
-          },
-          request
-        )
-      );
-      const model = sent.find((entry) =>
-        entry.url.includes("/chat/completions")
-      );
-      expect(model?.headers.get("authorization")).toBe("Bearer st_refreshed");
-      expect(model?.headers.get("x-opencode-org-id")).toBe("org_fixture");
-      expect(
-        sent.filter((entry) => entry.url.endsWith("/auth/device/token"))
-      ).toHaveLength(1);
-      await expect(store!.read()).resolves.toMatchObject({
-        accessToken: "st_refreshed",
-        refreshToken: "rt_refreshed",
-        orgId: "org_fixture",
-      });
-    } finally {
-      if (typeof dispose === "function") dispose();
-      vi.unstubAllEnvs();
-      clearCapturedApiKeys();
-    }
   });
 
   it("disposer does not clobber a replacement fetch", () => {

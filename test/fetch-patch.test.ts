@@ -10,7 +10,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { name } from "../src/identity.ts";
 import {
   DUMMY_BASH_TOOL,
   DUMMY_READ_TOOL,
@@ -25,11 +24,8 @@ import {
   resolveConfig,
   type ActiveTurnState,
 } from "../src/index.ts";
-import { createLoginCredentialReader } from "../src/login-credential.ts";
-import { createTokenStore } from "../src/token-store.ts";
 import {
   createCaptureFetch,
-  createCredentialsSeam,
   createOpencodeStore,
   headerOf,
   parseJsonBody,
@@ -1102,161 +1098,6 @@ describe("patchFetch", () => {
     );
   });
 
-  it.each(["opencode", "opencode-go"])(
-    "fills a keyless %s request from a login written after patch creation",
-    async (plane) => {
-      const { ctx, credentials } = createCredentialsSeam();
-      const store = createTokenStore({
-        credentials,
-        plane: "opencode",
-        scope: name,
-      });
-      expect(store).toBeDefined();
-      const { capture, mockFetch } = createCaptureFetch();
-      const patched = patchFetch(
-        mockFetch,
-        new AsyncLocalStorage<ActiveTurnState>(),
-        resolveConfig(),
-        {
-          loginCredential: createLoginCredentialReader(ctx),
-          resolveOrg: () => "org_stale",
-        }
-      );
-      const url = `https://opencode.ai/zen/${plane === "opencode-go" ? "go/" : ""}v1/chat/completions`;
-      await patched(url, { headers: { Authorization: "Bearer unused" } });
-      expect(headerOf(capture.init, "authorization")).toBe("Bearer unused");
-      await store!.write({
-        accessToken: "st_login",
-        expiresInSeconds: 3600,
-        orgId: "org_login",
-      });
-      await patched(url, { headers: { Authorization: "Bearer unused" } });
-      expect(headerOf(capture.init, "authorization")).toBe("Bearer st_login");
-      expect(headerOf(capture.init, "x-opencode-org-id")).toBe("org_login");
-      await store!.write({
-        accessToken: "st_new_owner",
-        expiresInSeconds: 3600,
-      });
-      await patched(url, {
-        headers: { "x-opencode-org-id": "org_old_header" },
-      });
-      expect(headerOf(capture.init, "authorization")).toBe(
-        "Bearer st_new_owner"
-      );
-      expect(headerOf(capture.init, "x-opencode-org-id")).toBeNull();
-    }
-  );
-
-  it("keeps request, captured, and declared auth ahead of a login", async () => {
-    const loginCredential = vi.fn(async () => ({
-      accessToken: "st_should_not_run",
-      orgId: "org_login",
-    }));
-    const { capture, mockFetch } = createCaptureFetch();
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const patched = patchFetch(mockFetch, als, resolveConfig(), {
-      loginCredential,
-    });
-    const url = "https://opencode.ai/zen/v1/chat/completions";
-    await patched(url, { headers: { Authorization: "Bearer explicit" } });
-    expect(headerOf(capture.init, "authorization")).toBe("Bearer explicit");
-    clearCapturedApiKeys();
-    await patched(url, { headers: { "x-api-key": "anthropic_explicit" } });
-    expect(headerOf(capture.init, "authorization")).toBe(
-      "Bearer anthropic_explicit"
-    );
-    clearCapturedApiKeys();
-    process.env.OPENCODE_API_KEY = "declared";
-    await patched(url, { headers: { Authorization: "Bearer unused" } });
-    expect(headerOf(capture.init, "authorization")).toBe("Bearer declared");
-    recordCapturedApiKey("captured", "opencode", url);
-    await patched(url, { headers: {} });
-    expect(headerOf(capture.init, "authorization")).toBe("Bearer captured");
-    await patchFetch(
-      mockFetch,
-      als,
-      resolveConfig({ keySource: "configured" }),
-      { loginCredential }
-    )(url, { headers: {} });
-    expect(headerOf(capture.init, "authorization")).toBe("Bearer declared");
-    expect(loginCredential).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["/zen/v1/messages", "x-api-key"],
-    ["/zen/v1/models/gemini-3.8-flash:streamGenerateContent", "x-goog-api-key"],
-    ["/zen/go/v1/chat/completions", "authorization"],
-  ])(
-    "repairs missing and placeholder auth on %s in its wire header",
-    async (path, header) => {
-      const { capture, mockFetch } = createCaptureFetch();
-      const loginCredential = vi.fn(async () => ({
-        accessToken: "st_protocol",
-        orgId: "org_protocol",
-      }));
-      const patched = patchFetch(
-        mockFetch,
-        new AsyncLocalStorage<ActiveTurnState>(),
-        resolveConfig(),
-        { loginCredential }
-      );
-      for (const value of [undefined, "none", "  UNUSED  "]) {
-        await patched(`https://opencode.ai${path}`, {
-          headers:
-            value === undefined
-              ? {}
-              : {
-                  [header]:
-                    header === "authorization" ? `bearer ${value}` : value,
-                },
-        });
-        expect(headerOf(capture.init, header)).toBe(
-          header === "authorization" ? "Bearer st_protocol" : "st_protocol"
-        );
-        expect(headerOf(capture.init, "x-opencode-org-id")).toBe(
-          "org_protocol"
-        );
-      }
-      expect(loginCredential).toHaveBeenCalledTimes(3);
-    }
-  );
-
-  it.each(["x-api-key", "x-goog-api-key"])(
-    "preserves a real %s even beside a Bearer placeholder",
-    async (header) => {
-      const { capture, mockFetch } = createCaptureFetch();
-      const loginCredential = vi.fn(async () => ({ accessToken: "st_wrong" }));
-      const patched = patchFetch(
-        mockFetch,
-        new AsyncLocalStorage<ActiveTurnState>(),
-        resolveConfig({ keySource: "configured" }),
-        { loginCredential }
-      );
-      await patched("https://opencode.ai/zen/v1/messages", {
-        headers: {
-          authorization: "Bearer unused",
-          [header]: "explicit_wire_key",
-        },
-      });
-      expect(headerOf(capture.init, header)).toBe("explicit_wire_key");
-      expect(getCapturedApiKey(undefined, "zen")).toBe("explicit_wire_key");
-      expect(loginCredential).not.toHaveBeenCalled();
-    }
-  );
-
-  it("does not infer a gateway plane from query text on a claimed foreign request", async () => {
-    const loginCredential = vi.fn(async () => ({ accessToken: "st_secret" }));
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const { mockFetch, capture } = createCaptureFetch();
-    await als.run({ provider: "opencode", value: "ses_fixture" }, () =>
-      patchFetch(mockFetch, als, resolveConfig(), { loginCredential })(
-        "https://example.com/api?next=/zen/go/v1/responses"
-      )
-    );
-    expect(loginCredential).not.toHaveBeenCalled();
-    expect(headerOf(capture.init, "authorization")).toBeNull();
-  });
-
   it("selects a declared key from the URL's plane rather than a conflicting turn provider", async () => {
     process.env.OPENCODE_API_KEY = "zen_declared";
     process.env.OPENCODE_GO_API_KEY = "go_declared";
@@ -1270,114 +1111,6 @@ describe("patchFetch", () => {
       )("https://opencode.ai/zen/v1/messages")
     );
     expect(headerOf(capture.init, "x-api-key")).toBe("zen_declared");
-  });
-
-  it("does not send a request when login refresh fails", async () => {
-    const mockFetch = vi.fn(async () => new Response("unexpected"));
-    const loginCredential = async () => {
-      throw new Error("MISSING_CREDENTIAL: refresh refused");
-    };
-    await expect(
-      patchFetch(
-        mockFetch,
-        new AsyncLocalStorage<ActiveTurnState>(),
-        resolveConfig(),
-        { loginCredential }
-      )("https://opencode.ai/zen/v1/responses")
-    ).rejects.toThrow(/MISSING_CREDENTIAL/);
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it("does not resolve a login for unclaimed URLs or an unknown gateway plane", async () => {
-    const loginCredential = vi.fn(async () => ({ accessToken: "st_secret" }));
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const { capture, mockFetch } = createCaptureFetch();
-    const patched = patchFetch(mockFetch, als, resolveConfig(), {
-      loginCredential,
-    });
-    await patched("https://example.com/api", { headers: {} });
-    await als.run({ provider: "opencode", value: "ses_fixture" }, () =>
-      patched("https://example.com/api", { headers: {} })
-    );
-    expect(loginCredential).not.toHaveBeenCalled();
-    expect(headerOf(capture.init, "authorization")).toBeNull();
-  });
-
-  it("uses the opt-in account before the installation key, with its own org", async () => {
-    const fixture = createOpencodeStore(
-      [{ integrationId: "opencode-go", value: "sk_fixture" }],
-      { accessToken: "st_installation", orgId: "org_installation" }
-    );
-    process.env.XDG_DATA_HOME = fixture.root;
-    const { capture, mockFetch } = createCaptureFetch();
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const url = "https://opencode.ai/zen/go/v1/chat/completions";
-    try {
-      await patchFetch(
-        mockFetch,
-        als,
-        resolveConfig({ readOpencodeStore: true }),
-        {
-          loginCredential: createLoginCredentialReader({}, true),
-          resolveOrg: () => "org_wrong",
-        }
-      )(url, { headers: {} });
-      expect(headerOf(capture.init, "authorization")).toBe(
-        "Bearer st_installation"
-      );
-      expect(headerOf(capture.init, "x-opencode-org-id")).toBe(
-        "org_installation"
-      );
-      await patchFetch(
-        mockFetch,
-        als,
-        resolveConfig({
-          credentialOrg: "org_override",
-          readOpencodeStore: true,
-        }),
-        { loginCredential: createLoginCredentialReader({}, true) }
-      )(url, { headers: {} });
-      expect(headerOf(capture.init, "x-opencode-org-id")).toBe("org_override");
-      await patchFetch(mockFetch, als, resolveConfig(), {
-        loginCredential: createLoginCredentialReader({}),
-      })(url, { headers: {} });
-      expect(headerOf(capture.init, "authorization")).toBeNull();
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  it("pairs concurrent request tokens with their own org, not the shared cache", async () => {
-    const sent: Headers[] = [];
-    const mockFetch: typeof fetch = (_input, init) => {
-      sent.push(new Headers(init?.headers));
-      return Promise.resolve(new Response("ok"));
-    };
-    const patched = patchFetch(
-      mockFetch,
-      new AsyncLocalStorage<ActiveTurnState>(),
-      resolveConfig(),
-      {
-        loginCredential: async (plane) => ({
-          accessToken: `st_${plane}`,
-          orgId: `org_${plane}`,
-        }),
-        resolveOrg: () => "org_other_request",
-      }
-    );
-    await Promise.all([
-      patched("https://opencode.ai/zen/v1/responses"),
-      patched("https://opencode.ai/zen/go/v1/chat/completions"),
-    ]);
-    expect(
-      sent.map((headers) => [
-        headers.get("authorization"),
-        headers.get("x-opencode-org-id"),
-      ])
-    ).toEqual([
-      ["Bearer st_opencode", "org_opencode"],
-      ["Bearer st_opencode-go", "org_opencode-go"],
-    ]);
   });
 
   it("fills the Authorization header from the installation's store, last", async () => {

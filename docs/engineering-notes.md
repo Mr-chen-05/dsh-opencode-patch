@@ -139,7 +139,7 @@ login: loginCalls(ctx),   // called at inject time
 readUsage: () => readGoUsage(ctx),   // called when the card asks
 ```
 
-`loginCalls` asks for `ctx.remote.opencodeLogin` **while the injector builds the props**, and the mount is an asynchronous `$mount` started in an effect. If it runs first, `loginCalls` answers `undefined`, the card's `props.login !== undefined` is false, and the row never renders — no retry, no second chance, and the warning it prints says the service is missing when it is merely late.
+(`v2` record — this branch has no sign-in row.) `loginCalls` asked for `ctx.remote.opencodeLogin` **while the injector builds the props**, and the mount was an asynchronous `$mount` started in an effect. If it runs first, `loginCalls` answers `undefined`, the card's `props.login !== undefined` is false, and the row never renders — no retry, no second chance, and the warning it prints says the service is missing when it is merely late.
 
 **Fixed, and the choice is worth recording because the two are not equivalent.** `loginCalls` now resolves the remote inside each method and answers the three calls unconditionally. Making them lazy is what fixes the race; answering unconditionally is what makes the row render at all, and it carries a cost: a host that mounts no login service shows a row that reports it rather than showing nothing. That is the better failure — "no row" and "no service" stop looking identical — and it is deliberately the opposite of the meter's choice, which hides itself when its service is absent. The card's prop is now never `undefined`, so the condition that used to guard the row is a formality rather than a decision.
 
@@ -509,7 +509,7 @@ That is recorded rather than asserted, because the honest position is that the p
 
 ## Both remotes absent at once, and the two console lines that would say why
 
-The card now reports `the login remote did not answer` and `读不到配额` together. Both services are the plugin's own — `opencodeLogin` and `opencodeGoUsage` — and both are mounted by the same helper in `settings-page.tsx:140-160`, so one failure explains both.
+(`v2` record.) The card reported `the login remote did not answer` and `读不到配额` together while both services were mounted by the same helper. This branch mounts the meter's remote only, so the meter is the one surface whose absence has to be reported.
 
 It is **not** the read race: the login row resolves its remote per call, and the usage summary reads up to five times with a growing wait, so a mount that arrived late would be found by either. Both being absent means the mount did not happen or did not succeed.
 

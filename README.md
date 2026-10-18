@@ -169,7 +169,7 @@ The patch **keeps those two routes out of both the model picker and _Settings �
 
 - **You keep choosing.** The picker shows exactly the models you listed, and each one is matched to the right protocol automatically. OpenCode serves models on three shapes — OpenAI Chat Completions (the default), OpenAI Responses, and Anthropic Messages — and a model that needs one of the other two is dispatched to the route that speaks it. No second route to declare by hand.
 - **You are never offered a model that cannot work.** Every one of the four families is reachable, so no model is dropped for want of a protocol: the `@ai-sdk/google` models are served through the patch's own adapter, and the three DSH already speaks are dispatched to the route that speaks them. That holds for models you list by hand as well — one the catalog does not describe is routed by the family its id names (`gemini-*` to the Generative AI path, `claude-*` to Messages), and if the route you put it on cannot serve that protocol it is not offered there at all, rather than answering `400 ModelProtocolUnsupported` when you pick it.
-- **One credential, from wherever you already have one.** A routed model authenticates with the key you configured, resolved through the credentials service and never re-asked for — and if a route names no key at all, a stored login's token answers instead, so signing in is enough. Your own configuration always wins: the order is the route's own reference, then the login, and nothing is consulted before the thing you declared.
+- **One credential, from wherever you already have one.** A routed model authenticates with the key you configured, resolved through the credentials service and never re-asked for — and if a route names no key at all, the installation's own OpenCode store answers, when the deployment opts into reading it. Your own configuration always wins: the order is the route's own reference, then the store, and nothing is consulted before the thing you declared.
 
 **The route, if you would rather declare it yourself:** `opencode-responses` — and `opencode-anthropic`, once you use an Anthropic-plane model — can live in your profile's `llm-pi-ai` `providers` block, listing the models it serves. Declaring it is a choice, not a requirement:
 
@@ -273,16 +273,9 @@ Go usage                                           Healthy
 Monthly allowance  mimo-v2.6-pro · Go $60 · Plus $120         ⓘ
 ```
 
-Above both sits the **sign-in row** — the plugin's own OpenCode account, when you want one:
+**This build carries the API key path only.** There is no sign-in row and no device flow: a credential comes from the deployment's configuration, from a key captured on a live request, or — when `readOpencodeStore` is on — from the OpenCode installation's own store. The Console login (device flow, session store, credential pool) lives on the `v2` line and is deliberately not in `main`, so nothing here depends on a service the host may not mount.
 
-```
-OpenCode account                                          Not signed in
-                                                            [ Sign in to OpenCode ]
-```
-
-Click it and the card shows a short code, a link to open, and that it is waiting. Approve in the browser and the row becomes the account's email. It is a device flow, so there is nothing to paste and no token ever reaches the page — the credential is written and read on the host, and the card only renders what it is told.
-
-**If you do not see this row after updating, the host process has not restarted.** The host bundle is read once at process start, so a browser reload keeps running the previous `lib/index.mjs`; stop and restart `dsh web`. The row is the quickest way to tell, because it is new in the same build as everything else.
+**If the card looks like the previous build after updating, the host process has not restarted.** The host bundle is read once at process start, so a browser reload keeps running the previous `lib/index.mjs`; stop and restart `dsh web`. The row is the quickest way to tell, because it is new in the same build as everything else.
 
 "Left" is a percentage, never a dollar figure: `/usage` publishes a percent per window and no balance at all, and the plan tier is not discoverable — so a dollar remainder would be a guess. The ⓘ states that. A quota that cannot be read says so and prints no numbers, rather than a row of zeroes that reads as a measurement.
 
@@ -376,7 +369,7 @@ These exist in the schema but render no control — each is a literal, a marker,
 | `sessionIdEnv` | `OPENCODE_SESSION_ID` | Names an env var only a caller-supplied session id uses |
 | `freeModelMarker` | `free` | Model-id substring; `*` forces the fallback, `''` disables it |
 | `usageBaseURL` | `https://opencode.ai/zen/go/v1` | Endpoint override; auto-discovered from the composition |
-| `credentialOrg` | — | The org id an account credential belongs to, for a token that came from somewhere other than a login through this plugin |
+| `credentialOrg` | — | The org id an account credential belongs to, when the deployment supplies one out of band |
 | `debug` / `debugFile` | `false` / — | Diagnostic JSONL logging, not a behaviour anyone tunes in the UI |
 
 ```yaml

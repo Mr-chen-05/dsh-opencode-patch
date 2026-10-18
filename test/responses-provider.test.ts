@@ -24,7 +24,6 @@ import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { OPENCODE_PLANE_API } from "../src/catalog-data.ts";
-import { name as pluginName } from "../src/identity.ts";
 import {
   RESPONSES_SDK,
   ROUTE_FOR_PLANE_PROTOCOL,
@@ -37,16 +36,12 @@ import {
   SELF_MOUNTED_ROUTES,
 } from "../src/index.ts";
 import type { CordisContext } from "../src/index.ts";
-import { orgFor, clearOrgs, setOrg } from "../src/org-cache.ts";
 import { baseForProtocol } from "../src/pi-provider.ts";
 import {
   loadPiAiAdapterHost,
   loadPiAiModule,
-  loginTokenReader,
   reasoningEffortsFor,
 } from "../src/responses-provider.ts";
-import { createTokenStore } from "../src/token-store.ts";
-import { createCredentialsSeam, createOpencodeStore } from "./test-helpers.ts";
 
 const MUSE = "muse-spark-1.2-contributor-free";
 
@@ -1484,117 +1479,5 @@ describe("responses-provider: a loader that breaks its own contract", () => {
     const host = createHost();
     (host.ctx.loader as { entries: unknown }).entries = 42;
     await expect(registerResponsesProvider(host.ctx)).resolves.toBeUndefined();
-  });
-});
-
-describe("responses-provider · the login token a route falls back to", () => {
-  it("updates the bridge org for the selected account and clears it when none remains", async () => {
-    const fixture = createOpencodeStore([], {
-      accessToken: "st_installation",
-      orgId: "org_installation",
-    });
-    vi.stubEnv("XDG_DATA_HOME", fixture.root);
-    const { ctx, credentials } = createCredentialsSeam();
-    const store = createTokenStore({
-      credentials,
-      plane: "opencode",
-      scope: pluginName,
-    });
-    expect(store).toBeDefined();
-    const read = loginTokenReader(ctx, true);
-    try {
-      await expect(read("opencode-go")).resolves.toBe("st_installation");
-      expect(orgFor("opencode-go")).toBe("org_installation");
-      await store!.write({
-        accessToken: "st_dsh",
-        expiresInSeconds: 3600,
-        orgId: "org_dsh",
-      });
-      await expect(read("opencode-go")).resolves.toBe("st_dsh");
-      expect(orgFor("opencode-go")).toBe("org_dsh");
-      await store!.write({
-        accessToken: "st_without_org",
-        expiresInSeconds: 3600,
-      });
-      await expect(read("opencode-go")).resolves.toBe("st_without_org");
-      expect(orgFor("opencode-go")).toBeUndefined();
-      await store!.clear();
-      setOrg("opencode-go", "org_stale");
-      await expect(
-        loginTokenReader(ctx)("opencode-go")
-      ).resolves.toBeUndefined();
-      expect(orgFor("opencode-go")).toBeUndefined();
-    } finally {
-      fixture.cleanup();
-      vi.unstubAllEnvs();
-      clearOrgs();
-    }
-  });
-  it("answers undefined when no credential service is reachable", async () => {
-    // The store answers undefined rather than throwing, which is why the bridge
-    // needs no guard around this: a deployment with no login simply falls through
-    // to the adapter's own ambient auth, exactly as it did before.
-    await expect(loginTokenReader({})("opencode")).resolves.toBeUndefined();
-  });
-});
-
-describe("responses-provider · a login and the reader actually meet", () => {
-  it("answers with the token a login stored, on either plane", async () => {
-    // The two halves of this are tested apart - the login writes a grant, the
-    // bridge asks this reader - and this is the seam: a grant written through the
-    // store comes back out of the reader, which is the whole of what "signing in
-    // is enough" means. The second plane is asked because the ACCOUNT is not
-    // plane-specific, measured, and the sign-in card defaults to one of them.
-    const records = new Map<string, unknown>();
-    const credentials = {
-      deleteRecord: async (key: string) => {
-        records.delete(key);
-      },
-      readRecord: async (key: string) => {
-        const payload = records.get(key);
-        return payload === undefined ? undefined : { kind: "grant", payload };
-      },
-      // `readCredentialsWriter` requires all seven: a seam that cannot write a
-      // record atomically is not one a rotating grant can be kept in, so it
-      // answers undefined rather than handing back half a writer.
-      modifyRecord: async (
-        key: string,
-        mutate: (current?: unknown) => Promise<unknown>
-      ) => {
-        const next = await mutate(records.get(key));
-        if (next !== undefined) {
-          records.set(key, next);
-        }
-        return next;
-      },
-      resolve: vi.fn(),
-      set: vi.fn(),
-      unset: vi.fn(),
-      writeGrant: async (key: string, payload: unknown) => {
-        records.set(key, payload);
-      },
-    };
-    const ctx = {
-      get: (which: string) =>
-        which === "credentials" ? credentials : undefined,
-    };
-
-    const store = createTokenStore({
-      credentials,
-      plane: "opencode",
-      scope: pluginName,
-    });
-    await store?.write({
-      accessToken: "st_from_login",
-      expiresInSeconds: 3600,
-    });
-
-    expect(records.size, "the write did not land").toBe(1);
-    await expect(loginTokenReader(ctx)("opencode")).resolves.toBe(
-      "st_from_login"
-    );
-    await expect(loginTokenReader(ctx)("opencode-go")).resolves.toBe(
-      "st_from_login"
-    );
   });
 });
