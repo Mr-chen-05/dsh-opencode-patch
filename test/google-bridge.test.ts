@@ -18,10 +18,7 @@ import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import semver from "semver";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import {
-  OPENCODE_PLANE_API,
-  OPENCODE_ZEN_CATALOG,
-} from "../src/catalog-data.ts";
+import { OPENCODE_ZEN_CATALOG } from "../src/catalog-data.ts";
 import {
   ambientAuthContext,
   emptyCredentialStore,
@@ -100,10 +97,13 @@ describe("google-bridge · the provider it builds", () => {
     const models = providerAs(geminiSpecs).getModels();
     expect(models.length).toBe(geminiSpecs.length);
     for (const model of models) {
-      // The URL this protocol produces on this base was measured end to end:
-      // …/zen/v1/models/<id>:streamGenerateContent?alt=sse.
+      // **The Google family has its own base.** Measured from the vendor's
+      // `GET /console/api/config`: `…/inference/google/v1beta`, not the
+      // `…/inference/openai/v1` the plane's openai protocols use. Deriving it by
+      // string surgery on one plane URL is what sent these models to the wrong
+      // endpoint.
       expect(model.api).toBe("google-generative-ai");
-      expect(model.baseUrl).toBe(OPENCODE_PLANE_API.zen);
+      expect(model.baseUrl).toBe("https://opencode.ai/inference/google/v1beta");
       // The provider field names the route, the way the wrapper's own model
       // resolution sets it — not the plane the model was catalogued on.
       expect(model.provider).toBe(GOOGLE_INTERNAL_ROUTE);
@@ -200,7 +200,7 @@ describe("google-bridge · the provider it builds", () => {
         }
         expect(seen.length).toBe(1);
         expect(seen[0]?.url).toBe(
-          `${OPENCODE_PLANE_API.zen}/models/${model.id}:streamGenerateContent?alt=sse`
+          `https://opencode.ai/inference/google/v1beta/models/${model.id}:streamGenerateContent?alt=sse`
         );
         // This protocol's credential header, measured against the gateway:
         // the request-level key rides x-goog-api-key, not Authorization.
@@ -227,7 +227,7 @@ describe("google-bridge · the provider it builds", () => {
       }
       expect(seen.length).toBe(1);
       expect(seen[0]?.url).toBe(
-        `${OPENCODE_PLANE_API.zen}/models/${first.id}:streamGenerateContent?alt=sse`
+        `https://opencode.ai/inference/google/v1beta/models/${first.id}:streamGenerateContent?alt=sse`
       );
     } finally {
       globalThis.fetch = real;
@@ -390,7 +390,7 @@ describe("google-bridge · the request the adapter actually sends", () => {
         1
       );
       expect(sent[0]?.url).toBe(
-        `${OPENCODE_PLANE_API.zen}/models/gemini-3.8-flash:streamGenerateContent?alt=sse`
+        "https://opencode.ai/inference/google/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse"
       );
       // The credential the plugin resolved, on the header this protocol reads.
       expect(sent[0]?.headers["x-goog-api-key"]).toBe("oc_sk_stream_resolved");

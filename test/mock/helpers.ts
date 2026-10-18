@@ -80,6 +80,37 @@ export const FAMILY_ROOTS: Readonly<
   },
 };
 
+/**
+ * The root one (family, plane, protocol) lands on.
+ *
+ * **The inference family is not one root per plane.** Its anthropic and google
+ * protocols live at their own paths, declared per model by the vendor's
+ * `GET /console/api/config`; deriving them from the openai root is what sent
+ * those models to the wrong endpoint. The legacy family genuinely is one root.
+ *
+ * @param family - the endpoint family under test.
+ * @param plane - the gateway plane.
+ * @param protocol - the wire protocol.
+ * @returns the path root the request should carry.
+ */
+export const rootForProtocol = (
+  family: TestFamily,
+  plane: TestPlane,
+  protocol: string
+): string => {
+  if (family === "legacy") {
+    return FAMILY_ROOTS.legacy[plane];
+  }
+  const go = plane === "opencode-go";
+  if (protocol === "anthropic-messages") {
+    return go ? "/inference/go/anthropic/v1" : "/inference/anthropic/v1";
+  }
+  if (protocol === "google-generative-ai") {
+    return go ? "/inference/go/google/v1beta" : "/inference/google/v1beta";
+  }
+  return FAMILY_ROOTS.auto[plane];
+};
+
 /** The path suffix each protocol's SDK appends to its base. */
 const PATH_FOR_PROTOCOL: Readonly<Record<string, string>> = {
   "anthropic-messages": "/messages",

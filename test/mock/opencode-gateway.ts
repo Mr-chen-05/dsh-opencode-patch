@@ -220,6 +220,15 @@ const FAMILY_ROOTS: readonly { plane: GatewayPlane; root: string }[] = [
   { plane: "opencode", root: "/zen/v1" },
   { plane: "opencode-go", root: new URL(OPENCODE_PLANE_API.go).pathname },
   { plane: "opencode", root: new URL(OPENCODE_PLANE_API.zen).pathname },
+  // **The inference family is not one root per plane.** Its anthropic and google
+  // protocols live at their own paths, which the vendor's `GET /console/api/config`
+  // declares per model. Measured there; hard-coded here because this file MOCKS
+  // the gateway and a mock that derives its routes from the code under test
+  // cannot catch a wrong route.
+  { plane: "opencode-go", root: "/inference/go/anthropic/v1" },
+  { plane: "opencode-go", root: "/inference/go/google/v1beta" },
+  { plane: "opencode", root: "/inference/anthropic/v1" },
+  { plane: "opencode", root: "/inference/google/v1beta" },
 ];
 
 const ENDPOINTS: readonly {

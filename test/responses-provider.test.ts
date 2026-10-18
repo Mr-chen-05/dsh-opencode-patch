@@ -1118,7 +1118,7 @@ describe("responses-provider: the mount survives the host's own instance", () =>
     ).toBeGreaterThan(1);
     // Spot-check the two that differ, in the gateway's own terms.
     expect(providers["opencode-anthropic"]?.baseURL).toBe(
-      OPENCODE_PLANE_API.zen.replace(/\/v1$/, "")
+      "https://opencode.ai/inference/anthropic"
     );
     expect(providers["opencode-responses"]?.baseURL).toBe(
       OPENCODE_PLANE_API.zen

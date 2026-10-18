@@ -98,19 +98,62 @@ export const planeBaseFor = (plane: Plane, family: EndpointFamily): string => {
 };
 
 /**
- * The protocol's path on the plane's base, or `null` when it is the base itself.
+ * The protocol's path on its family's base, or `null` when the SDK wants the base
+ * without its version segment.
  *
- * The catalog's `api` is the base INCLUDING the version segment - `…/zen/v1`,
- * `…/inference/v1` - so the versioned protocols are the base with nothing added,
- * and the Anthropic endpoint (`/messages`) is the base without that segment.
- * Appending `/v1` to the new value produces `…/inference/v1/v1`, which is how
- * this was found.
+ * A family's `api` is the base INCLUDING the version segment - `…/openai/v1`,
+ * `…/anthropic/v1`, `…/google/v1beta` - so the versioned protocols are the base
+ * with nothing added, and the Anthropic endpoint (`/messages`) is the base
+ * without that segment: pi-ai's SDK appends `/v1/messages` itself.
  */
 const PROTOCOL_SUFFIX: Readonly<Record<string, string | null>> = {
   "anthropic-messages": null,
   "google-generative-ai": "",
   "openai-completions": "",
   "openai-responses": "",
+};
+
+/** The wire family a protocol belongs to. Each family has its own base. */
+type WireFamily = "anthropic" | "google" | "openai";
+
+const FAMILY_OF_PROTOCOL: Readonly<Record<string, WireFamily>> = {
+  "anthropic-messages": "anthropic",
+  "google-generative-ai": "google",
+  "openai-completions": "openai",
+  "openai-responses": "openai",
+};
+
+/**
+ * The inference family's base, per plane and per wire family.
+ *
+ * **Measured from the vendor's own `GET /console/api/config`, not derived.** The
+ * gateway does not serve one base per plane with the protocol appended: each
+ * family lives at its own path, and the vendor's client hands the SDK exactly
+ * the `api` its config reports for that model.
+ *
+ * Deriving these by stripping `/v1` off one plane URL - which is what this
+ * module used to do - sent every Anthropic model to `…/inference/openai` and
+ * every Google model to `…/inference/openai/v1`. Measured on the live config:
+ * `opencode` declares `…/inference/anthropic/v1` for 18 models and
+ * `…/inference/google/v1beta` for 8; `opencode-go` declares the `go/` variants
+ * for 5 and 1. Thirty-two models, reachable only through their own family.
+ *
+ * The legacy (`…/zen/v1`) family genuinely IS one base for every protocol, which
+ * is why it keeps the old derivation.
+ */
+const INFERENCE_BASE: Readonly<
+  Record<Plane, Readonly<Record<WireFamily, string>>>
+> = {
+  opencode: {
+    anthropic: "https://opencode.ai/inference/anthropic/v1",
+    google: "https://opencode.ai/inference/google/v1beta",
+    openai: "https://opencode.ai/inference/openai/v1",
+  },
+  "opencode-go": {
+    anthropic: "https://opencode.ai/inference/go/anthropic/v1",
+    google: "https://opencode.ai/inference/go/google/v1beta",
+    openai: "https://opencode.ai/inference/go/openai/v1",
+  },
 };
 
 /**
@@ -136,14 +179,22 @@ const basesFor = (family: EndpointFamily): BaseTable => {
   return table;
 };
 
-/** Every protocol on one plane and family, sharing that plane's base. */
+/**
+ * Every protocol on one plane and family, each on its own family's base.
+ *
+ * Legacy is one base for all four protocols; the inference family is not, and
+ * pretending otherwise is the bug this encodes against.
+ */
 function withPlaneBase(
   plane: Plane,
   family: EndpointFamily
 ): Readonly<Record<string, string>> {
-  const base = planeBaseFor(plane, family);
   const out: Record<string, string> = {};
   for (const [protocol, suffix] of Object.entries(PROTOCOL_SUFFIX)) {
+    const base =
+      family === "legacy"
+        ? planeBaseFor(plane, "legacy")
+        : INFERENCE_BASE[plane][FAMILY_OF_PROTOCOL[protocol] ?? "openai"];
     out[protocol] =
       suffix === null ? base.replace(/\/v1$/, "") : `${base}${suffix}`;
   }
