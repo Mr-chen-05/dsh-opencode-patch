@@ -1,7 +1,7 @@
 {
   "name": "dsh-opencode-patch",
   "version": "1.1.1",
-  "description": "OpenCode on DeepSeek Harness \u2014 session affinity, Zen/Go gateway origin headers, free-tier tool fallback, and live Go quota display.",
+  "description": "OpenCode on DeepSeek Harness — session affinity, Zen/Go gateway origin headers, free-tier tool fallback, and live Go quota display.",
   "keywords": [
     "cordis",
     "deepseek-harness",
@@ -71,15 +71,18 @@
     "format:fix": "vp fmt --write",
     "lint": "vp lint",
     "lint:fix": "vp lint --fix",
-    "prepare": "pnpm run build",
-    "prepublishOnly": "pnpm run release:gate",
-    "release:gate": "pnpm run build && pnpm run check && pnpm run test && node --experimental-strip-types scripts/check.ts",
+    "prepare": "vp run build",
+    "prepublishOnly": "vp run release:gate",
+    "release:gate": "vp run build && vp run check && vp run test && node --experimental-strip-types scripts/check.ts",
     "test": "vp test",
     "test:coverage": "vp test run --coverage",
     "test:e2e": "vp test --config vitest.e2e.config.ts",
     "test:mock": "vp test --config vitest.mock.config.ts",
     "typecheck": "tsc --noEmit",
-    "cli:version": "node --experimental-strip-types scripts/check-vendor-version.ts"
+    "cli:version": "node --experimental-strip-types scripts/check-vendor-version.ts",
+    "version:patch": "vp pm version patch --no-git-checks",
+    "version:minor": "vp pm version minor --no-git-checks",
+    "version:major": "vp pm version major --no-git-checks"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "3.18.5-alpha.2",
