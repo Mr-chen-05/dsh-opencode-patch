@@ -45,6 +45,44 @@ Three steps, all data-driven:
 
 `src/responses-provider.ts` then **mounts the host's own `llm-pi-ai`** under isolated auth scopes to serve those routes. That is the piece with four host contracts to survive; read its header before touching it. The plugin registers the routes, so the user configures nothing.
 
+### Why a provider cannot serve mixed protocols, in the harness's own terms
+
+Traced through `dsh-llm-pi-ai` and pi-ai, because "one provider, many protocols" keeps looking like it should work and never does:
+
+```
+profile → PiAiProviderProfile
+  → buildProvider (dsh-llm-pi-ai/lib/index.js:926)
+      catalog route AND no route-level `api` → reuseCatalogProvider (:908)
+      anything else                          → createProvider({ api: factory() })  (:931)
+  → snapshot.models.streamSimple(model, …)              host :1987
+  → dispatch                                            @earendil-works/pi-ai/dist/models.js:553
+```
+
+`createProvider` calls `input.api.stream(model, …)` — the ROUTE's implementation, so a route with an `api` speaks exactly one protocol and `model.api` is ignored. pi's own provider _does_ dispatch per model (`apiFor = single ?? byApi[model.api]`), and pi ships `opencode` with an api MAP of four protocols (`providers/opencode.js`), so the reused-catalog path genuinely supports mixed protocols — for models the installed catalog describes.
+
+**The wall is model materialization** (`lib/index.js:663-690`):
+
+```js
+const base = defaults.get(entry.id); // the installed catalog entry
+const api = request.api ?? base?.api ?? routeApi;
+if (api === void 0) invalid(provider, "… needs an api …");
+```
+
+with `routeApi = sharedCatalogApi(defaults)`, which answers the one protocol the route's shipped models agree on — **and `undefined` when they disagree**, which is always the case for `opencode`.
+
+| declared model | protocol it gets | outcome |
+| :-- | :-- | :-- |
+| described by the installed catalog | `base.api` (its own) | per-model dispatch, no help needed |
+| hand-written, not described | `request.api`, else `routeApi` | **INVALID_CONFIG** when both are absent |
+
+So: a route that names `api` pins every model on it; a route that does not name one gives hand-written models no protocol at all. That is why this plugin's answer is the three steps it implements rather than a single mixed-protocol provider:
+
+1. **declare the route again, hidden** — an internal route per protocol, with the right `api` and `baseURL` (`registerResponsesProvider`);
+2. **hide the mount** — `hideResponsesRoute` drops it from every listing, including the configurable-provider set and the browser catalog;
+3. **merge at the presentation layer** — discovery and `/models` enrichment describe the models on the route the user actually selected, never on the hidden ones.
+
+And the consequence for anything built on top: a model's protocol is not a property of the model object alone. It is the route's, chosen at profile resolution, so a model that needs a different protocol needs a route that speaks it.
+
 ### Why it is a table and not a model list
 
 An earlier version kept a hand-written list of which models redirect. A hand-patched field in that list once mis-routed nine models on every cold start. The SDK the vendor itself ships is the authority, and it arrives with the catalog.
