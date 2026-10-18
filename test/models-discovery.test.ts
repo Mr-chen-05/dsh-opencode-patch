@@ -1413,3 +1413,61 @@ describe("models-discovery: resolveEffectiveContextWindow", () => {
     ).toBe(1_050_000);
   });
 });
+
+describe("models-discovery: a keyless deployment is offered only what it can call", () => {
+  /**
+   * A host whose parent route lists one priced model and one free one.
+   *
+   * The official client's rule (`provider/provider.ts:231-237`) is to delete every
+   * model whose `cost.input` is not 0 when no credential is present; without it the
+   * picker offers rows that answer 401 and says nothing about why.
+   */
+  const hostListing = (ids: readonly string[]) =>
+    ({
+      llm: {
+        listConfigurableProviders: () => [{ provider: "opencode" }],
+        listModels: async (provider: string) =>
+          provider === "opencode" ? ids.map((id) => ({ id })) : [],
+        listProviders: () => [{ id: "opencode", name: "opencode" }],
+      },
+    }) as unknown as CordisContext;
+
+  const listedFor = async (
+    ctx: CordisContext,
+    verify?: (plane: string) => boolean
+  ): Promise<string[]> => {
+    const stop = hideResponsesRoute(
+      ctx,
+      resolveConfig(),
+      verify === undefined ? {} : { hasCredential: verify }
+    );
+    const listed = (await ctx.llm?.listModels?.("opencode")) as Array<{
+      id: string;
+    }>;
+    stop?.();
+    return listed.map((model) => model.id);
+  };
+
+  it("drops the priced model when no credential resolves", async () => {
+    const ids = await listedFor(
+      hostListing(["gpt-5.4", "space-bunny-free"]),
+      () => false
+    );
+    expect(ids).toEqual(["space-bunny-free"]);
+  });
+
+  it("keeps every model when the plane does hold a credential", async () => {
+    const ids = await listedFor(
+      hostListing(["gpt-5.4", "space-bunny-free"]),
+      () => true
+    );
+    expect(ids).toEqual(["gpt-5.4", "space-bunny-free"]);
+  });
+
+  it("leaves the list untouched when the caller does not ask", async () => {
+    // The default is "do not narrow": a caller that cannot tell must not hide
+    // models a deployment can actually use.
+    const ids = await listedFor(hostListing(["gpt-5.4", "space-bunny-free"]));
+    expect(ids).toEqual(["gpt-5.4", "space-bunny-free"]);
+  });
+});

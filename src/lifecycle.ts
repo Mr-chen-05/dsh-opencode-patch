@@ -36,6 +36,7 @@ import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
 import { isFetchFunction, isRecord } from "./guards.ts";
 import { LEGACY_NAME, LEGACY_PKG, name } from "./identity.ts";
+import { getCapturedApiKey, isPlaceholderApiKey } from "./key-capture.ts";
 import { createLoginCredentialReader } from "./login-credential.ts";
 import { LoginService } from "./login-service.ts";
 import {
@@ -354,7 +355,11 @@ const installFetchPatch = (
     // and every live reload would stack another wrapper. Installed before the
     // stream hook is used, because the redirect asks it whether the route is
     // really registered.
-    const stopCatalogHiding = hideResponsesRoute(ctx, config);
+    // Told which planes are keyless, so the picker can offer only what such a
+    // deployment can actually call (the official client's rule).
+    const stopCatalogHiding = hideResponsesRoute(ctx, config, {
+      hasCredential: hasPlaneCredential,
+    });
     // Own the Responses route from here, so the user configures nothing: they
     // keep the `opencode` provider and key they already have. Best-effort — a
     // route declared in the profile still works if this cannot register.
@@ -480,6 +485,36 @@ const installModelDiscovery = (
  * @param ctx - the Cordis host context.
  * @param rawConfig - the row config, if any.
  */
+/**
+ * Whether this plane holds a credential the gateway would accept.
+ *
+ * Deliberately synchronous and deliberately generous: a declared env key, a key
+ * captured from a live request, or an org written by a completed login. The
+ * SQLite store is not consulted because it is opt-in and off by default, and
+ * calling a deployment "keyless" when it does hold a credential would hide models
+ * it can actually use.
+ *
+ * @param plane - the gateway plane.
+ * @returns whether any credential is known for it.
+ */
+const hasPlaneCredential = (plane: string): boolean => {
+  const declared =
+    plane === "opencode-go"
+      ? process.env.OPENCODE_GO_API_KEY
+      : process.env.OPENCODE_API_KEY;
+  if (
+    typeof declared === "string" &&
+    declared.length > 0 &&
+    !isPlaceholderApiKey(declared)
+  ) {
+    return true;
+  }
+  if (getCapturedApiKey(plane) !== undefined) {
+    return true;
+  }
+  return orgFor(plane) !== undefined;
+};
+
 /**
  * Mount the login service, so a settings card has something to call.
  *

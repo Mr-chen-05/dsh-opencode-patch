@@ -22,6 +22,7 @@ import { isRecord } from "./guards.ts";
 import {
   getLiveGoCatalog,
   catalogPlaneForRoute,
+  type CatalogPlane,
   findModelSpecOn,
   getLiveZenCatalog,
   isDeprecatedModelOn,
@@ -355,9 +356,44 @@ export const isServableModel = (
  * @returns the disposer restoring the original methods, or `undefined` when
  *   there is nothing to patch.
  */
+/**
+ * What the listing patch needs from its caller beyond the configuration.
+ */
+export interface ListingOptions {
+  /**
+   * Whether this plane has a credential the gateway would accept.
+   *
+   * Absent means "do not ask": a caller that cannot tell leaves the list exactly
+   * as the deployment declared it. Only a definite `false` narrows anything.
+   */
+  readonly hasCredential?: (plane: string) => boolean | Promise<boolean>;
+}
+
+/** The two routes this plugin owns; a deployment's own relay is not one. */
+const isPlaneRoute = (provider: string): boolean =>
+  provider === "opencode" || provider === "opencode-go";
+
+/**
+ * Whether the catalog prices this model above zero, on its own plane.
+ *
+ * The official client's keyless rule is exactly this test
+ * (`packages/opencode/src/provider/provider.ts:231-237`: delete every model whose
+ * `cost.input` is not 0 when no credential is present), so a keyless deployment
+ * is offered the free ids and nothing it cannot pay for.
+ *
+ * @param plane - the catalog plane the route belongs to.
+ * @param id - the model id.
+ * @returns whether the model costs anything to call.
+ */
+const costsMoney = (plane: CatalogPlane, id: string): boolean => {
+  const cost = findModelSpecOn(plane, id)?.cost;
+  return cost !== undefined && cost.input > 0;
+};
+
 export const hideResponsesRoute = (
   ctx: CordisContext,
-  config: ResolvedPluginConfig
+  config: ResolvedPluginConfig,
+  options: ListingOptions = {}
 ): (() => void) | undefined => {
   const { llm } = ctx;
   if (llm === undefined) {
@@ -421,13 +457,33 @@ export const hideResponsesRoute = (
         return [];
       }
       const models = await Reflect.apply(originalListModels, this, [provider]);
-      return Array.isArray(models)
-        ? models.filter(
-            (model) =>
-              !isRecord(model) ||
-              isServableModel(model.id, provider, config.hiddenModels)
-          )
-        : models;
+      if (!Array.isArray(models)) {
+        return models;
+      }
+      const servable = models.filter(
+        (model) =>
+          !isRecord(model) ||
+          isServableModel(model.id, provider, config.hiddenModels)
+      );
+      // **Keyless deployments are offered only what they can actually call.**
+      // The official client deletes every model whose price is non-zero when no
+      // credential is present; without this the picker offers paid rows that
+      // answer 401 with nothing in the row to explain it.
+      if (options.hasCredential === undefined || !isPlaneRoute(provider)) {
+        return servable;
+      }
+      const keyed = await options.hasCredential(provider);
+      if (keyed) {
+        return servable;
+      }
+      const plane = catalogPlaneForRoute(provider);
+      return servable.filter((model) => {
+        if (!isRecord(model)) {
+          return true;
+        }
+        const { id } = model;
+        return typeof id !== "string" || !costsMoney(plane, id);
+      });
     };
   }
 
