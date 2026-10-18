@@ -25,7 +25,7 @@
  */
 
 import type { CatalogModelSpec } from "./catalog-data.ts";
-import { OPENCODE_PLANE_API } from "./catalog-data.ts";
+import { OPENCODE_FAMILY_API, OPENCODE_PLANE_API } from "./catalog-data.ts";
 import type { EndpointFamily } from "./config-values.ts";
 import {
   ANTHROPIC_SDK,
@@ -124,7 +124,7 @@ const FAMILY_OF_PROTOCOL: Readonly<Record<string, WireFamily>> = {
 };
 
 /**
- * The inference family's base, per plane and per wire family.
+ * The inference family's base, per plane and per wire family — the FALLBACK.
  *
  * **Measured from the vendor's own `GET /console/api/config`, not derived.** The
  * gateway does not serve one base per plane with the protocol appended: each
@@ -141,6 +141,42 @@ const FAMILY_OF_PROTOCOL: Readonly<Record<string, WireFamily>> = {
  * The legacy (`…/zen/v1`) family genuinely IS one base for every protocol, which
  * is why it keeps the old derivation.
  */
+/**
+ * The SDK package each wire family is named by in the catalog.
+ *
+ * `""` is the provider default — the completions family names no package at all,
+ * so it is looked up under the empty key first and under `@ai-sdk/openai` (the
+ * same endpoint, declared for the Responses models) second.
+ */
+const FAMILY_PACKAGES: Readonly<Record<WireFamily, readonly string[]>> = {
+  anthropic: ["@ai-sdk/anthropic"],
+  google: ["@ai-sdk/google"],
+  openai: ["", "@ai-sdk/openai"],
+};
+
+/**
+ * A family's endpoint as the CATALOG declares it, or `undefined` when the
+ * generated map does not name that package yet.
+ *
+ * @param plane - the gateway plane.
+ * @param family - the wire family.
+ * @returns the declared endpoint, when there is one.
+ */
+const declaredFamilyBase = (
+  plane: Plane,
+  family: WireFamily
+): string | undefined => {
+  // The generated map is keyed by the catalog's plane names, not the route names.
+  const declared = OPENCODE_FAMILY_API[plane === "opencode-go" ? "go" : "zen"];
+  for (const pkg of FAMILY_PACKAGES[family]) {
+    const api = declared[pkg];
+    if (typeof api === "string" && api.length > 0) {
+      return api;
+    }
+  }
+  return undefined;
+};
+
 const INFERENCE_BASE: Readonly<
   Record<Plane, Readonly<Record<WireFamily, string>>>
 > = {
@@ -191,10 +227,13 @@ function withPlaneBase(
 ): Readonly<Record<string, string>> {
   const out: Record<string, string> = {};
   for (const [protocol, suffix] of Object.entries(PROTOCOL_SUFFIX)) {
+    const wire = FAMILY_OF_PROTOCOL[protocol] ?? "openai";
     const base =
       family === "legacy"
         ? planeBaseFor(plane, "legacy")
-        : INFERENCE_BASE[plane][FAMILY_OF_PROTOCOL[protocol] ?? "openai"];
+        : // The catalog's own field, with the measured table as the fallback for a
+          // shim generated before the map existed.
+          (declaredFamilyBase(plane, wire) ?? INFERENCE_BASE[plane][wire]);
     out[protocol] =
       suffix === null ? base.replace(/\/v1$/, "") : `${base}${suffix}`;
   }

@@ -11,6 +11,7 @@ import { readFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { OPENCODE_FAMILY_API } from "../src/catalog-data.ts";
 import {
   OPENCODE_GO_CATALOG,
   OPENCODE_ZEN_CATALOG,
@@ -470,9 +471,30 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(headerOf(capture.init, SESSION_HEADER)).toMatch(SESSION_RE);
   });
 
+  it("declares a distinct endpoint per wire family, per plane", () => {
+    // The mount reads its base from this map, so the INVARIANT it depends on is
+    // that the families are not one address: anthropic and google are served at
+    // their own paths. Asserting the shape rather than the literals keeps a
+    // vendor move a regeneration instead of a test edit.
+    for (const plane of ["zen", "go"] as const) {
+      const map = OPENCODE_FAMILY_API[plane];
+      expect(map[""], plane).toBeTruthy();
+      expect(map["@ai-sdk/anthropic"], plane).toBeTruthy();
+      expect(map["@ai-sdk/google"], plane).toBeTruthy();
+      expect(map["@ai-sdk/anthropic"], plane).not.toBe(map[""]);
+      expect(map["@ai-sdk/google"], plane).not.toBe(map[""]);
+    }
+  });
+
   it("parseModelsDevCatalog handles malformed data gracefully", () => {
-    // `api` is carried alongside the arrays and is empty when nothing declares it.
-    const empty = { api: { go: "", zen: "" }, go: [], zen: [] };
+    // `api` and `familyApi` are carried alongside the arrays and are empty when
+    // nothing declares them — not `undefined`, so callers never guard two shapes.
+    const empty = {
+      api: { go: "", zen: "" },
+      familyApi: { go: {}, zen: {} },
+      go: [],
+      zen: [],
+    };
     expect(parseModelsDevCatalog(null)).toEqual(empty);
     expect(parseModelsDevCatalog({})).toEqual(empty);
     expect(parseModelsDevCatalog({ "opencode-go": {} })).toEqual(empty);

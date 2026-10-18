@@ -174,13 +174,57 @@ export interface ParsedCatalogs {
    * (`packages/core/src/models-dev.ts:107`, `settings: { baseURL: item.api }`).
    */
   api: { go: string; zen: string };
+  /**
+   * The endpoint each WIRE FAMILY declares, per plane, keyed by the SDK package
+   * the catalog names for it (`""` for the provider default).
+   *
+   * The provider-level `api` above is not the whole story: the vendor serves
+   * anthropic and google at their own paths, and declares that per model. Read
+   * from the same data rather than restated in code, so a vendor move is a shim
+   * regeneration and not a source change.
+   */
+  familyApi: { go: FamilyApi; zen: FamilyApi };
   go: CatalogModelSpec[];
   zen: CatalogModelSpec[];
 }
 
+/** One plane's endpoint per SDK package (`""` = the provider's own default). */
+export type FamilyApi = Readonly<Record<string, string>>;
+
 /** The endpoint a provider entry declares, or `""` when it declares none. */
 const providerApiFor = (entry: unknown): string =>
   isRecord(entry) && typeof entry.api === "string" ? entry.api : "";
+
+/**
+ * Each wire family's endpoint, keyed by the SDK package that names it.
+ *
+ * A model's own `provider.api` wins; otherwise it inherits the provider's. The
+ * first value seen for a package is kept — the vendor declares one endpoint per
+ * family, and a second value would mean the assumption is wrong rather than that
+ * the first should be replaced.
+ *
+ * @param entry - one provider entry from the catalog.
+ * @returns the family map, empty when the entry carries no models.
+ */
+const familyApiFor = (entry: unknown): FamilyApi => {
+  const out: Record<string, string> = {};
+  if (!isRecord(entry) || !isRecord(entry.models)) {
+    return out;
+  }
+  const providerApi = providerApiFor(entry);
+  for (const rawModel of Object.values(entry.models)) {
+    if (!isRecord(rawModel)) {
+      continue;
+    }
+    const provider = isRecord(rawModel.provider) ? rawModel.provider : {};
+    const npm = typeof provider.npm === "string" ? provider.npm : "";
+    const api = typeof provider.api === "string" ? provider.api : providerApi;
+    if (api.length > 0 && out[npm] === undefined) {
+      out[npm] = api;
+    }
+  }
+  return out;
+};
 
 /**
  * The thinking options a model declares, with unknown shapes dropped.
@@ -379,7 +423,12 @@ export const findModelSpec = (modelId: string): CatalogModelSpec | undefined =>
  */
 export const parseModelsDevCatalog = (data: unknown): ParsedCatalogs => {
   if (!isRecord(data)) {
-    return { api: { go: "", zen: "" }, go: [], zen: [] };
+    return {
+      api: { go: "", zen: "" },
+      familyApi: { go: {}, zen: {} },
+      go: [],
+      zen: [],
+    };
   }
   const goObj =
     isRecord(data["opencode-go"]) && isRecord(data["opencode-go"].models)
@@ -396,6 +445,10 @@ export const parseModelsDevCatalog = (data: unknown): ParsedCatalogs => {
     api: {
       go: providerApiFor(data["opencode-go"]),
       zen: providerApiFor(data.opencode),
+    },
+    familyApi: {
+      go: familyApiFor(data["opencode-go"]),
+      zen: familyApiFor(data.opencode),
     },
     go: extractSpecs(goObj, 1_000_000, deprecatedGoIds),
     zen: extractSpecs(zenObj, 1_000_000, deprecatedZenIds),

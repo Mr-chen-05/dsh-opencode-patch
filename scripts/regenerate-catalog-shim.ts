@@ -161,11 +161,27 @@ const renderPlaneApi = (
   zen: ${JSON.stringify(parsed.api.zen)},
 }`;
 
+/**
+ * The endpoint each wire family declares, per plane, keyed by its SDK package.
+ *
+ * The provider-level `api` is only the default family's address: anthropic and
+ * google are served at their own paths and the catalog records that per model.
+ * Emitting it keeps the mount reading DATA, so a vendor move is a regeneration.
+ */
+const renderFamilyApi = (
+  parsed: ReturnType<typeof parseModelsDevCatalog>
+): string =>
+  `{
+  go: ${JSON.stringify(parsed.familyApi.go)},
+  zen: ${JSON.stringify(parsed.familyApi.zen)},
+}`;
+
 const payload = await readPayload();
 const parsed = parseModelsDevCatalog(JSON.parse(payload));
 const go = forProvider(parsed, "go");
 const zen = forProvider(parsed, "zen");
 const planeApi = renderPlaneApi(parsed);
+const familyApi = renderFamilyApi(parsed);
 
 /** What the shim holds now, for the report. */
 const report = (
@@ -231,5 +247,6 @@ let source = readFileSync(TARGET, "utf8");
 source = splice(source, "OPENCODE_GO_CATALOG", render(go));
 source = splice(source, "OPENCODE_ZEN_CATALOG", render(zen));
 source = spliceObject(source, "OPENCODE_PLANE_API", planeApi);
+source = spliceObject(source, "OPENCODE_FAMILY_API", familyApi);
 writeFileSync(TARGET, source);
 console.log(`\nwrote ${basename(TARGET.pathname)}`);
