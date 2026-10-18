@@ -849,7 +849,18 @@ const declaredModelsFor = async (
         ids.add(id);
       }
     }
-    return ids;
+    // **An empty list is not a declaration.** The host answers `[]` whenever the
+    // route's credential cannot be resolved (`dsh-llm-pi-ai/lib/index.js:1894`
+    // returns `[]` on MISSING_CREDENTIAL) — which is exactly the keyless
+    // deployment this plugin supports for free models. Reading that as "the user
+    // declared nothing" would mount no internal route at all and break the
+    // protocol split for a deployment that only lacks a key.
+    //
+    // A genuinely empty declaration is indistinguishable from this, and the two
+    // errors do not cost the same: mounting with the catalog is harmless because
+    // the mounted routes are hidden from every listing, while mounting nothing
+    // breaks dispatch.
+    return ids.size > 0 ? ids : undefined;
   } catch {
     return undefined;
   }
@@ -923,6 +934,14 @@ export const registerResponsesProvider = async (
     const ids = await declaredModelsFor(ctx, plane);
     if (ids !== undefined) {
       declaredByPlane.set(plane, ids);
+    }
+  }
+  for (const plane of ["opencode", "opencode-go"]) {
+    if (!declaredByPlane.has(plane)) {
+      console.info(
+        `[dsh-opencode-patch] ${plane}: the declared models could not be read ` +
+          "(no resolvable credential yet) — internal routes keep the catalog"
+      );
     }
   }
   const undescribed = undescribedDeclaredModels(declaredByPlane);

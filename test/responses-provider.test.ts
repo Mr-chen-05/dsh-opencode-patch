@@ -1678,3 +1678,40 @@ describe("responses-provider · declared models the catalog cannot describe", ()
     ).toEqual([]);
   });
 });
+
+describe("responses-provider · an unreadable declaration is not an empty one", () => {
+  it("keeps the route when the host answers [] because no key resolved", async () => {
+    // `dsh-llm-pi-ai` answers `[]` from `listModels` when the route's credential
+    // cannot be resolved (`lib/index.js:1894`), which is the keyless deployment
+    // this plugin supports for free models. Reading that as "declared nothing"
+    // mounts no internal route and breaks the protocol split for a deployment that
+    // merely lacks a key.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const registered: string[] = [];
+    const ctx = {
+      isolate: () => ({}),
+      llm: {
+        listModels: async () => [],
+        listProviders: () => [],
+        registerAdapter: (providers: readonly string[]) => {
+          registered.push(...providers);
+          return () => {};
+        },
+      },
+      loader: { entries: () => [] },
+    } as unknown as CordisContext;
+    try {
+      await registerResponsesProvider(ctx);
+      // Nothing could be narrowed, so the mount is not narrowed either: the
+      // routes exist and are hidden from every listing, which is what keeps them
+      // out of a picker.
+      expect(
+        info.mock.calls.some((call) =>
+          String(call[0]).includes("declared models could not be read")
+        )
+      ).toBe(true);
+    } finally {
+      info.mockRestore();
+    }
+  });
+});
