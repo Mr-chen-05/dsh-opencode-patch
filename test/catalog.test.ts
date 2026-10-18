@@ -1148,3 +1148,45 @@ describe("routing · the plane half of the decision", () => {
     expect(internalRouteFor("opencode-go", "grok-4.7")).toBeUndefined();
   });
 });
+
+/**
+ * The default format, which is the only thing the original route has to decide.
+ *
+ * A model that speaks the route's own protocol has no SDK of its own — the route's
+ * `api` IS its protocol — so the call stays where the user configured it. That is
+ * the whole of "handling the original opencode default format": there is nothing to
+ * redirect, and nothing to hide. Everything the plugin adds lives around this case,
+ * not in it.
+ */
+describe("routing · the default format stays where it is", () => {
+  it("never redirects a model with no SDK of its own", () => {
+    // `big-pickle` carries no `provider.npm`: completions is the default, and the
+    // declared route already speaks it.
+    expect(internalRouteFor("opencode", "big-pickle")).toBeUndefined();
+    expect(internalRouteFor("opencode-go", "big-pickle")).toBeUndefined();
+  });
+
+  it("redirects an id-only family the catalog does not describe", () => {
+    // A model nobody catalogued still cannot be sent as a chat completion when its
+    // family fixes the protocol by name — the measured behaviour, not a guess.
+    expect(internalRouteFor("opencode", "claude-unlisted-9")).toBe(
+      "opencode-anthropic"
+    );
+    expect(internalRouteFor("opencode", "gemini-unlisted-9")).toBe(
+      "opencode-google"
+    );
+  });
+
+  it("leaves the route alone when the declared protocol is its own", () => {
+    // The `modelRoutes` override reaches the decision, and a declaration equal to
+    // the route's protocol means no move at all.
+    expect(
+      internalRouteFor(
+        "opencode",
+        "some-model",
+        "@ai-sdk/anthropic",
+        "openai-completions"
+      )
+    ).toBeUndefined();
+  });
+});
