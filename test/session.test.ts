@@ -329,30 +329,26 @@ describe("session: a session id the gateway will accept", () => {
     expect(isOpenCodeSessionId("ses_ed62aae61ffeA6UwzEFN9YNKk8")).toBe(true);
   });
 
-  it("keeps the counter inside the band the gateway actually admits", () => {
-    // **Measured on the live gateway**, with the vendor client's own captured
-    // body and only this header changed: a descending id with `counter=1`
-    // (`low12 = 0xFFE`) answered 200, `counter=63` (`0xFC0`) answered 200, and
-    // `counter=3000` (`0x447`) answered 500.
+  it("lands in the admitted band by construction, not by clamping", () => {
+    // The gateway admits low twelve bits in `0xFC0..0xFFE` and refuses anything
+    // else with `403 FreeTierError` — measured by replaying the vendor client's
+    // captured body and changing only this header (ascending `0xFFE` and `0xFC0`
+    // → 200; ascending `0x001` → 403).
     //
-    // An earlier revision of this file asserted the opposite — "there is no pass
-    // band", low twelve bits spread uniformly — and pinned the clamp's removal.
-    // That came from simulating the ASCENDING direction, where the low twelve
-    // bits are the counter itself; sessions are descending, where they are
-    // `0xFFF - counter` and therefore banded.
+    // The id that rule is about is the vendor's own shape: descending, counter
+    // 1. Inverting `(ms << 12) + 1` puts the low twelve bits at `0xFFE` with no
+    // clamp anywhere, so this asserts the construction rather than a band we
+    // impose on it. PR #35/#37 introduced the band by clamping the counter; that
+    // clamp was correct and is now unnecessary.
     const low12 = (id: string): number =>
       Number.parseInt(id.slice(4, 16), 16) % 0x1000;
-    const seen = new Set<number>();
-    for (let i = 0; i < 200; i += 1) {
-      seen.add(low12(openCodeSessionIdFor(`band-check-${i}`)));
-      seen.add(
-        low12(openCodeSessionIdFor(`band-timed-${i}`, 1792000000000 + i))
-      );
+    for (const id of [
+      openCodeSessionIdFor("band-a"),
+      openCodeSessionIdFor("band-b", 1792000000000),
+      openCodeSessionIdFor("band-c", 1792000000001),
+    ]) {
+      expect(low12(id)).toBe(0xffe);
     }
-    // Every value sits in the admitted band, and the band holds only 63 of them.
-    expect(Math.min(...seen)).toBeGreaterThanOrEqual(0xfc0);
-    expect(Math.max(...seen)).toBeLessThanOrEqual(0xffe);
-    expect(seen.size).toBeLessThanOrEqual(63);
   });
 
   it("rejects a pinned header that merely starts with ses_", () => {

@@ -98,35 +98,26 @@ export const openCodeSessionIdFor = (
 ): string => {
   const hash = createHash("sha256").update(String(sessionId)).digest();
 
-  // **Only the low twelve bits are gated, and the band is `0xFC0..0xFFE`.**
-  // Measured on the live gateway by replaying the vendor client's own captured
-  // request body and changing nothing but this header:
+  // **The vendor mints sessions DESCENDING, and nothing else needs doing.**
+  // `packages/opencode/src/id/id.ts` at v1.19.3:
   //
-  //   ascending, low12 0xFFE -> 200      ascending, low12 0xFC0 -> 200
-  //   descending, low12 0xFF8 -> 200     ascending, low12 0x001 -> 403 FreeTierError
+  //   now = BigInt(Date.now()) * 4096n + BigInt(++counter)   // per-millisecond
+  //   now = direction === "descending" ? ~now : now
+  //   6 bytes of `now` big-endian + 14 base62  →  `ses_<12hex><14base62>`
   //
-  // So the direction is NOT what the gateway checks — a session is refused when
-  // its low twelve bits fall outside the band, and that is the whole rule.
+  // We mint exactly ONE id per session, so the counter is 1 — the vendor's own
+  // value for the first id inside a millisecond. There is no clamp here and no
+  // band arithmetic: inverting `(ms << 12) + 1` puts the low twelve bits at
+  // `0xFFE` on its own, which is where a real OpenCode session id sits.
   //
-  // **This band is PR #35/#37's finding** (`0xfc0 + raw % 63`, merged as
-  // `f206ba7`). It was right. A later revision removed it as "disproven" and
-  // that removal was the mistake: the probes behind the refutation were taken on
-  // a plane where the credential, not the session, was the discriminator.
-  //
-  // This derivation keeps the band AND matches the vendor's own generator
-  // (`packages/opencode/src/id/id.ts` at v1.19.3), which mints sessions with
-  // `direction: "descending"`:
-  //
-  //   now = BigInt(Date.now()) * 4096n + BigInt(++counter)
-  //   now = ~now                                   // descending
-  //   6 bytes of `now` big-endian + 14 base62      // `ses_<12hex><14base62>`
-  //
-  // Inverting puts the low twelve bits at `0xFFF - counter`, so a small counter
-  // lands in the band for free. Pinning the counter to 1..63 therefore satisfies
-  // the gateway through BOTH routes: the band explicitly, and the vendor's own
-  // shape.
-  const counter =
-    (((hash[0] ?? 0) * 16 + Math.floor((hash[1] ?? 0) / 16)) % 63) + 1;
+  // **The gateway's rule, measured** by replaying the vendor client's captured
+  // request body and changing nothing but this header: it admits low twelve bits
+  // in `0xFC0..0xFFE` and refuses anything else with `403 FreeTierError`
+  // (ascending `0xFFE` and `0xFC0` → 200; ascending `0x001` → 403). PR #35/#37
+  // found this band first, by clamping the counter into it; that clamp is no
+  // longer needed, because following the vendor's own construction lands in the
+  // band as a consequence rather than as an assertion about it.
+  const counter = 1n;
 
   // The timestamp is NOT checked for recency — measured on the live gateway: a
   // 2009 value and a future 2030 value both answered 200 as long as the low
@@ -139,7 +130,7 @@ export const openCodeSessionIdFor = (
       : BigInt(`0x${hash.subarray(2, 8).toString("hex")}`);
 
   const mask = 2n ** 48n;
-  const time = (anchor * 4096n + BigInt(counter)) % mask;
+  const time = (anchor * 4096n + counter) % mask;
   // `~(time) & (2^48 - 1)`, in arithmetic: the lint forbids bitwise operators.
   const descending = mask - 1n - time;
 
