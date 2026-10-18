@@ -335,14 +335,12 @@ describe("OpenCode Model Catalog & Enrichment", () => {
       object: string;
     };
     expect(json.object).toBe("list");
-    // **Only the rows the gateway answered with.** The listing used to be seeded
-    // with the whole bundled catalog, which is how a deployment that had declared
-    // four models saw every model the vendor publishes. Enrichment adds metadata
-    // to a row; it does not add rows.
-    expect(json.data.map((row) => row.id).toSorted()).toEqual([
-      "custom-gateway-model",
-      "deepseek-v4.1-flash",
-    ]);
+    // **The catalog surface seeds, and that is correct here.** `discoverModels`
+    // returns its installed catalog for a provider pi ships and only fetches an
+    // endpoint for one it does not, so this listing is what the endpoint offers —
+    // the surface a user browses, not the list a picker shows. The picker's own
+    // path (`mergeDiscoveredModels`) still never widens.
+    expect(json.data.length).toBe(OPENCODE_GO_CATALOG.length + 1);
 
     const deepseek = json.data.find((m) => m.id === "deepseek-v4.1-flash");
     expect(deepseek).toBeDefined();
@@ -353,31 +351,20 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(custom).toBeDefined();
     expect(custom?.id).toBe("custom-gateway-model");
 
-    // An empty answer stays empty: it is the gateway's list, not an invitation to
-    // supply the catalog's.
-    const emptyResponse = await enrichModelsResponse(
+    // An empty answer is answered with the catalog that endpoint stands for: the
+    // vendor's own listing is narrower than its catalog, and this is the surface
+    // that says what exists.
+    const zenResponse = await enrichModelsResponse(
       "https://opencode.ai/zen/v1/models",
       Response.json({ data: [], object: "list" })
     );
-    const emptyJson = (await emptyResponse.json()) as {
+    const zenJson = (await zenResponse.json()) as {
       data: Array<{ id: string }>;
     };
-    expect(emptyJson.data).toEqual([]);
-
-    // And a row the gateway DOES return is enriched from the catalog.
-    const zenResponse = await enrichModelsResponse(
-      "https://opencode.ai/zen/v1/models",
-      Response.json({
-        data: [{ id: "muse-spark-1.2-contributor-free", object: "model" }],
-        object: "list",
-      })
-    );
-    const zenJson = (await zenResponse.json()) as {
-      data: Array<{ id: string; context_window?: number }>;
-    };
-    expect(zenJson.data.map((m) => m.id)).toEqual([
-      "muse-spark-1.2-contributor-free",
-    ]);
+    expect(zenJson.data.length).toBe(getLiveZenCatalog().length);
+    expect(
+      zenJson.data.some((m) => m.id === "muse-spark-1.2-contributor-free")
+    ).toBe(true);
   });
 
   it("keeps the Muse 1.2 rows the zen plane actually serves", async () => {
@@ -442,10 +429,11 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const json = (await res.json()) as {
       data: Array<{ id: string; name?: string; context_window?: number }>;
     };
-    // The gateway's one row, enriched — not the catalog appended to it.
-    expect(json.data.map((row) => row.id)).toEqual(["deepseek-v4.1-flash"]);
-    expect(json.data[0]?.name).toBe("DeepSeek V4.1 Flash");
-    expect(json.data[0]?.context_window).toBe(1_000_000);
+    // The catalog, with the gateway's one row enriched inside it.
+    expect(json.data.length).toBeGreaterThanOrEqual(OPENCODE_GO_CATALOG.length);
+    const row = json.data.find((m) => m.id === "deepseek-v4.1-flash");
+    expect(row?.name).toBe("DeepSeek V4.1 Flash");
+    expect(row?.context_window).toBe(1_000_000);
   });
 
   it("leaves the raw gateway listing alone when enrichModels is off", async () => {

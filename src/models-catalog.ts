@@ -668,11 +668,30 @@ export const enrichModelsResponse = async (
   const catalogById = new Map(catalog.map((m) => [m.id, m]));
   const merged = new Map<string, Record<string, unknown>>();
 
-  // **Enrichment only: the rows the gateway returned, and nothing else.** The
-  // seed that used to sit here appended the whole bundled catalog to every
-  // listing, so a deployment that had declared four models was answered with
-  // eighty-six. The gateway's own answer is the list; this function's job is to
-  // give each row the metadata DSH needs.
+  // **This is the CATALOG surface, so it is the one place that seeds.**
+  // `discoverModels` in `dsh-llm-pi-ai` returns its installed catalog for a
+  // provider it ships and only fetches an endpoint for one it does not — so a
+  // `/models` answer is "what this endpoint offers", the list a user browses, not
+  // the list a picker shows. Widening is right here and wrong anywhere that
+  // decides what a deployment may pick.
+  //
+  // The seed also covers the ordinary case of a gateway answering with a subset:
+  // the vendor's own listing is narrower than its catalog.
+  for (const spec of catalog) {
+    const input_modalities = sanitizeModalities(spec.input_modalities);
+    merged.set(spec.id, {
+      context_window: spec.context_window,
+      created: 1_727_740_800,
+      id: spec.id,
+      input: input_modalities,
+      input_modalities,
+      inputModalities: input_modalities,
+      max_output_tokens: spec.max_output_tokens,
+      name: spec.name,
+      object: "model",
+      owned_by: "opencode",
+    });
+  }
   for (const item of existingData) {
     const id = typeof item.id === "string" ? item.id : "";
     if (id.length === 0 || isRetiredModel(isGo ? "go" : "zen", id)) {
@@ -710,12 +729,6 @@ export const enrichModelsResponse = async (
       owned_by: item.owned_by ?? "opencode",
     };
     merged.set(id, enriched);
-  }
-
-  // Nothing to enrich — an empty or unparseable answer is the gateway's, not an
-  // invitation to supply one.
-  if (merged.size === 0) {
-    return response;
   }
 
   const enrichedPayload = {
