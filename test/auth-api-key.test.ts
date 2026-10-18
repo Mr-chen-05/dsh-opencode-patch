@@ -93,6 +93,7 @@ describe("API Key Authentication", () => {
   it("authenticates Anthropic Messages with x-api-key ALONE", async () => {
     const result = await runner.execute("opencode", "/zen/v1/messages", {
       body: {
+        max_tokens: 64,
         messages: [{ content: "hi", role: "user" }],
         model: "claude-sonnet-4-6",
         stream: true,

@@ -91,11 +91,12 @@ const responsesBody = (model: string): Record<string, unknown> => ({
 const post = (
   patched: typeof fetch,
   url: string,
-  body: unknown
+  body: unknown,
+  extraHeaders: Record<string, string> = {}
 ): Promise<Response> =>
   patched(url, {
     body: JSON.stringify(body),
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...extraHeaders },
     method: "POST",
   });
 
@@ -257,7 +258,11 @@ describe("the request shape per configuration", () => {
           messages: [{ content: "hi", role: "user" }],
           model: spec.id,
           stream: true,
-        }
+        },
+        // The Anthropic protocol identifies itself by version, and the request
+        // this test stands in for is one the SDK adapter produced — so it carries
+        // the header the adapter adds. The mock enforces it.
+        { "anthropic-version": "2023-06-01" }
       )
     );
     expect(response.status).toBe(200);
@@ -401,8 +406,10 @@ describe("the request shape per configuration", () => {
  * session-id bug years earlier: our ids were syntactically valid and the gateway
  * refused them, which nothing in this suite modelled until now.
  */
+const IN_BAND_SESSION = "ses_eb1e9e706ffeCDEFGHIJKLMNOP";
+
 describe("the gateway's rules, as measured", () => {
-  const IN_BAND = "ses_eb1e9e706ffeCDEFGHIJKLMNOP";
+  const IN_BAND = IN_BAND_SESSION;
   const OUT_OF_BAND = "ses_0123456789abCDEFGHIJKLMNOP";
   const TOOLS = [
     {
@@ -455,5 +462,99 @@ describe("the gateway's rules, as measured", () => {
       error: { type: string };
     };
     expect(payload.error.type).toBe("FreeTierError");
+  });
+});
+
+describe("each protocol's own contract, asserted against the mock", () => {
+  const ZEN_ANTHROPIC_PATH = "/zen/v1/messages?beta=true";
+  const spec = firstSpecFor("opencode", "@ai-sdk/anthropic");
+  const googleSpec = firstSpecFor("opencode", "@ai-sdk/google");
+
+  const raw = (
+    path: string,
+    body: Record<string, unknown>,
+    headers: Record<string, string>
+  ): Promise<Response> =>
+    fetch(`${gateway.origin}${path}`, {
+      body: JSON.stringify(body),
+      headers: {
+        "content-type": "application/json",
+        "x-opencode-session": IN_BAND_SESSION,
+        "x-opencode-session-id": IN_BAND_SESSION,
+        ...headers,
+      },
+      method: "POST",
+    });
+
+  it("requires anthropic-version on a Messages call", async () => {
+    if (spec === undefined) {
+      throw new Error("the zen catalog serves no anthropic model");
+    }
+    const response = await raw(
+      ZEN_ANTHROPIC_PATH,
+      {
+        max_tokens: 64,
+        messages: [{ content: "hi", role: "user" }],
+        model: spec.id,
+        stream: true,
+      },
+      { "x-api-key": ZEN_KEY }
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("requires the Messages auth header to be x-api-key, not Authorization", async () => {
+    if (spec === undefined) {
+      throw new Error("the zen catalog serves no anthropic model");
+    }
+    // The official client sends `x-api-key` and no `Authorization`
+    // (`provider/provider.ts:240`); a Bearer-only request has no credential on the
+    // header this protocol reads.
+    const response = await raw(
+      ZEN_ANTHROPIC_PATH,
+      {
+        max_tokens: 64,
+        messages: [{ content: "hi", role: "user" }],
+        model: spec.id,
+        stream: true,
+      },
+      {
+        "anthropic-version": "2023-06-01",
+        authorization: `Bearer ${ZEN_KEY}`,
+      }
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("requires Anthropic-shaped bodies: max_tokens and messages", async () => {
+    if (spec === undefined) {
+      throw new Error("the zen catalog serves no anthropic model");
+    }
+    const response = await raw(
+      ZEN_ANTHROPIC_PATH,
+      { model: spec.id, stream: true },
+      { "anthropic-version": "2023-06-01", "x-api-key": ZEN_KEY }
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("requires x-goog-api-key and a contents array on a Google call", async () => {
+    if (googleSpec === undefined) {
+      throw new Error("the zen catalog serves no Google model");
+    }
+    const path = `/zen/v1/models/${googleSpec.id}:streamGenerateContent?alt=sse`;
+    const withoutKey = await raw(
+      path,
+      { contents: [{ parts: [{ text: "hi" }], role: "user" }] },
+      { authorization: `Bearer ${ZEN_KEY}` }
+    );
+    expect(withoutKey.status).toBe(401);
+
+    const withoutContents = await raw(
+      path,
+      { messages: [{ content: "hi", role: "user" }] },
+      { "x-goog-api-key": ZEN_KEY }
+    );
+    expect(withoutContents.status).toBe(400);
   });
 });

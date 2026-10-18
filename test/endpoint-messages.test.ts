@@ -61,6 +61,7 @@ describe("Anthropic Messages Endpoint (/messages)", () => {
   it("delivers streaming SSE response with content_block_delta events", async () => {
     const result = await runner.execute("opencode", "/zen/v1/messages", {
       body: {
+        max_tokens: 64,
         messages: [{ content: "hi", role: "user" }],
         model: "claude-sonnet-4-6",
         stream: true,
@@ -86,6 +87,7 @@ describe("Anthropic Messages Endpoint (/messages)", () => {
   it("delivers unary application/json response when stream is false", async () => {
     const result = await runner.execute("opencode", "/zen/v1/messages", {
       body: {
+        max_tokens: 64,
         messages: [{ content: "hi", role: "user" }],
         model: "claude-sonnet-4-6",
         stream: false,
@@ -106,6 +108,7 @@ describe("Anthropic Messages Endpoint (/messages)", () => {
   it("refuses models not served by anthropic-messages with 400 ModelProtocolUnsupported", async () => {
     const result = await runner.execute("opencode", "/zen/v1/messages", {
       body: {
+        max_tokens: 64,
         messages: [{ content: "hi", role: "user" }],
         model: "gpt-5.4",
         stream: true,

@@ -697,6 +697,48 @@ export const handleGatewayRequest = (
     );
   }
 
+  // **Each protocol has its own contract, and the mock enforces it.** The auth
+  // headers are already required above (`x-api-key` for Messages, `x-goog-api-key`
+  // for Google); these are the rest of each wire format:
+  //
+  // - Anthropic identifies itself by version on every call — the official client's
+  //   `@ai-sdk/anthropic` sends `anthropic-version: 2023-06-01`, and the vendor's
+  //   own API answers a request without it as a client error;
+  // - Anthropic bodies carry `max_tokens` and `messages` (the system prompt is a
+  //   separate field, not a message role);
+  // - Gemini bodies are `contents[].parts[]`, not `messages`.
+  const requestBody = isRecord(record.body) ? record.body : {};
+  if (endpoint.kind === "messages") {
+    const version = headers["anthropic-version"];
+    if (typeof version !== "string" || version.length === 0) {
+      return refuse(
+        400,
+        "anthropic-version: header is required",
+        "invalid_request",
+        "anthropic_version"
+      );
+    }
+    if (
+      !Array.isArray(requestBody.messages) ||
+      typeof requestBody.max_tokens !== "number"
+    ) {
+      return refuse(
+        400,
+        "max_tokens and messages are required",
+        "invalid_request",
+        "messages_body"
+      );
+    }
+  }
+  if (endpoint.kind === "google" && !Array.isArray(requestBody.contents)) {
+    return refuse(
+      400,
+      "contents: field is required",
+      "invalid_request",
+      "contents"
+    );
+  }
+
   // **A free-tier call must carry tools.** Measured: the same body with and
   // without a `tools` array answers 200 and 403 FreeTierError respectively. It is
   // why `src/tool-fallback.ts` injects read/bash for free ids, and asserting it

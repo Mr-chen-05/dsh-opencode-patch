@@ -188,6 +188,8 @@ const readHeaderSource = (
 };
 
 /** Whether the request already carries a session header (any casing). */
+const ANTHROPIC_VERSION = "2023-06-01";
+
 export const hasSessionHeader = (
   input: RequestInfo | URL,
   init?: RequestInit
@@ -335,6 +337,16 @@ export const patchFetch = (
     let login: LoginCredential | undefined;
     const plane = gatewayPlaneFor(url);
     const wireHeader = authHeaderFor(url);
+    // **The Anthropic protocol identifies itself by version**, and nothing below
+    // this plugin sends it: `@earendil-works/pi-ai`'s anthropic adapter sets
+    // `anthropic-beta` and `anthropic-dangerous-direct-browser-access` but not
+    // `anthropic-version` (measured against the installed package), while the
+    // official client's `@ai-sdk/anthropic` sends `2023-06-01` on every call.
+    // The vendor's own API treats a Messages request without it as a client error,
+    // so the plugin supplies it rather than depending on the adapter.
+    if (wireHeader === "x-api-key" && !headers.has("anthropic-version")) {
+      headers.set("anthropic-version", ANTHROPIC_VERSION);
+    }
     const authHeader = headers.get(wireHeader);
     const wireKey = authHeader?.replace(/^Bearer\s+/iu, "").trim();
     if (
