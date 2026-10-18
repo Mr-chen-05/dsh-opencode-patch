@@ -927,7 +927,12 @@ export const registerResponsesProvider = async (
   }
   const undescribed = undescribedDeclaredModels(declaredByPlane);
   if (undescribed.length > 0) {
-    ctx.logger?.info?.(
+    // CONSOLE, not `ctx.logger`: cordis's logger only buffers (its default
+    // exporter pushes to a ring, `cordis/lib/index.js:596-607`) and no host
+    // package registers a console exporter — so a `logger.info` here reaches the
+    // inspector's buffer and nobody's terminal. A diagnostic nobody can see is
+    // not a diagnostic.
+    console.info(
       `[dsh-opencode-patch] ${undescribed.length} declared model(s) are not ` +
         `described by the catalog (newer than it, or deprecated): ` +
         `${undescribed.join(", ")} — they are served from the deployment's ` +
@@ -941,7 +946,7 @@ export const registerResponsesProvider = async (
     if (gaps.length === 0) {
       return;
     }
-    ctx.logger?.warn?.(
+    console.warn(
       `[dsh-opencode-patch] ${gaps.length} declared model(s) speak a protocol no ` +
         `route serves: ${gaps.join(", ")} — declare provider routes for them ` +
         "(see modelRoutes), or set internalRoutes: true"

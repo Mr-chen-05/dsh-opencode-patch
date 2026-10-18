@@ -276,9 +276,13 @@ const installFetchPatch = (
 
   ctx.effect?.(() => {
     globalThis.fetch = patched;
-    ctx.logger?.info?.(
-      "[dsh-opencode-patch] active for providers [%s]",
-      [...config.providers].join(", ")
+    // Console as well as the logger: the logger's default exporter only buffers,
+    // so a boot line that says "the plugin loaded" has to reach stdout to be worth
+    // anything when someone is checking whether a build was picked up.
+    console.info(
+      `[dsh-opencode-patch] active for providers [${[...config.providers].join(
+        ", "
+      )}]`
     );
     // Decorate discovery in the same effect so disabling the plugin restores
     // both the gateway fetch behavior and the Host discovery method.
