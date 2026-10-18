@@ -1,7 +1,7 @@
 {
   "name": "dsh-opencode-patch",
   "version": "1.1.1",
-  "description": "OpenCode on DeepSeek Harness — session affinity, Zen/Go gateway origin headers, free-tier tool fallback, and live Go quota display.",
+  "description": "OpenCode on DeepSeek Harness \u2014 session affinity, Zen/Go gateway origin headers, free-tier tool fallback, and live Go quota display.",
   "keywords": [
     "cordis",
     "deepseek-harness",
@@ -117,7 +117,7 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@12.6.0",
+  "packageManager": "pnpm@12.14.0",
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
