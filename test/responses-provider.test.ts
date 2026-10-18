@@ -30,6 +30,7 @@ import {
   getLiveGoCatalog,
   getLiveZenCatalog,
   inheritedCredentialRef,
+  internalRouteFor,
   loadPiAi,
   modelsForSdk,
   narrowToDeclared,
@@ -1612,5 +1613,29 @@ describe("responses-provider · the keyless and unreadable declarations", () => 
       logger: { info: () => {}, warn: () => {} },
     } as unknown as CordisContext;
     await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
+  });
+});
+
+describe("routing · a declared protocol beats the catalog's", () => {
+  it("routes by the declared protocol before the SDK's", () => {
+    // `modelRoutes` is the deployment saying it knows better than a bundled
+    // snapshot. It has to reach the redirect, not just the model object: a
+    // provider built with a route protocol dispatches on THAT protocol
+    // (`createProvider` in `dsh-llm-pi-ai` calls `input.api.stream`), so the only
+    // way to change which format is spoken is to hand the call to another route.
+    expect(
+      internalRouteFor(
+        "opencode",
+        "some-model",
+        "@ai-sdk/openai",
+        "anthropic-messages"
+      )
+    ).toBe("opencode-anthropic");
+  });
+
+  it("falls back to the SDK's protocol when nothing was declared", () => {
+    expect(
+      internalRouteFor("opencode", "claude-opus-5", "@ai-sdk/anthropic")
+    ).toBe("opencode-anthropic");
   });
 });

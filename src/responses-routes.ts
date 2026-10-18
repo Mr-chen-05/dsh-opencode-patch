@@ -225,7 +225,16 @@ export const isServableSdk = (providerNpm?: unknown): boolean =>
 export const internalRouteFor = (
   provider: unknown,
   model: unknown,
-  providerNpm?: unknown
+  providerNpm?: unknown,
+  /**
+   * The protocol to route by, overriding what `providerNpm` maps to.
+   *
+   * This is `modelRoutes`' entry point into dispatch: a deployment that knows the
+   * catalog's protocol for a model is wrong can name the right one, and the call
+   * is handed to the route that speaks it without waiting for the catalog to
+   * agree.
+   */
+  overrideProtocol?: string
 ): string | undefined => {
   if (typeof provider !== "string" || typeof model !== "string") {
     return undefined;
@@ -246,6 +255,11 @@ export const internalRouteFor = (
   const plane = ROUTE_FOR_PLANE_PROTOCOL[planeKey];
   if (plane === undefined) {
     return undefined;
+  }
+  // A declared protocol wins outright: it is the deployment saying it knows
+  // better than the catalog, which is the whole point of `modelRoutes`.
+  if (overrideProtocol !== undefined) {
+    return plane.routes[overrideProtocol];
   }
   if (providerNpm !== undefined) {
     if (typeof providerNpm !== "string") {

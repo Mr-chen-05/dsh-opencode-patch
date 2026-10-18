@@ -215,6 +215,12 @@ export const createStreamHook = (
             findModelSpecOn(catalogPlaneForRoute(providerKey), options.model) ??
             findModelSpec(options.model)
           )?.provider_npm
+        : undefined,
+      // A route the deployment declared beats the catalog's own answer. The
+      // catalog is a snapshot; the deployment is the one place that can say it is
+      // wrong about a model.
+      typeof options.model === "string"
+        ? config.modelRoutes[options.model]?.api
         : undefined
     );
     // Take the call over only when the target route is really registered.
