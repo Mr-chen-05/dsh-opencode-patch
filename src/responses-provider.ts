@@ -49,7 +49,7 @@ import {
   getLiveGoCatalog,
   getLiveZenCatalog,
 } from "./models-catalog.ts";
-import { baseForProtocol } from "./pi-provider.ts";
+import { baseForProtocol, protocolFor } from "./pi-provider.ts";
 import {
   GOOGLE_INTERNAL_ROUTE,
   GOOGLE_SDK,
@@ -746,6 +746,51 @@ const mountScope = (
  * @param declared - the ids the user wrote, or `undefined` when unreadable.
  * @returns `models` when unreadable, otherwise only the declared entries.
  */
+/**
+ * Declared models that speak a protocol nothing in this composition serves.
+ *
+ * The case this exists for: `internalRoutes: false` turns the automatic mount off,
+ * and a declared model whose protocol differs from its provider's then has no
+ * route to answer for it. Silence would be the worst outcome — the model is in the
+ * picker and every call fails — so the caller logs these by name and protocol.
+ *
+ * A model the catalog does not describe is skipped: it cannot be known to need
+ * anything else, and guessing would produce a warning that is wrong more often
+ * than right.
+ *
+ * @param declaredByPlane - the ids the deployment declared, per plane route.
+ * @param served - the `plane:protocol` pairs some route serves.
+ * @returns one `id (protocol)` entry per unrouted model, sorted for a stable log.
+ */
+export const unroutedDeclaredModels = (
+  declaredByPlane: ReadonlyMap<string, ReadonlySet<string>>,
+  served: ReadonlySet<string>
+): string[] => {
+  const gaps: string[] = [];
+  for (const [plane, ids] of declaredByPlane) {
+    const entry = ROUTE_FOR_PLANE_PROTOCOL[plane];
+    if (entry === undefined) {
+      continue;
+    }
+    const catalog =
+      plane === "opencode-go" ? getLiveGoCatalog() : getLiveZenCatalog();
+    const byId = new Map(catalog.map((spec) => [spec.id, spec]));
+    for (const id of ids) {
+      const spec = byId.get(id);
+      const protocol = spec === undefined ? undefined : protocolFor(spec);
+      // A protocol the plane does not carry has no route to miss.
+      if (protocol === undefined || entry.routes[protocol] === undefined) {
+        continue;
+      }
+      if (served.has(`${plane}:${protocol}`)) {
+        continue;
+      }
+      gaps.push(`${id} (${plane} · ${protocol})`);
+    }
+  }
+  return gaps.toSorted((a, b) => a.localeCompare(b));
+};
+
 export const narrowToDeclared = <T extends { readonly id: string }>(
   models: readonly T[],
   declared?: ReadonlySet<string>
@@ -837,14 +882,48 @@ export const registerResponsesProvider = async (
   // hand-picks the models it serves, and mounting over that would take the choice
   // away. Deferring is the point — this module exists so a deployment that
   // declares NOTHING still works, not to override one that does.
+  // **What the deployment declared, per plane.** The mount serves the protocols a
+  // declared model needs, with only those models: a route's model list is what the
+  // picker shows, and the whole protocol catalog there is how models nobody
+  // selected reached it. Read from the host, which holds the user's configuration.
+  const declaredByPlane = new Map<string, ReadonlySet<string>>();
+  for (const plane of ["opencode", "opencode-go"]) {
+    const ids = await declaredModelsFor(ctx, plane);
+    if (ids !== undefined) {
+      declaredByPlane.set(plane, ids);
+    }
+  }
+  /** Protocols some route in this composition serves, as `plane:protocol`. */
+  const served = new Set<string>();
+  const reportGaps = (): void => {
+    const gaps = unroutedDeclaredModels(declaredByPlane, served);
+    if (gaps.length === 0) {
+      return;
+    }
+    ctx.logger?.warn?.(
+      `[dsh-opencode-patch] ${gaps.length} declared model(s) speak a protocol no ` +
+        `route serves: ${gaps.join(", ")} — declare provider routes for them ` +
+        "(see modelRoutes), or set internalRoutes: true"
+    );
+  };
+  // A route the deployment declared is served by that declaration.
+  for (const [plane, entry] of Object.entries(ROUTE_FOR_PLANE_PROTOCOL)) {
+    for (const [protocol, route] of Object.entries(entry.routes)) {
+      if (declared.has(route)) {
+        served.add(`${plane}:${protocol}`);
+      }
+    }
+  }
+
   // A curated deployment can turn the mount off: every mounted route is a
-  // provider whose model list is the whole protocol catalog, which is how models
+  // provider whose model list is the protocol's catalog, which is how models
   // nobody selected reach a picker. Such a deployment declares its own provider
   // entries (and `modelRoutes` for the ids that need them) instead.
   if (config?.internalRoutes === false) {
     ctx.logger?.info?.(
       "[dsh-opencode-patch] internal routes are off (internalRoutes: false); a declared provider must serve each protocol"
     );
+    reportGaps();
     return undefined;
   }
   const wanted = Object.entries(ROUTE_FOR_PLANE_PROTOCOL).flatMap(
@@ -878,6 +957,7 @@ export const registerResponsesProvider = async (
     ctx.logger?.info?.(
       "[dsh-opencode-patch] every internal route is already declared; leaving them alone"
     );
+    reportGaps();
     return undefined;
   }
   const host = loadPiAi(ctx);
@@ -885,18 +965,8 @@ export const registerResponsesProvider = async (
     ctx.logger?.info?.(
       "[dsh-opencode-patch] no loaded llm-pi-ai in this composition; internal routes stay unregistered"
     );
+    reportGaps();
     return undefined;
-  }
-  // **What the deployment declared, per plane.** The mount serves the protocols a
-  // declared model needs, with only those models: a route's model list is what
-  // the picker shows, and the whole protocol catalog there is how models nobody
-  // selected reached it. Read from the host, which holds the user's configuration.
-  const declaredByPlane = new Map<string, ReadonlySet<string>>();
-  for (const plane of ["opencode", "opencode-go"]) {
-    const ids = await declaredModelsFor(ctx, plane);
-    if (ids !== undefined) {
-      declaredByPlane.set(plane, ids);
-    }
   }
   const providers: Record<string, unknown> = {};
   const mounted: string[] = [];
@@ -930,6 +1000,7 @@ export const registerResponsesProvider = async (
       source.apiKeyEnv,
       baseURL
     );
+    served.add(`${plane}:${protocol}`);
     mounted.push(
       `${route} (${plane} · ${protocol}) with ${models.length} model(s)`
     );

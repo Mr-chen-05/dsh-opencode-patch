@@ -28,7 +28,11 @@ import {
   sanitizeModalities,
   type CatalogProvider,
 } from "./models-catalog.ts";
-import { thinkingLevelMapFor } from "./pi-provider.ts";
+import {
+  baseForProtocol,
+  protocolFor,
+  thinkingLevelMapFor,
+} from "./pi-provider.ts";
 import {
   internalRouteFor,
   isInternalRoute,
@@ -797,17 +801,28 @@ export const decoratePlaneAdapters = (
         if (supports !== undefined && supports.length > 0) {
           outRecord.reasoning = { efforts: supports };
         }
-        // **The deployment's own routing wins.** `modelRoutes` is the override
-        // layer over what the shim and its live refresh computed: an `api` pins
-        // the protocol this model is dispatched with, and a `baseURL` pins where
-        // it goes. Without a declared route the object keeps whatever the adapter
-        // answered, which is the provider's own protocol.
+        // **Route the model on the object the host dispatches on.**
+        // `dsh-llm-pi-ai` selects the implementation per model —
+        // `stream: (model, …) => input.api.stream(model, …)`, with the protocol
+        // materialized as `request.api ?? base?.api ?? routeApi` — so a single
+        // provider route serves every protocol its models name. That makes this
+        // object the place to say it, and it is why a model needing Anthropic does
+        // not need a provider of its own.
+        //
+        // The catalog's protocol is the default; `modelRoutes` overrides it, which
+        // is the layer for an endpoint the shim gets wrong.
         const declaredRoute = config.modelRoutes[model];
-        if (declaredRoute?.api !== undefined) {
-          outRecord.api = declaredRoute.api;
+        const protocol = declaredRoute?.api ?? protocolFor(spec);
+        if (protocol !== undefined) {
+          outRecord.api = protocol;
         }
-        if (declaredRoute?.baseURL !== undefined) {
-          outRecord.baseUrl = declaredRoute.baseURL;
+        const baseURL =
+          declaredRoute?.baseURL ??
+          (protocol === undefined
+            ? undefined
+            : baseForProtocol(route, protocol, config.endpoint));
+        if (baseURL !== undefined) {
+          outRecord.baseUrl = baseURL;
         }
         return outRecord;
       };

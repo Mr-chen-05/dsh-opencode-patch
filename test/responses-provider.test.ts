@@ -28,11 +28,13 @@ import {
   RESPONSES_SDK,
   ROUTE_FOR_PLANE_PROTOCOL,
   getLiveGoCatalog,
+  getLiveZenCatalog,
   inheritedCredentialRef,
   loadPiAi,
   modelsForSdk,
   narrowToDeclared,
   registerResponsesProvider,
+  unroutedDeclaredModels,
   GOOGLE_INTERNAL_ROUTE,
   SELF_MOUNTED_ROUTES,
 } from "../src/index.ts";
@@ -468,6 +470,13 @@ const createHost = (options: { onPlugin?: (config: unknown) => void } = {}) => {
     // case can stage a registration that arrives after the declared check.
     adapters,
     listConfigurableProviders: () => [...directory.values()],
+    // What the deployment declared, which the mount narrows each route to. The
+    // real service answers it from the user's configuration; the catalog here
+    // stands in for that, so the mount has a declaration to read.
+    listModels: async () => [
+      ...getLiveZenCatalog().map((spec) => ({ id: spec.id })),
+      ...getLiveGoCatalog().map((spec) => ({ id: spec.id })),
+    ],
     listProviders: () => [...adapters.values()],
     registerAdapter,
     registerConfigurableProviders,
@@ -1510,5 +1519,98 @@ describe("responses-provider · an internal route never outgrows the declaration
     // The caller skips the route on an empty list rather than registering a
     // provider with no models.
     expect(narrowToDeclared(models, new Set(["gpt-5.4"]))).toHaveLength(1);
+  });
+});
+
+describe("responses-provider · declared models a missing route would strand", () => {
+  const zen = getLiveZenCatalog();
+  const anthropic = zen.find(
+    (spec) => spec.provider_npm === "@ai-sdk/anthropic"
+  );
+
+  it("names the model and the protocol nothing serves", () => {
+    // The case: `internalRoutes: false`, no declared provider for this protocol,
+    // and a model the user selected that speaks it. Silence would leave the model
+    // in the picker with every call failing.
+    if (anthropic === undefined) {
+      throw new Error("the zen catalog serves no anthropic model");
+    }
+    const declared = new Map([["opencode", new Set([anthropic.id])]]);
+    expect(unroutedDeclaredModels(declared, new Set())).toEqual([
+      `${anthropic.id} (opencode · anthropic-messages)`,
+    ]);
+  });
+
+  it("says nothing once a route serves that protocol", () => {
+    if (anthropic === undefined) {
+      throw new Error("the zen catalog serves no anthropic model");
+    }
+    const declared = new Map([["opencode", new Set([anthropic.id])]]);
+    expect(
+      unroutedDeclaredModels(declared, new Set(["opencode:anthropic-messages"]))
+    ).toEqual([]);
+  });
+
+  it("skips a model the catalog does not describe", () => {
+    // Nothing is known about its protocol, and a guess here would warn about a
+    // model that works.
+    const declared = new Map([["opencode", new Set(["not-in-the-catalog"])]]);
+    expect(unroutedDeclaredModels(declared, new Set())).toEqual([]);
+  });
+});
+
+describe("responses-provider · the keyless and unreadable declarations", () => {
+  it("keeps a route whole when the host cannot list its models", async () => {
+    // `declaredModelsFor` answers `undefined` when the service is absent, which the
+    // mount must read as "could not tell" rather than "declared nothing".
+    const ctx = {
+      llm: { listProviders: () => [], registerAdapter: () => () => {} },
+      loader: { entries: () => [] },
+      logger: { info: () => {}, warn: () => {} },
+    } as unknown as CordisContext;
+    await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
+  });
+
+  it("reads the declaration before deciding what to mount", async () => {
+    // The mount asks the host what the deployment declared; a host that answers
+    // is the ordinary case, and the answer narrows every route it mounts.
+    const listed: string[] = [];
+    const ctx = {
+      llm: {
+        listModels: async (route: string) => {
+          listed.push(route);
+          return [
+            { id: "space-bunny-free" },
+            { id: "gpt-5.4" },
+            { name: "no id here" },
+            null,
+          ];
+        },
+        listProviders: () => [],
+        registerAdapter: () => () => {},
+      },
+      loader: { entries: () => [] },
+      logger: { info: () => {}, warn: () => {} },
+    } as unknown as CordisContext;
+    await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
+    // Both plane routes were asked, and an entry without an id was ignored.
+    expect(listed).toEqual(["opencode", "opencode-go"]);
+  });
+
+  it("does not throw when the listing fails", async () => {
+    // A host whose `listModels` throws is the same case as one that has none: the
+    // mount falls back to the catalog rather than failing the boot.
+    const ctx = {
+      llm: {
+        listModels: () => {
+          throw new Error("not implemented");
+        },
+        listProviders: () => [],
+        registerAdapter: () => () => {},
+      },
+      loader: { entries: () => [] },
+      logger: { info: () => {}, warn: () => {} },
+    } as unknown as CordisContext;
+    await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
   });
 });

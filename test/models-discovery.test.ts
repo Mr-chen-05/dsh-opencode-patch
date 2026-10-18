@@ -685,11 +685,21 @@ describe("models-discovery: the adapter behind a plane route", () => {
       llm as never,
       resolveConfig({ enrichModels: true })
     );
-    const resolved = await resolveOn(llm, "opencode")(
+    const resolved = (await resolveOn(llm, "opencode")(
       "opencode",
       "space-bunny-free"
-    );
-    expect(resolved).toEqual(own);
+    )) as Record<string, unknown>;
+    // Every field the adapter answered is kept: it is what dispatch honours.
+    expect(resolved).toMatchObject(own);
+    // The ROUTING fields are the plugin's, and they are new here. The host
+    // dispatches on `model.api` (`dsh-llm-pi-ai`:
+    // `stream: (model, …) => input.api.stream(model, …)`), and it materializes a
+    // hand-declared model with the ROUTE's protocol — so a model whose catalog
+    // protocol differs is mis-dispatched unless the wrapper says otherwise. This
+    // is what lets one provider route serve every protocol its models name,
+    // instead of a provider per protocol.
+    expect(resolved.api).toBe("openai-completions");
+    expect(resolved.baseUrl).toBe("https://opencode.ai/inference/openai/v1");
     stop?.();
   });
 

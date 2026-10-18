@@ -209,5 +209,6 @@ export {
   loadPiAi,
   modelsForSdk,
   narrowToDeclared,
+  unroutedDeclaredModels,
   registerResponsesProvider,
 } from "./responses-provider.ts";
