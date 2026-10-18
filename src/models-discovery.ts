@@ -591,6 +591,19 @@ const effortsFromLevelMap = (
         : `${level.charAt(0).toUpperCase()}${level.slice(1)}`,
   }));
 
+/**
+ * The vendor's retired plane bases, as they appear in pi's installed catalog and
+ * in profiles written before the per-family move.
+ *
+ * Only these are rewritten. Matching a path rather than an origin keeps a
+ * deployment's own proxy out of it: `https://gateway.internal/zen/v1` is not this
+ * vendor's endpoint and is none of our business.
+ */
+const LEGACY_PLANE_BASES: ReadonlySet<string> = new Set([
+  "https://opencode.ai/zen",
+  "https://opencode.ai/zen/v1",
+]);
+
 /** Whether a value is a usable token count. */
 const usableWindow = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -816,11 +829,32 @@ export const decoratePlaneAdapters = (
         if (protocol !== undefined) {
           outRecord.api = protocol;
         }
-        const baseURL =
-          declaredRoute?.baseURL ??
-          (protocol === undefined
+        // **The endpoint: a declaration outranks our measurement, except where the
+        // declaration is the vendor's own retired path.** pi's installed catalog
+        // still says `https://opencode.ai/zen`, and a profile written for the old
+        // gateway says `…/zen/v1`; both are aliases today (measured: `/zen/v1/…`
+        // and `/inference/openai/v1/…` both answer 200), but the per-family
+        // addresses are what the gateway serves, and an anthropic model on a
+        // `/zen` base is simply wrong.
+        //
+        // Anything else is left alone: a deployment pointing this route at its own
+        // proxy must not have that endpoint rewritten by a bundled snapshot.
+        const existingBase =
+          typeof record.baseUrl === "string"
+            ? record.baseUrl.trim().replace(/\/+$/u, "")
+            : undefined;
+        const legacyBase =
+          existingBase !== undefined && LEGACY_PLANE_BASES.has(existingBase);
+        // The catalog's per-family endpoint is a REPAIR for a retired base and a
+        // FALLBACK when none was given; an endpoint the deployment wrote is kept.
+        const keepExisting =
+          existingBase !== undefined && !legacyBase && protocol !== undefined;
+        const measured =
+          protocol === undefined
             ? undefined
-            : baseForProtocol(route, protocol, config.endpoint));
+            : baseForProtocol(route, protocol, config.endpoint);
+        const baseURL =
+          declaredRoute?.baseURL ?? (keepExisting ? existingBase : measured);
         if (baseURL !== undefined) {
           outRecord.baseUrl = baseURL;
         }

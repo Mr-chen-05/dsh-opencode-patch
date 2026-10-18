@@ -1438,3 +1438,61 @@ describe("models-discovery: a keyless deployment is offered only what it can cal
     expect(ids).toEqual(["gpt-5.4", "space-bunny-free"]);
   });
 });
+
+describe("models-discovery · the endpoint a model is dispatched to", () => {
+  /** One plane-route adapter answering with a fixed model, then resolve it. */
+  const resolveBase = async (
+    own: Record<string, unknown>
+  ): Promise<unknown> => {
+    const answer = () => ({
+      context: { contextWindow: 999 },
+      id: "space-bunny-free",
+      inputModalities: ["text"],
+      name: "Space Bunny",
+      provider: "opencode",
+      ...own,
+    });
+    const adapter: Record<string, unknown> = {
+      modelOf: (_snapshot: unknown) => answer(),
+      resolveModel: async () => answer(),
+    };
+    const llm = { adapters: new Map([["opencode", { adapter }]]) };
+    const stop = decoratePlaneAdapters(
+      llm as never,
+      resolveConfig({ enrichModels: true })
+    );
+    const resolveModel = adapter.resolveModel as (
+      provider: string,
+      model: string
+    ) => Promise<unknown>;
+    // The MODEL id matters: without one the wrapper has no catalog entry to work
+    // from and passes the adapter's answer through untouched.
+    const resolved = (await resolveModel(
+      "opencode",
+      "space-bunny-free"
+    )) as Record<string, unknown>;
+    stop?.();
+    return resolved.baseUrl;
+  };
+
+  it("replaces the vendor's retired base with the current family endpoint", async () => {
+    // pi's installed catalog still says `https://opencode.ai/zen`, and a profile
+    // written for the old gateway says `…/zen/v1`. Both are aliases today, but the
+    // per-family address is what the gateway serves, and an anthropic model on a
+    // `/zen` base is simply wrong.
+    expect(await resolveBase({ baseUrl: "https://opencode.ai/zen" })).toBe(
+      "https://opencode.ai/inference/openai/v1"
+    );
+    expect(await resolveBase({ baseUrl: "https://opencode.ai/zen/v1" })).toBe(
+      "https://opencode.ai/inference/openai/v1"
+    );
+  });
+
+  it("leaves any other endpoint alone", async () => {
+    // A deployment pointing this route at its own proxy must not have the
+    // endpoint rewritten by a bundled snapshot.
+    expect(
+      await resolveBase({ baseUrl: "https://gateway.internal/zen/v1" })
+    ).toBe("https://gateway.internal/zen/v1");
+  });
+});
