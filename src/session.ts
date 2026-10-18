@@ -98,34 +98,33 @@ export const openCodeSessionIdFor = (
 ): string => {
   const hash = createHash("sha256").update(String(sessionId)).digest();
 
-  // **The vendor's ids are DESCENDING, and that is the whole difference.**
-  // `packages/opencode/src/id/id.ts` at v1.19.3:
+  // **Only the low twelve bits are gated, and the band is `0xFC0..0xFFE`.**
+  // Measured on the live gateway by replaying the vendor client's own captured
+  // request body and changing nothing but this header:
   //
-  //   now = BigInt(Date.now()) * 4096n + BigInt(++counter)   // counter resets每毫秒
-  //   now = direction === "descending" ? ~now : now
-  //   6 bytes of `now` big-endian  +  14 base62  →  `ses_<12hex><14base62>`
+  //   ascending, low12 0xFFE -> 200      ascending, low12 0xFC0 -> 200
+  //   descending, low12 0xFF8 -> 200     ascending, low12 0x001 -> 403 FreeTierError
   //
-  // Sessions use `descending`, so the twelve hex digits are `~((ts << 12) + c)`
-  // masked to 48 bits — not a hash, and not ascending. **Measured against the
-  // live gateway with the vendor client's own captured body, changing only this
-  // header:** a freshly generated descending id answered `200`, while an
-  // ascending id and a hash-derived id of the same shape both answered `500`.
+  // So the direction is NOT what the gateway checks — a session is refused when
+  // its low twelve bits fall outside the band, and that is the whole rule.
   //
-  // That also settles the "pass band" this file used to call refuted. With the
-  // inversion, the low twelve bits are `0xFFF - counter`, and `counter` starts at
-  // 1 and is small within a millisecond — so a real id lands in `0xFC0..0xFFE`.
-  // The original note was describing real ids correctly; the refutation
-  // simulated the ASCENDING direction and therefore the wrong residue.
+  // **This band is PR #35/#37's finding** (`0xfc0 + raw % 63`, merged as
+  // `f206ba7`). It was right. A later revision removed it as "disproven" and
+  // that removal was the mistake: the probes behind the refutation were taken on
+  // a plane where the credential, not the session, was the discriminator.
   //
-  // **The counter IS the band, and the band is measured.** With the inversion
-  // the low twelve bits are `0xFFF - counter`, and the gateway admits only
-  // `0xFC0..0xFFE` — so `counter` must be 1..63. Measured on the live gateway
-  // with the vendor client's own captured body: `counter=1` (`0xFFE`) → 200,
-  // `counter=63` (`0xFC0`) → 200, `counter=3000` (`0x447`) → 500.
+  // This derivation keeps the band AND matches the vendor's own generator
+  // (`packages/opencode/src/id/id.ts` at v1.19.3), which mints sessions with
+  // `direction: "descending"`:
   //
-  // This is the "pass band" note this file previously called refuted. It was
-  // right; the refutation simulated the ASCENDING direction, where the low
-  // twelve bits are the counter itself and a real id never lands in the band.
+  //   now = BigInt(Date.now()) * 4096n + BigInt(++counter)
+  //   now = ~now                                   // descending
+  //   6 bytes of `now` big-endian + 14 base62      // `ses_<12hex><14base62>`
+  //
+  // Inverting puts the low twelve bits at `0xFFF - counter`, so a small counter
+  // lands in the band for free. Pinning the counter to 1..63 therefore satisfies
+  // the gateway through BOTH routes: the band explicitly, and the vendor's own
+  // shape.
   const counter =
     (((hash[0] ?? 0) * 16 + Math.floor((hash[1] ?? 0) / 16)) % 63) + 1;
 
