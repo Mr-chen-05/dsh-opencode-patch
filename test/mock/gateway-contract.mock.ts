@@ -130,9 +130,16 @@ describe("the mock gateway", () => {
   });
 
   it("refuses the wrong auth header for the protocol", async () => {
-    const spec = firstSpecFor("opencode", "@ai-sdk/anthropic");
+    // A PAID model on purpose: a free one is admitted with no credential at all,
+    // so it could not show that this endpoint reads `x-api-key` rather than
+    // `Authorization`. The rule being tested is what a credential-requiring model
+    // requires.
+    const spec = catalogFor("opencode").find(
+      (entry) =>
+        entry.provider_npm === "@ai-sdk/anthropic" && !entry.id.includes("free")
+    );
     if (spec === undefined) {
-      throw new Error("the zen catalog serves no anthropic model");
+      throw new Error("the zen catalog serves no paid anthropic model");
     }
     // A valid Bearer is present, and that is exactly the point: the Messages
     // endpoint reads x-api-key, so a request carrying only authorization is

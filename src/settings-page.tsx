@@ -83,17 +83,6 @@ export const SCOPED_PKG = "@viztor/dsh-opencode-patch";
 export { remoteNamespace } from "./settings-remote.ts";
 
 /** The value a Remote result carries, or a thrown failure. */
-export const unwrapRemote = async (result: unknown): Promise<unknown> => {
-  const resolved: unknown = await result;
-  if (isRecord(resolved) && resolved.ok === true) {
-    return resolved.value;
-  }
-  throw new Error(
-    isRecord(resolved) && typeof resolved.error === "string"
-      ? resolved.error
-      : "the login remote did not answer"
-  );
-};
 
 /**
  * Mount one remote contribution, reporting why when it cannot.

@@ -590,7 +590,19 @@ export const handleGatewayRequest = (
   }
 
   const wireHeader = WIRE_HEADER[endpoint.kind];
-  if (wireHeader.length > 0 && !isCredential(headers[wireHeader])) {
+  // Endpoints that carry no model are judged on the credential alone. A model
+  // endpoint is judged per model, after the model is known: a free one is admitted
+  // with no credential at all.
+  const perModelCredential =
+    endpoint.kind === "completions" ||
+    endpoint.kind === "responses" ||
+    endpoint.kind === "messages" ||
+    endpoint.kind === "google";
+  if (
+    wireHeader.length > 0 &&
+    !perModelCredential &&
+    !isCredential(headers[wireHeader])
+  ) {
     return refuse(401, "Invalid API key", "invalid_api_key", "credential");
   }
 
@@ -695,6 +707,26 @@ export const handleGatewayRequest = (
       "model_not_found",
       "model_unknown"
     );
+  }
+
+  // **The credential, judged per model.** The gateway admits a free model with NO
+  // credential at all or with the literal `public` (`allowAnonymous` on the model
+  // entry — measured: a keyless free-tier request answers 200), and requires a
+  // real one everywhere else. A placeholder that is neither absent nor `public`
+  // is still refused, on any model.
+  if (wireHeader.length > 0) {
+    const presented = headers[wireHeader];
+    const bare = presented
+      ?.replace(/^Bearer\s+/iu, "")
+      .trim()
+      .toLowerCase();
+    const admitted =
+      isCredential(presented) ||
+      (model.includes("free") &&
+        (bare === undefined || bare.length === 0 || bare === "public"));
+    if (!admitted) {
+      return refuse(401, "Invalid API key", "invalid_api_key", "credential");
+    }
   }
 
   // **Each protocol has its own contract, and the mock enforces it.** The auth

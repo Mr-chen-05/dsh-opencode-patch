@@ -36,23 +36,6 @@ export interface OpencodeCredential {
   readonly value: string;
 }
 
-/** A stored login, which is the alternative to running the device flow again. */
-export interface OpencodeAccount {
-  /** The account's email, which is not a secret. */
-  readonly email: string;
-  /** The access token. Never logged. */
-  readonly accessToken: string;
-  /**
-   * The org the account is active in, when the installation records one.
-   *
-   * A request has to carry this, and a token with the wrong org is worse than no
-   * token — so it is read from `account_state` rather than assumed.
-   */
-  readonly orgId: string | undefined;
-  /** The refresh token, when the installation stored one. */
-  readonly refreshToken: string | undefined;
-}
-
 /**
  * The bearer token a credential row actually carries.
  *
@@ -170,52 +153,4 @@ export const readOpencodeCredentials = (
     ];
   });
   return credentials.length === 0 ? undefined : credentials;
-};
-
-/**
- * The stored login, or `undefined` when there is not one.
- *
- * The account the installation names as ACTIVE wins, and the first usable row is
- * the fallback for a database whose state row names nobody. A row without an
- * access token is not a login, so it is skipped either way.
- *
- * The org is JOINED rather than fetched separately, and that is a correctness
- * point rather than a style one: `account_state` names which account is active
- * and which org that account is working in, and an org read on its own could be
- * paired with a DIFFERENT account's token. A token carrying another credential's
- * org is worse than a token sent without one, which is the whole reason this is
- * one query. Both tables come from the same migration, so a database that has
- * `account` at all has `account_state` beside it.
- *
- * @param databasePath - the path {@link opencodeDatabasePath} resolved, or `:memory:`.
- * @returns the account, or `undefined`.
- */
-export const readOpencodeAccount = (
-  databasePath: string
-): OpencodeAccount | undefined => {
-  if (databasePath === ":memory:") {
-    return undefined;
-  }
-  const found = rows(
-    databasePath,
-    "SELECT a.email AS email, a.access_token AS accessToken," +
-      " a.refresh_token AS refreshToken, s.active_org_id AS orgId" +
-      " FROM account a LEFT JOIN account_state s ON s.active_account_id = a.id" +
-      " ORDER BY (s.active_account_id IS NULL), a.time_created, a.id"
-  );
-  if (found === undefined) {
-    return undefined;
-  }
-  for (const row of found) {
-    const accessToken = text(row.accessToken);
-    if (accessToken !== undefined) {
-      return {
-        accessToken,
-        email: text(row.email) ?? "",
-        orgId: text(row.orgId),
-        refreshToken: text(row.refreshToken),
-      };
-    }
-  }
-  return undefined;
 };

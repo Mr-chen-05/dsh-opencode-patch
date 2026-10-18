@@ -14,10 +14,7 @@
 import { describe, expect, it } from "vitest";
 
 import { opencodeDatabaseFile, opencodeRoots } from "../src/opencode-paths.ts";
-import {
-  readOpencodeAccount,
-  readOpencodeCredentials,
-} from "../src/opencode-store.ts";
+import { readOpencodeCredentials } from "../src/opencode-store.ts";
 
 describe("OpenCode Client Channels & Database File Resolution", () => {
   it.each([
@@ -109,8 +106,6 @@ describe("OpenCode Client Channels & Database File Resolution", () => {
 
   it("gracefully returns undefined for non-existent, corrupt, or missing tables without throwing", () => {
     expect(readOpencodeCredentials("/nonexistent/opencode.db")).toBeUndefined();
-    expect(readOpencodeAccount("/nonexistent/opencode.db")).toBeUndefined();
     expect(readOpencodeCredentials(":memory:")).toBeUndefined();
-    expect(readOpencodeAccount(":memory:")).toBeUndefined();
   });
 });

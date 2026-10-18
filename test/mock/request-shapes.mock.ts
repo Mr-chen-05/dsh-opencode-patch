@@ -558,3 +558,39 @@ describe("each protocol's own contract, asserted against the mock", () => {
     expect(withoutContents.status).toBe(400);
   });
 });
+
+describe("keyless: free models still answer", () => {
+  it("serves a free model when no credential exists anywhere", async () => {
+    // The deployment the plugin has to survive: an `apiKeyEnv` that is declared
+    // but empty (or absent), which is what "the user has not filled it in" looks
+    // like from here. The gateway admits a free model anonymously — measured —
+    // so the request must go out with no credential and still succeed.
+    vi.stubEnv("OPENCODE_API_KEY", "");
+    vi.stubEnv("OPENCODE_GO_API_KEY", "");
+    clearCapturedApiKeys();
+
+    const response = await als.run(sessionTurn(), () =>
+      post(
+        patchedWith(resolveConfig()),
+        `${gateway.origin}/zen/v1/chat/completions`,
+        {
+          messages: [{ content: "hi", role: "user" }],
+          model: "space-bunny-free",
+          stream: true,
+          tools: [
+            {
+              function: { name: "read", parameters: { type: "object" } },
+              type: "function",
+            },
+          ],
+        }
+      )
+    );
+
+    expect(response.status).toBe(200);
+    const request = recorded();
+    // No credential on the wire at all: not a placeholder, not `public`.
+    expect(request.headers.authorization).toBeUndefined();
+    expect(request.headers["x-api-key"]).toBeUndefined();
+  });
+});

@@ -10,12 +10,11 @@
 
 import assert from "node:assert/strict";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   isLoaderHost,
   readCredentialsResolver,
-  readCredentialsWriter,
   readEntryOptions,
   readSessionMetaResolver,
 } from "../src/cordis-context.ts";
@@ -203,117 +202,5 @@ describe("cordis-context: readSessionMetaResolver", () => {
     expect(resolver("no-header")).toBeUndefined();
     expect(resolver("other")).toBeUndefined();
     expect(resolver("throws")).toBeUndefined();
-  });
-});
-
-describe("cordis-context: readCredentialsWriter", () => {
-  /** A seam with all six methods, each recorded so a test can see which ran. */
-  const seam = (overrides: Record<string, unknown> = {}) => {
-    const calls: string[] = [];
-    const records = new Map<string, unknown>();
-    return {
-      calls,
-      credentials: {
-        deleteRecord: (key: string) => {
-          calls.push(`delete:${key}`);
-          records.delete(key);
-        },
-        modifyRecord: async (
-          key: string,
-          mutate: (current?: unknown) => Promise<unknown>
-        ) => {
-          calls.push(`modify:${key}`);
-          // The real seam awaits the mutation under its lock; a stub
-          // that skipped the await would return before the write landed.
-          const next = await mutate(records.get(key));
-          if (next !== undefined) {
-            records.set(key, next);
-          }
-          return next;
-        },
-        readRecord: (key: string) => {
-          calls.push(`read:${key}`);
-          return Promise.resolve(records.get(key));
-        },
-        resolve: vi.fn(),
-        set: vi.fn(),
-        unset: vi.fn(),
-        ...overrides,
-      },
-      records,
-    };
-  };
-
-  it("reads, writes and deletes a record through the seam", async () => {
-    const { calls, credentials, records } = seam();
-    const writer = readCredentialsWriter({ get: () => credentials });
-    expect(writer).toBeDefined();
-
-    await writer?.writeGrant("scope/id", { accessToken: "a" });
-    expect(records.get("scope/id")).toEqual({
-      kind: "grant",
-      payload: { accessToken: "a" },
-    });
-    // And the record is read back as the seam stores it, not as it was written:
-    // a record with no payload yields neither field.
-    await expect(writer?.readRecord("scope/id")).resolves.toEqual({
-      kind: "grant",
-      payload: { accessToken: "a" },
-    });
-    await writer?.deleteRecord("scope/id");
-    await expect(writer?.readRecord("scope/id")).resolves.toBeUndefined();
-    expect(calls).toEqual([
-      "modify:scope/id",
-      "read:scope/id",
-      "delete:scope/id",
-      "read:scope/id",
-    ]);
-  });
-
-  it("reports an absent record as undefined rather than an empty one", async () => {
-    const { credentials } = seam();
-    const writer = readCredentialsWriter({ get: () => credentials });
-    await expect(writer?.readRecord("scope/missing")).resolves.toBeUndefined();
-  });
-
-  it("drops a record that carries no payload, so the reader cannot invent one", async () => {
-    const { credentials } = seam({
-      readRecord: () => Promise.resolve({ kind: "api_key" }),
-    });
-    expect(credentials.readRecord).toBeDefined();
-    const writer = readCredentialsWriter({ get: () => credentials });
-    // `kind` survives; `payload` was never there and must not become `null`
-    // or an empty object — a reader would then have to guess whether the
-    // grant had a payload.
-    await expect(writer?.readRecord("scope/id")).resolves.toStrictEqual({
-      kind: "api_key",
-    });
-  });
-
-  it("is undefined when the seam lacks the record half", async () => {
-    // A composition that mounts a credential service without `modifyRecord`
-    // cannot keep a rotating refresh token atomically, so this must not
-    // pretend otherwise.
-    const partial = {
-      deleteRecord: () => Promise.resolve(),
-      readRecord: () => Promise.resolve(),
-      resolve: () => Promise.resolve(),
-      set: () => Promise.resolve(),
-      unset: () => Promise.resolve(),
-    };
-    expect(readCredentialsWriter({ get: () => partial })).toBeUndefined();
-    expect(readCredentialsWriter({})).toBeUndefined();
-    expect(
-      readCredentialsWriter({ get: () => "not a service" })
-    ).toBeUndefined();
-  });
-
-  it("is undefined when asking for the seam throws", async () => {
-    const ctx = {
-      get: () => {
-        throw new Error("no such service");
-      },
-    };
-    expect(readCredentialsWriter(ctx)).toBeUndefined();
   });
 });

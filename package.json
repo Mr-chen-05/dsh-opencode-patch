@@ -78,7 +78,6 @@
     "test:coverage": "vp test run --coverage",
     "test:e2e": "vp test --config vitest.e2e.config.ts",
     "test:mock": "vp test --config vitest.mock.config.ts",
-    "token:refresh": "node --experimental-strip-types scripts/refresh-opencode-token.ts",
     "typecheck": "tsc --noEmit",
     "cli:version": "node --experimental-strip-types scripts/check-vendor-version.ts"
   },

@@ -296,7 +296,7 @@ The trigger is a model named by hand rather than chosen from the picker: the pic
 
 ## Seventeen sweeps, and the fourth time a sweep asked the wrong question
 
-Every script under `scripts/`, checked against whether a workflow runs it: `build`, `catalog:shim`, `limits:shim` and `cli:version` are all called, and the two that are not are meant not to be — `release:gate` is the four CI steps as one convenience for a person, and `token:refresh` rewrites a local credential store that CI does not have and should not.
+Every script under `scripts/`, checked against whether a workflow runs it: `build`, `catalog:shim`, `limits:shim` and `cli:version` are all called, and the one that is not is meant not to be — `release:gate` is the four CI steps as one convenience for a person. `token:refresh` (a console-session refresher) left with the login stack: it rewrote a local credential store through the device flow, which is `v2` work.
 
 The first version of this check grepped the workflows for each script's **filename**, and reported three of them unwired. Workflows call npm script names, not files. That is the fourth time this session a sweep resolved a name in a context that could not show it — after the count sweep that missed Go, the identifier sweep that asked about exports, and the heading diff that stripped non-ASCII out of Chinese.
 
