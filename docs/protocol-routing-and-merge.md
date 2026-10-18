@@ -81,6 +81,20 @@ So: a route that names `api` pins every model on it; a route that does not name 
 2. **hide the mount** — `hideResponsesRoute` drops it from every listing, including the configurable-provider set and the browser catalog;
 3. **merge at the presentation layer** — discovery and `/models` enrichment describe the models on the route the user actually selected, never on the hidden ones.
 
+### When the automatic path is enough, and when it never is
+
+pi-ai's own `opencode` provider carries a four-protocol api map, so it dispatches per model natively. Reusing it instead of mounting routes needs three things at once, and a deployment loses the argument if it fails any of them:
+
+| condition | note |
+| :-- | :-- |
+| every declared id is in pi's installed snapshot | a hand-written id has no `base.api` |
+| the route declares no `api` | a declared `api` pins every model on the route |
+| pi's per-model `baseUrl` is current | the installed snapshot still says `…/zen` |
+
+The third is ours to fix and is fixed: the adapter decoration writes `baseUrl` (and `api`) on the model it answers, and pi passes that exact object down (`provider.streamSimple(requestModel, …)`), so the override reaches the wire.
+
+The first two cannot be fixed from a plugin. A hand-written id resolves to `request.api ?? base?.api ?? routeApi`, and `routeApi` is `sharedCatalogApi` — the one protocol the route's shipped models agree on, which is `undefined` for `opencode` because they do not agree. A route that names `api` pins every model on it instead. So: **any deployment that hand-writes a model needs a route that speaks its protocol**, which is why the hidden-route mechanism is structural rather than a workaround, and why the mount narrows to the declared ids — a deployment whose ids all speak the route's protocol mounts nothing at all.
+
 And the consequence for anything built on top: a model's protocol is not a property of the model object alone. It is the route's, chosen at profile resolution, so a model that needs a different protocol needs a route that speaks it.
 
 ### Why it is a table and not a model list
