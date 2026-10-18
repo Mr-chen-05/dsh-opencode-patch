@@ -208,5 +208,6 @@ export {
   inheritedCredentialRef,
   loadPiAi,
   modelsForSdk,
+  narrowToDeclared,
   registerResponsesProvider,
 } from "./responses-provider.ts";

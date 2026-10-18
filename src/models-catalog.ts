@@ -668,24 +668,11 @@ export const enrichModelsResponse = async (
   const catalogById = new Map(catalog.map((m) => [m.id, m]));
   const merged = new Map<string, Record<string, unknown>>();
 
-  // 1. Seed with known catalog models
-  for (const spec of catalog) {
-    const input_modalities = sanitizeModalities(spec.input_modalities);
-    merged.set(spec.id, {
-      context_window: spec.context_window,
-      created: 1_727_740_800,
-      id: spec.id,
-      input: input_modalities,
-      input_modalities,
-      inputModalities: input_modalities,
-      max_output_tokens: spec.max_output_tokens,
-      name: spec.name,
-      object: "model",
-      owned_by: "opencode",
-    });
-  }
-
-  // 2. Overlay live models returned by gateway
+  // **Enrichment only: the rows the gateway returned, and nothing else.** The
+  // seed that used to sit here appended the whole bundled catalog to every
+  // listing, so a deployment that had declared four models was answered with
+  // eighty-six. The gateway's own answer is the list; this function's job is to
+  // give each row the metadata DSH needs.
   for (const item of existingData) {
     const id = typeof item.id === "string" ? item.id : "";
     if (id.length === 0 || isRetiredModel(isGo ? "go" : "zen", id)) {
@@ -723,6 +710,12 @@ export const enrichModelsResponse = async (
       owned_by: item.owned_by ?? "opencode",
     };
     merged.set(id, enriched);
+  }
+
+  // Nothing to enrich — an empty or unparseable answer is the gateway's, not an
+  // invitation to supply one.
+  if (merged.size === 0) {
+    return response;
   }
 
   const enrichedPayload = {

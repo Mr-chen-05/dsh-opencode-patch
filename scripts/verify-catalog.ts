@@ -189,7 +189,7 @@ for (const [route, catalog, plane] of [
     .filter((m) => isServableModel(m.id, route))
     .slice(0, 3)
     .map((m) => ({ id: m.id, name: m.name }));
-  const listed = mergeDiscoveredModels(declared, plane, catalog).filter((m) =>
+  const listed = mergeDiscoveredModels(declared, plane).filter((m) =>
     isServableModel(m.id, route)
   );
   const listedIds = new Set(listed.map((m) => m.id));

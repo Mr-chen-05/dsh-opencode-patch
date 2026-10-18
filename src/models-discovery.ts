@@ -20,15 +20,12 @@ import type { ResolvedPluginConfig } from "./config.ts";
 import type { CordisContext } from "./cordis-context.ts";
 import { isRecord } from "./guards.ts";
 import {
-  getLiveGoCatalog,
   catalogPlaneForRoute,
   type CatalogPlane,
   findModelSpecOn,
-  getLiveZenCatalog,
   isDeprecatedModelOn,
   isRetiredModel,
   sanitizeModalities,
-  type CatalogModelSpec,
   type CatalogProvider,
 } from "./models-catalog.ts";
 import { thinkingLevelMapFor } from "./pi-provider.ts";
@@ -136,8 +133,7 @@ export const resolveDiscoveryProvider = (
  */
 export const mergeDiscoveredModels = (
   discovered: unknown,
-  provider: CatalogProvider,
-  catalog: readonly CatalogModelSpec[]
+  provider: CatalogProvider
 ): DiscoveryCandidate[] => {
   const seen = new Set<string>();
   const merged: DiscoveryCandidate[] = [];
@@ -171,24 +167,16 @@ export const mergeDiscoveredModels = (
     }
   }
 
-  // Cold-start fallback only: nothing was reported, so the catalog stands in.
-  const fallback = merged.length === 0;
-  if (fallback) {
-    for (const spec of catalog) {
-      if (seen.has(spec.id) || isRetiredModel(provider, spec.id)) {
-        continue;
-      }
-      seen.add(spec.id);
-      merged.push({
-        contextWindow: spec.context_window,
-        id: spec.id,
-        inputModalities: sanitizeModalities(spec.input_modalities),
-        maxTokens: spec.max_output_tokens,
-        name: spec.name,
-      });
-    }
-  }
-
+  // **Nothing is ever added.** An earlier revision seeded the whole catalog when
+  // the adapter reported no models ("cold start"), and that is how a deployment
+  // that had declared four models saw eighty-six: the fallback could not see the
+  // declaration, so it treated "no answer" as "no preference". A list this plugin
+  // is not the owner of is never widened — the same rule that withdrew the picker
+  // join, applied to the empty case.
+  //
+  // The cost is honest: a cold start with nothing discovered shows nothing until
+  // the adapter answers. Showing models the deployment did not select is the worse
+  // failure, because it looks like a working picker.
   return merged;
 };
 
@@ -547,11 +535,7 @@ export const decorateModelDiscovery = (
     if (provider === undefined) {
       return discovered;
     }
-    return mergeDiscoveredModels(
-      discovered,
-      provider,
-      provider === "go" ? getLiveGoCatalog() : getLiveZenCatalog()
-    );
+    return mergeDiscoveredModels(discovered, provider);
   };
 
   try {
@@ -603,43 +587,34 @@ const effortsFromLevelMap = (
         : `${level.charAt(0).toUpperCase()}${level.slice(1)}`,
   }));
 
+/** Whether a value is a usable token count. */
+const usableWindow = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0;
+
 /**
- * Resolve the effective context window for a model by taking into account:
- * 1. The canonical capability from the catalog (`canonicalWindow`).
- * 2. Any explicit context limit requested by the user, session, or host (`requestedWindow`).
- * 3. Any optional deployment ceiling configured by the user (`maxCeiling`).
+ * The context window a model actually gets.
  *
- * It safely clamps so that:
- * - A requested context cannot exceed the model's physical context limit.
- * - A configured ceiling clamps any higher context window down to that ceiling.
- * - Missing or invalid requests cleanly fall back to canonical specs.
+ * The rule is the repository's own, applied to a number: **a declaration outranks
+ * an estimate.** The window the deployment wrote wins outright, and the catalog's
+ * value is the fallback when it wrote none — which matters because the catalog is
+ * a bundled snapshot of the vendor's published limits and is conservative where
+ * the vendor is: the free DeepSeek id is listed at 200k while the model serves 1M.
+ * `Math.min(requested, canonical)` used to clamp that back down and made a stale
+ * entry unoverridable.
  *
- * @param canonicalWindow - The physical context limit declared by the model catalog.
- * @param requestedWindow - Optional requested or configured context window.
- * @param maxCeiling - Optional deployment-level context ceiling.
- * @returns The effective context window limit in tokens.
+ * `maxContextWindow` still clamps, because it is the deployment's own explicit
+ * ceiling rather than our estimate of the model's.
+ *
+ * @param requestedWindow - the window the deployment (or the catalog) declared.
+ * @param maxCeiling - the deployment's ceiling, when it configured one.
+ * @returns the effective window in tokens, or 0 when nothing usable was given.
  */
 export const resolveEffectiveContextWindow = (
-  canonicalWindow: number,
-  requestedWindow?: unknown,
+  requestedWindow: number,
   maxCeiling?: unknown
 ): number => {
-  let effective = canonicalWindow;
-  if (
-    typeof requestedWindow === "number" &&
-    Number.isFinite(requestedWindow) &&
-    requestedWindow > 0
-  ) {
-    effective = Math.min(requestedWindow, canonicalWindow);
-  }
-  if (
-    typeof maxCeiling === "number" &&
-    Number.isFinite(maxCeiling) &&
-    maxCeiling > 0
-  ) {
-    effective = Math.min(effective, maxCeiling);
-  }
-  return effective;
+  const base = usableWindow(requestedWindow) ? requestedWindow : 0;
+  return usableWindow(maxCeiling) ? Math.min(base, maxCeiling) : base;
 };
 
 /**
@@ -748,11 +723,13 @@ export const decoratePlaneAdapters = (
           (typeof existingContext.contextWindow === "number"
             ? existingContext.contextWindow
             : undefined);
+        // What the deployment declared outranks the catalog; the catalog is the
+        // fallback when nothing did.
+        const declaredWindow = requestedWindow ?? spec.context_window;
         const effectiveWindow =
-          spec.context_window > 0
+          declaredWindow > 0
             ? resolveEffectiveContextWindow(
-                spec.context_window,
-                requestedWindow,
+                declaredWindow,
                 config.maxContextWindow
               )
             : undefined;
@@ -819,6 +796,18 @@ export const decoratePlaneAdapters = (
         }
         if (supports !== undefined && supports.length > 0) {
           outRecord.reasoning = { efforts: supports };
+        }
+        // **The deployment's own routing wins.** `modelRoutes` is the override
+        // layer over what the shim and its live refresh computed: an `api` pins
+        // the protocol this model is dispatched with, and a `baseURL` pins where
+        // it goes. Without a declared route the object keeps whatever the adapter
+        // answered, which is the provider's own protocol.
+        const declaredRoute = config.modelRoutes[model];
+        if (declaredRoute?.api !== undefined) {
+          outRecord.api = declaredRoute.api;
+        }
+        if (declaredRoute?.baseURL !== undefined) {
+          outRecord.baseUrl = declaredRoute.baseURL;
         }
         return outRecord;
       };
@@ -1038,8 +1027,7 @@ export const decorateModelInfo = (
 
     if (typeof spec.context_window === "number" && spec.context_window > 0) {
       const effectiveWindow = resolveEffectiveContextWindow(
-        spec.context_window,
-        requestedWindow,
+        requestedWindow ?? spec.context_window,
         config.maxContextWindow
       );
       out.context = {

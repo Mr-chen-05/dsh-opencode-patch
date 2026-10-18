@@ -44,6 +44,21 @@ export {
  * Optional user-defined overrides for a specific model in configuration.
  * Allows tuning contextWindow, maxTokens, name, reasoningEfforts, etc. per model.
  */
+/**
+ * One model's wire routing, in the shape the catalog uses.
+ *
+ * `api` is a pi protocol (`openai-completions`, `openai-responses`,
+ * `anthropic-messages`, `google-generative-ai`); `baseURL` is the endpoint that
+ * model is sent to. Both are optional, and an absent field means "whatever the
+ * shim and its live refresh computed".
+ */
+export interface ModelRouteConfig {
+  /** The pi protocol this model speaks. */
+  readonly api?: string;
+  /** The endpoint this model is sent to, when it differs from the catalog's. */
+  readonly baseURL?: string;
+}
+
 export interface ModelOverrideConfig {
   /** Custom context window limit in tokens. */
   readonly contextWindow?: number;
@@ -135,6 +150,8 @@ export const CONFIG_DEFAULTS = {
   keySource: DEFAULT_KEY_SOURCE,
   maxContextWindow: undefined as number | undefined,
   modelOverrides: {} as Readonly<Record<string, ModelOverrideConfig>>,
+  modelRoutes: {} as Readonly<Record<string, ModelRouteConfig>>,
+  internalRoutes: true,
   originClient: DEFAULT_ORIGIN_CLIENT,
   providers: DEFAULT_PROVIDERS,
   readOpencodeStore: false,
@@ -160,6 +177,28 @@ export interface PluginConfig {
   keySource?: KeySourcePolicy;
   maxContextWindow?: number;
   modelOverrides?: Record<string, ModelOverrideConfig>;
+  /**
+   * Per-model wire routing, in the shape the catalog uses: `api` is the protocol
+   * and `baseURL` the endpoint for that model.
+   *
+   * This is the OVERRIDE layer over what the shim and its live refresh computed.
+   * A model whose protocol the catalog puts on an internal route can be pinned
+   * here instead, and a curated deployment that declares its own providers for
+   * the other protocols can switch {@link internalRoutes} off entirely.
+   */
+  modelRoutes?: Record<string, ModelRouteConfig>;
+  /**
+   * Whether to mount the internal per-protocol routes.
+   *
+   * On (default) the plugin registers a route for every protocol a plane serves,
+   * so a declared model that speaks Anthropic or Google is reachable with no
+   * configuration. Each mounted route is a provider whose model list is the
+   * WHOLE protocol catalog — the price of not being able to see the deployment's
+   * own selection from inside a plugin. A deployment that writes its own provider
+   * entries for those protocols turns this off and declares `modelRoutes` for the
+   * models that need it.
+   */
+  internalRoutes?: boolean;
   originClient?: string;
   providers?: string[];
   readOpencodeStore?: boolean;
@@ -209,6 +248,10 @@ export interface ResolvedPluginConfig {
   maxContextWindow?: number;
   /** Optional per-model configuration overrides. */
   readonly modelOverrides: Readonly<Record<string, ModelOverrideConfig>>;
+  /** The per-model protocol/base overrides, keyed by model id. */
+  readonly modelRoutes: Readonly<Record<string, ModelRouteConfig>>;
+  /** Whether the internal per-protocol routes are mounted. */
+  readonly internalRoutes: boolean;
   originClient: string;
   providers: Set<string>;
   /**
@@ -254,6 +297,39 @@ const resolvedKeySource = (raw: unknown): KeySourcePolicy => {
 const resolvedEndpoint = (raw: unknown): EndpointFamily => {
   const value = readString(raw);
   return isEndpointFamily(value) ? value : CONFIG_DEFAULTS.endpoint;
+};
+
+/**
+ * Read the per-model routing overrides.
+ *
+ * An entry without a usable field is dropped rather than repaired: a typo must
+ * not silently pin a model to an endpoint nobody meant.
+ *
+ * @param raw - the config value.
+ * @returns the overrides, keyed by model id.
+ */
+const resolveModelRoutes = (
+  raw: unknown
+): Readonly<Record<string, ModelRouteConfig>> => {
+  if (!isRecord(raw)) {
+    return {};
+  }
+  const result: Record<string, ModelRouteConfig> = {};
+  for (const [modelId, value] of Object.entries(raw)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    const api = readString(value.api);
+    const baseURL = readString(value.baseURL ?? value.base_url);
+    if (api === undefined && baseURL === undefined) {
+      continue;
+    }
+    result[modelId] = {
+      ...(api === undefined ? {} : { api }),
+      ...(baseURL === undefined ? {} : { baseURL }),
+    };
+  }
+  return result;
 };
 
 const resolveModelOverrides = (
@@ -368,6 +444,11 @@ export const resolveConfig = (
     keySource: resolvedKeySource(config.keySource),
     maxContextWindow: readPositiveInteger(config.maxContextWindow),
     modelOverrides: resolveModelOverrides(config.modelOverrides),
+    modelRoutes: resolveModelRoutes(config.modelRoutes),
+    internalRoutes: readBoolean(
+      config.internalRoutes,
+      CONFIG_DEFAULTS.internalRoutes
+    ),
     originClient:
       readString(config.originClient) ?? CONFIG_DEFAULTS.originClient,
     providers: new Set(
@@ -529,6 +610,22 @@ export const Config = z.object({
     .volatile()
     .description(
       "Optional per-model overrides for contextWindow, maxTokens, and metadata."
+    ),
+  modelRoutes: z
+    .any()
+    .default({})
+    .volatile()
+    .description(
+      "Per-model wire routing overrides: { <id>: { api, baseURL } }. The api " +
+        "names a pi protocol; baseURL replaces the catalog's endpoint."
+    ),
+  internalRoutes: z
+    .boolean()
+    .default(CONFIG_DEFAULTS.internalRoutes)
+    .volatile()
+    .description(
+      "Mount the internal per-protocol routes. Off for a deployment that " +
+        "declares its own providers for the other protocols."
     ),
   usageBaseURL: z
     .string()

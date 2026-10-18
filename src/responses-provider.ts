@@ -722,6 +722,62 @@ const mountScope = (
  * @returns the disposer withdrawing the mount, or `undefined` when nothing was
  *   mounted.
  */
+/**
+ * The model ids the deployment declared on one plane route.
+ *
+ * `ctx.llm` is the projection of the user's own configuration: `listModels(route)`
+ * answers what that route advertises, and a route the user wrote is exactly what
+ * we must not widen. Returns `undefined` when the service cannot answer — the
+ * caller then falls back to the catalog rather than mounting nothing.
+ *
+ * @param ctx - the host context.
+ * @param route - the plane route (`opencode`, `opencode-go`).
+ * @returns the declared ids, or `undefined` when unreadable.
+ */
+/**
+ * Narrow a route's models to the ones the deployment declared.
+ *
+ * The rule the mount needs and the whole reason it can be trusted: a route's
+ * model list is what a picker shows, so it may never be wider than the user's own
+ * configuration. `undefined` means "the declaration could not be read", which
+ * falls back to the full list rather than mounting nothing.
+ *
+ * @param models - the protocol's models, from the catalog.
+ * @param declared - the ids the user wrote, or `undefined` when unreadable.
+ * @returns `models` when unreadable, otherwise only the declared entries.
+ */
+export const narrowToDeclared = <T extends { readonly id: string }>(
+  models: readonly T[],
+  declared?: ReadonlySet<string>
+): readonly T[] =>
+  declared === undefined ? models : models.filter((m) => declared.has(m.id));
+
+const declaredModelsFor = async (
+  ctx: CordisContext,
+  route: string
+): Promise<ReadonlySet<string> | undefined> => {
+  const listModels = ctx.llm?.listModels;
+  if (typeof listModels !== "function") {
+    return undefined;
+  }
+  try {
+    const listed = await Reflect.apply(listModels, ctx.llm, [route]);
+    if (!Array.isArray(listed)) {
+      return undefined;
+    }
+    const ids = new Set<string>();
+    for (const entry of listed) {
+      const id = isRecord(entry) ? entry.id : undefined;
+      if (typeof id === "string" && id.length > 0) {
+        ids.add(id);
+      }
+    }
+    return ids;
+  } catch {
+    return undefined;
+  }
+};
+
 export const registerResponsesProvider = async (
   ctx: CordisContext,
   config?: ResolvedPluginConfig
@@ -781,6 +837,16 @@ export const registerResponsesProvider = async (
   // hand-picks the models it serves, and mounting over that would take the choice
   // away. Deferring is the point — this module exists so a deployment that
   // declares NOTHING still works, not to override one that does.
+  // A curated deployment can turn the mount off: every mounted route is a
+  // provider whose model list is the whole protocol catalog, which is how models
+  // nobody selected reach a picker. Such a deployment declares its own provider
+  // entries (and `modelRoutes` for the ids that need them) instead.
+  if (config?.internalRoutes === false) {
+    ctx.logger?.info?.(
+      "[dsh-opencode-patch] internal routes are off (internalRoutes: false); a declared provider must serve each protocol"
+    );
+    return undefined;
+  }
   const wanted = Object.entries(ROUTE_FOR_PLANE_PROTOCOL).flatMap(
     ([plane, entry]) =>
       Object.entries(entry.routes)
@@ -821,6 +887,17 @@ export const registerResponsesProvider = async (
     );
     return undefined;
   }
+  // **What the deployment declared, per plane.** The mount serves the protocols a
+  // declared model needs, with only those models: a route's model list is what
+  // the picker shows, and the whole protocol catalog there is how models nobody
+  // selected reached it. Read from the host, which holds the user's configuration.
+  const declaredByPlane = new Map<string, ReadonlySet<string>>();
+  for (const plane of ["opencode", "opencode-go"]) {
+    const ids = await declaredModelsFor(ctx, plane);
+    if (ids !== undefined) {
+      declaredByPlane.set(plane, ids);
+    }
+  }
   const providers: Record<string, unknown> = {};
   const mounted: string[] = [];
   for (const { plane, protocol, route, baseURL } of wanted) {
@@ -831,9 +908,22 @@ export const registerResponsesProvider = async (
     // route whose protocol that plane does not carry has no entry in the table
     // at all. The guard this replaces existed because every route used the Zen
     // catalog, which made every Go route empty.
-    const models = sdksForProtocol(protocol).flatMap((sdk) =>
-      modelsForSdk(sdk, source.catalog)
+    const declaredIds = declaredByPlane.get(plane);
+    const models = narrowToDeclared(
+      sdksForProtocol(protocol).flatMap((sdk) =>
+        modelsForSdk(sdk, source.catalog)
+      ),
+      declaredIds
     );
+    // A protocol no declared model speaks is not mounted at all: an empty route
+    // is dropped from the picker anyway, and mounting it only to hide it is how
+    // the exposure happened.
+    if (models.length === 0) {
+      ctx.logger?.info?.(
+        `[dsh-opencode-patch] ${route} not mounted: no declared model speaks ${protocol}`
+      );
+      continue;
+    }
     providers[route] = providerProfile(
       protocol,
       models,

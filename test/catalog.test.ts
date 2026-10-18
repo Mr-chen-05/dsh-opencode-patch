@@ -335,8 +335,14 @@ describe("OpenCode Model Catalog & Enrichment", () => {
       object: string;
     };
     expect(json.object).toBe("list");
-    // Every bundled Go model plus the one custom row the gateway added.
-    expect(json.data.length).toBe(OPENCODE_GO_CATALOG.length + 1);
+    // **Only the rows the gateway answered with.** The listing used to be seeded
+    // with the whole bundled catalog, which is how a deployment that had declared
+    // four models saw every model the vendor publishes. Enrichment adds metadata
+    // to a row; it does not add rows.
+    expect(json.data.map((row) => row.id).toSorted()).toEqual([
+      "custom-gateway-model",
+      "deepseek-v4.1-flash",
+    ]);
 
     const deepseek = json.data.find((m) => m.id === "deepseek-v4.1-flash");
     expect(deepseek).toBeDefined();
@@ -347,20 +353,31 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(custom).toBeDefined();
     expect(custom?.id).toBe("custom-gateway-model");
 
-    // Also verify Zen models enrichment
-    const zenResponse = await enrichModelsResponse(
+    // An empty answer stays empty: it is the gateway's list, not an invitation to
+    // supply the catalog's.
+    const emptyResponse = await enrichModelsResponse(
       "https://opencode.ai/zen/v1/models",
       Response.json({ data: [], object: "list" })
     );
-    const zenJson = (await zenResponse.json()) as {
+    const emptyJson = (await emptyResponse.json()) as {
       data: Array<{ id: string }>;
     };
-    // The runtime catalog, not the raw shim: retirement filters at load, so the
-    // enriched listing is one shorter than the generated data.
-    expect(zenJson.data.length).toBe(getLiveZenCatalog().length);
-    expect(
-      zenJson.data.some((m) => m.id === "muse-spark-1.2-contributor-free")
-    ).toBe(true);
+    expect(emptyJson.data).toEqual([]);
+
+    // And a row the gateway DOES return is enriched from the catalog.
+    const zenResponse = await enrichModelsResponse(
+      "https://opencode.ai/zen/v1/models",
+      Response.json({
+        data: [{ id: "muse-spark-1.2-contributor-free", object: "model" }],
+        object: "list",
+      })
+    );
+    const zenJson = (await zenResponse.json()) as {
+      data: Array<{ id: string; context_window?: number }>;
+    };
+    expect(zenJson.data.map((m) => m.id)).toEqual([
+      "muse-spark-1.2-contributor-free",
+    ]);
   });
 
   it("keeps the Muse 1.2 rows the zen plane actually serves", async () => {
@@ -411,7 +428,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const mockFetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("/models")) {
         return Response.json({
-          data: [{ id: "deepseek-v4-flash", object: "model" }],
+          data: [{ id: "deepseek-v4.1-flash", object: "model" }],
           object: "list",
         });
       }
@@ -423,13 +440,12 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(res.status).toBe(200);
 
     const json = (await res.json()) as {
-      data: Array<{ id: string; name?: string }>;
+      data: Array<{ id: string; name?: string; context_window?: number }>;
     };
-    expect(json.data.length).toBeGreaterThanOrEqual(OPENCODE_GO_CATALOG.length);
-
-    const qwen = json.data.find((m) => m.id === "qwen3.8-flash");
-    expect(qwen).toBeDefined();
-    expect(qwen?.name).toBe("Qwen3.8 Flash");
+    // The gateway's one row, enriched — not the catalog appended to it.
+    expect(json.data.map((row) => row.id)).toEqual(["deepseek-v4.1-flash"]);
+    expect(json.data[0]?.name).toBe("DeepSeek V4.1 Flash");
+    expect(json.data[0]?.context_window).toBe(1_000_000);
   });
 
   it("leaves the raw gateway listing alone when enrichModels is off", async () => {

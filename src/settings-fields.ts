@@ -100,6 +100,18 @@ export const CONFIG_ONLY_FIELDS: readonly {
       "per-model overrides for contextWindow, maxTokens, and metadata in YAML config",
   },
   {
+    field: "modelRoutes",
+    reason:
+      "per-model wire routing (api and baseURL); it overrides what the catalog " +
+      "computed, which is a deployment concern rather than a card control",
+  },
+  {
+    field: "internalRoutes",
+    reason:
+      "whether to mount the per-protocol routes; off is for a deployment that " +
+      "declares its own provider entries for those protocols",
+  },
+  {
     field: "usageBaseURL",
     reason: "endpoint override; auto-discovered from the composition",
   },

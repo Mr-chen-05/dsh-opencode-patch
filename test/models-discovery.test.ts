@@ -25,7 +25,6 @@ import {
   resolveEffectiveContextWindow,
   RESPONSES_ROUTE,
   type CordisContext,
-  type CatalogModelSpec,
 } from "../src/index.ts";
 import {
   decoratePlaneAdapters,
@@ -42,18 +41,6 @@ afterEach(() => {
 const providers = new Set(["opencode", "opencode-go"]);
 const gatewayUrls = ["opencode.ai/zen"];
 const config = { ...resolveConfig(), gatewayUrls, providers };
-
-const catalogRow = (
-  id: string,
-  name = id,
-  inputModalities: string[] = ["text"]
-): CatalogModelSpec => ({
-  context_window: 1000000,
-  id,
-  input_modalities: inputModalities,
-  max_output_tokens: 131072,
-  name,
-});
 
 describe("resolveDiscoveryProvider", () => {
   it("prefers an explicitly claimed route ID", () => {
@@ -134,8 +121,7 @@ describe("mergeDiscoveredModels", () => {
           name: "Adapter Only",
         },
       ],
-      "zen",
-      []
+      "zen"
     );
     const ids = merged.map((m) => m.id);
     expect(ids).not.toContain("retired-one");
@@ -157,11 +143,7 @@ describe("mergeDiscoveredModels", () => {
         { id: "muse-spark-1.2-contributor-free", name: "Muse Spark 1.2 Free" },
         { id: "", name: "Nameless" },
       ],
-      "zen",
-      [
-        catalogRow("adapter-model", "Catalog Adapter Model"),
-        catalogRow("space-bunny-free", "Space Bunny Free"),
-      ]
+      "zen"
     );
 
     // **Exactly what the adapter reported.** The catalog supplies metadata, not
@@ -184,8 +166,7 @@ describe("mergeDiscoveredModels", () => {
   it("does not retire Go’s paid Muse 1.2 contributor row", () => {
     const merged = mergeDiscoveredModels(
       [{ id: "muse-spark-1.2-contributor" }],
-      "go",
-      [catalogRow("space-bunny-free", "Space Bunny Free")]
+      "go"
     );
 
     // Kept — it is not retired — and the catalog appends nothing.
@@ -202,14 +183,7 @@ describe("mergeDiscoveredModels", () => {
           inputModalities: ["text", "image", "video", "audio", "pdf"],
         },
       ],
-      "go",
-      [
-        catalogRow("catalog-multimodal", "Catalog Multimodal", [
-          "text",
-          "image",
-          "video",
-        ]),
-      ]
+      "go"
     );
 
     // Unsupported modalities are stripped from the adapter row, and the catalog
@@ -225,13 +199,13 @@ describe("mergeDiscoveredModels", () => {
     ]);
   });
 
-  it("stands the catalog in only when the adapter reported nothing", () => {
-    // An empty answer is an ABSENCE, not a declaration of "no models", so the
-    // catalog fills it — that is the one case where appending is right.
-    const merged = mergeDiscoveredModels([], "zen", [
-      catalogRow("space-bunny-free", "Space Bunny Free"),
-    ]);
-    expect(merged.map((model) => model.id)).toEqual(["space-bunny-free"]);
+  it("adds nothing when the adapter reported nothing", () => {
+    // An empty answer is an ABSENCE, and the previous reading of it — "no
+    // preference, so the catalog stands in" — is how a deployment that had
+    // declared four models saw eighty-six. The merge enriches what it is given and
+    // never widens it, in this case as in every other.
+    const merged = mergeDiscoveredModels([], "zen");
+    expect(merged).toEqual([]);
   });
 
   it("enriches candidate rows missing contextWindow or maxTokens from the catalog spec", () => {
@@ -242,18 +216,7 @@ describe("mergeDiscoveredModels", () => {
           name: "MiniMax-M3",
         },
       ],
-      "go",
-      [
-        {
-          context_window: 1_000_000,
-          id: "minimax-m3",
-          input_modalities: ["text", "image"],
-          max_output_tokens: 131_072,
-          name: "MiniMax-M3",
-          provider_npm: "@ai-sdk/anthropic",
-          reasoning: true,
-        },
-      ]
+      "go"
     );
 
     expect(merged[0]).toEqual({
@@ -1380,37 +1343,31 @@ describe("models-discovery: resolveEffectiveContextWindow", () => {
     expect(resolveEffectiveContextWindow(1_050_000, 2_000_000)).toBe(1_050_000);
   });
 
-  it("honors lower requested window when below canonical limit", () => {
-    // If user tunes context down to 64,000 tokens on a 1M model, it uses 64,000
-    expect(resolveEffectiveContextWindow(1_050_000, 64_000)).toBe(64_000);
+  it("takes the window the deployment declared, even above the catalog's", () => {
+    // The catalog is a bundled snapshot of the vendor's published limits and it is
+    // conservative where the vendor is: the free DeepSeek id is listed at 200k
+    // while the model serves 1M. A declared window therefore wins outright —
+    // `Math.min(requested, canonical)` used to clamp it back down, which made a
+    // stale catalog entry unoverridable.
+    expect(resolveEffectiveContextWindow(1_000_000)).toBe(1_000_000);
+    expect(resolveEffectiveContextWindow(2_000_000)).toBe(2_000_000);
   });
 
-  it("clamps to maxCeiling when deployment ceiling is configured", () => {
-    // If deployment configures ceiling of 262,144 tokens, it clamps 1,050,000 down to 262,144
-    expect(resolveEffectiveContextWindow(1_050_000, undefined, 262_144)).toBe(
-      262_144
-    );
-    // If both requested and ceiling exist, it takes the lowest
-    expect(resolveEffectiveContextWindow(1_050_000, 100_000, 262_144)).toBe(
-      100_000
-    );
-    expect(resolveEffectiveContextWindow(1_050_000, 500_000, 262_144)).toBe(
-      262_144
-    );
+  it("still clamps to an explicitly configured ceiling", () => {
+    // `maxContextWindow` is the deployment's own bound, which is a different thing
+    // from our estimate of the model's.
+    expect(resolveEffectiveContextWindow(2_000_000, 262_144)).toBe(262_144);
+    expect(resolveEffectiveContextWindow(100_000, 262_144)).toBe(100_000);
   });
 
   it("ignores invalid, non-positive or non-finite values", () => {
-    expect(resolveEffectiveContextWindow(1_050_000, -100, "invalid")).toBe(
-      1_050_000
-    );
-    expect(resolveEffectiveContextWindow(1_050_000, 0, null)).toBe(1_050_000);
+    expect(resolveEffectiveContextWindow(1_050_000, "invalid")).toBe(1_050_000);
+    expect(resolveEffectiveContextWindow(1_050_000, null)).toBe(1_050_000);
     expect(
-      resolveEffectiveContextWindow(
-        1_050_000,
-        Number.NaN,
-        Number.POSITIVE_INFINITY
-      )
+      resolveEffectiveContextWindow(1_050_000, Number.POSITIVE_INFINITY)
     ).toBe(1_050_000);
+    expect(resolveEffectiveContextWindow(0)).toBe(0);
+    expect(resolveEffectiveContextWindow(Number.NaN)).toBe(0);
   });
 });
 

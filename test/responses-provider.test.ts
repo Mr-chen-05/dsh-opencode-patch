@@ -31,6 +31,7 @@ import {
   inheritedCredentialRef,
   loadPiAi,
   modelsForSdk,
+  narrowToDeclared,
   registerResponsesProvider,
   GOOGLE_INTERNAL_ROUTE,
   SELF_MOUNTED_ROUTES,
@@ -1479,5 +1480,35 @@ describe("responses-provider: a loader that breaks its own contract", () => {
     const host = createHost();
     (host.ctx.loader as { entries: unknown }).entries = 42;
     await expect(registerResponsesProvider(host.ctx)).resolves.toBeUndefined();
+  });
+});
+
+describe("responses-provider · an internal route never outgrows the declaration", () => {
+  const models = [
+    { id: "claude-haiku-5-5" },
+    { id: "claude-sonnet-5-5" },
+    { id: "gpt-5.4" },
+  ];
+
+  it("keeps only the models the deployment declared", () => {
+    // A mounted route's model list is what a picker shows. The whole protocol
+    // catalog there is how models nobody selected reached the screen, which is
+    // the bug this narrowing exists for.
+    expect(narrowToDeclared(models, new Set(["claude-haiku-5-5"]))).toEqual([
+      { id: "claude-haiku-5-5" },
+    ]);
+  });
+
+  it("falls back to the full list when the declaration cannot be read", () => {
+    // `undefined` is "the host could not answer", not "the user declared
+    // nothing": mounting nothing would break every deployment whose host does
+    // not expose the listing.
+    expect(narrowToDeclared(models)).toEqual(models);
+  });
+
+  it("mounts nothing when the declaration excludes this protocol entirely", () => {
+    // The caller skips the route on an empty list rather than registering a
+    // provider with no models.
+    expect(narrowToDeclared(models, new Set(["gpt-5.4"]))).toHaveLength(1);
   });
 });
