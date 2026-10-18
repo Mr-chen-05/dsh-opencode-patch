@@ -1000,7 +1000,7 @@ export const registerResponsesProvider = async (
         }))
   );
   if (wanted.length === 0) {
-    ctx.logger?.info?.(
+    console.info(
       "[dsh-opencode-patch] every internal route is already declared; leaving them alone"
     );
     reportGaps();
@@ -1008,7 +1008,7 @@ export const registerResponsesProvider = async (
   }
   const host = loadPiAi(ctx);
   if (host === undefined) {
-    ctx.logger?.info?.(
+    console.info(
       "[dsh-opencode-patch] no loaded llm-pi-ai in this composition; internal routes stay unregistered"
     );
     reportGaps();
@@ -1035,7 +1035,10 @@ export const registerResponsesProvider = async (
     // is dropped from the picker anyway, and mounting it only to hide it is how
     // the exposure happened.
     if (models.length === 0) {
-      ctx.logger?.info?.(
+      // Console, like the boot and diagnostic lines: this is the decision a
+      // reader needs to verify that nothing the deployment did not declare was
+      // mounted, and the logger only buffers.
+      console.info(
         `[dsh-opencode-patch] ${route} not mounted: no declared model speaks ${protocol}`
       );
       continue;
@@ -1080,7 +1083,13 @@ export const registerResponsesProvider = async (
       );
       return bridgeDispose;
     }
-    ctx.logger?.info?.("[dsh-opencode-patch] mounted %s", mounted.join("; "));
+    // The line that answers "what actually mounted", which the boot line's
+    // provider LIST does not: that one is the claimed set, not the mounted set.
+    console.info(
+      `[dsh-opencode-patch] mounted ${
+        mounted.length === 0 ? "no internal route" : mounted.join("; ")
+      }`
+    );
 
     return () => {
       bridgeDispose?.();

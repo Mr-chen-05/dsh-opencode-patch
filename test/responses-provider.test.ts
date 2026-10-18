@@ -638,17 +638,25 @@ describe("responses-provider: registration is best-effort", () => {
     // A deployment that does not must degrade to "the route you declared still
     // works", not fail the boot — and must say so at INFO, because that is an
     // expected state rather than a fault.
-    const info = vi.fn();
+    // The report goes to the CONSOLE, not `ctx.logger`: cordis's logger only
+    // buffers (its default exporter pushes to a ring) and no host package
+    // registers a console exporter, so a `logger.info` here is invisible in the
+    // terminal — which is where someone checks whether a build loaded.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const ctx = {
       llm: { listProviders: () => [], registerAdapter: vi.fn() },
       loader: { entries: () => [] },
-      logger: { info },
+      logger: {},
     } as unknown as CordisContext;
-    await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
-    expect(ctx.llm?.registerAdapter).not.toHaveBeenCalled();
-    expect(info).toHaveBeenCalledWith(
-      expect.stringContaining("no loaded llm-pi-ai")
-    );
+    try {
+      await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
+      expect(ctx.llm?.registerAdapter).not.toHaveBeenCalled();
+      expect(info).toHaveBeenCalledWith(
+        expect.stringContaining("no loaded llm-pi-ai")
+      );
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("defers to routes the profile already declares", async () => {
@@ -675,7 +683,7 @@ describe("responses-provider: registration is best-effort", () => {
     // DUPLICATE_ADAPTER. Here every internal route is in the raw map and NONE
     // is in the decorated list — that discrepancy, inverted into an assertion:
     // reading the decorated list would mount, reading the map stands down.
-    const info = vi.fn();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const plugin = vi.fn();
     const internal = Object.values(ROUTE_FOR_PLANE_PROTOCOL).flatMap((plane) =>
       Object.values(plane.routes)
@@ -687,14 +695,18 @@ describe("responses-provider: registration is best-effort", () => {
         listProviders: () => [],
         registerAdapter: vi.fn(),
       },
-      logger: { info },
+      logger: {},
     } as unknown as CordisContext;
-    await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
-    expect(plugin).not.toHaveBeenCalled();
-    expect(ctx.llm?.registerAdapter).not.toHaveBeenCalled();
-    expect(info).toHaveBeenCalledWith(
-      expect.stringContaining("every internal route is already declared")
-    );
+    try {
+      await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
+      expect(plugin).not.toHaveBeenCalled();
+      expect(ctx.llm?.registerAdapter).not.toHaveBeenCalled();
+      expect(info).toHaveBeenCalledWith(
+        expect.stringContaining("every internal route is already declared")
+      );
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("stands down when the host offers no scope to mount into", async () => {
