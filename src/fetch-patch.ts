@@ -382,16 +382,18 @@ export const patchFetch = (
           wireHeader,
           wireHeader === "authorization" ? `Bearer ${fallbackKey}` : fallbackKey
         );
-        // Keep the Bearer fallback for callers that use it on other wire shapes.
-        // Never overwrite real request auth merely to add the protocol's header.
-        const bearer = headers.get("authorization");
-        if (
-          wireHeader !== "authorization" &&
-          (bearer === null ||
-            isPlaceholderApiKey(bearer.replace(/^Bearer\s+/iu, "")))
-        ) {
-          headers.set("authorization", `Bearer ${fallbackKey}`);
-        }
+        // **One credential, on the protocol's own header, and nothing else.**
+        // The official client passes the key as an SDK option
+        // (`packages/opencode/src/provider/provider.ts:240`, `options: ok ? {} :
+        // { apiKey: "public" }`) and lets the SDK choose the header: `x-api-key`
+        // for `@ai-sdk/anthropic`, `x-goog-api-key` for `@ai-sdk/google`,
+        // `Authorization` for the openai family. Its only per-protocol header of
+        // its own is `anthropic-beta` (`:211-219`).
+        //
+        // A "Bearer fallback" used to be added here for the non-authorization
+        // shapes, so an Anthropic request carried BOTH headers. That is a
+        // credential on a header the protocol does not read, and it is not what
+        // the client does.
       } else if (
         plane.length > 0 &&
         !warnedNoCredential.has(plane) &&

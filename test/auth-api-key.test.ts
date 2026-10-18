@@ -90,7 +90,7 @@ describe("API Key Authentication", () => {
     expect(result.request?.headers.authorization).toBe(`Bearer ${ZEN_KEY}`);
   });
 
-  it("authenticates Anthropic Messages requests using x-api-key header and keeps Bearer fallback", async () => {
+  it("authenticates Anthropic Messages with x-api-key ALONE", async () => {
     const result = await runner.execute("opencode", "/zen/v1/messages", {
       body: {
         messages: [{ content: "hi", role: "user" }],
@@ -101,7 +101,12 @@ describe("API Key Authentication", () => {
 
     expect(result.status).toBe(200);
     expect(result.request?.headers["x-api-key"]).toBe(ZEN_KEY);
-    expect(result.request?.headers.authorization).toBe(`Bearer ${ZEN_KEY}`);
+    // **Only the protocol's own header.** The official client passes the key as
+    // an SDK option and lets the SDK choose the header
+    // (`provider/provider.ts:240`); it never sets `Authorization` on an Anthropic
+    // request. A second copy of the credential on a header this protocol does not
+    // read is not a fallback, it is a divergence.
+    expect(result.request?.headers.authorization).toBeUndefined();
   });
 
   it("authenticates Google Generative AI requests using x-goog-api-key header", async () => {
@@ -115,7 +120,8 @@ describe("API Key Authentication", () => {
 
     expect(result.status).toBe(200);
     expect(result.request?.headers["x-goog-api-key"]).toBe(ZEN_KEY);
-    expect(result.request?.headers.authorization).toBe(`Bearer ${ZEN_KEY}`);
+    // Same rule as Anthropic: the Google protocol reads its own header.
+    expect(result.request?.headers.authorization).toBeUndefined();
   });
 
   it("authenticates Go plane requests using OPENCODE_GO_API_KEY", async () => {

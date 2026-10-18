@@ -243,7 +243,7 @@ describe("the request shape per configuration", () => {
     expect(recorded().headers["x-opencode-org-id"]).toBe("wrk_mock");
   });
 
-  it("authenticates the Messages endpoint with x-api-key and the Bearer fallback", async () => {
+  it("authenticates the Messages endpoint with x-api-key alone", async () => {
     const spec = firstSpecFor("opencode", "@ai-sdk/anthropic");
     if (spec === undefined) {
       throw new Error("the zen catalog serves no anthropic model");
@@ -263,7 +263,10 @@ describe("the request shape per configuration", () => {
     expect(response.status).toBe(200);
     const request = recorded();
     expect(request.headers["x-api-key"]).toBe(ZEN_KEY);
-    expect(request.headers.authorization).toBe(`Bearer ${ZEN_KEY}`);
+    // The official client hands the key to the SDK and lets it choose the header
+    // (`packages/opencode/src/provider/provider.ts:240`); an Anthropic request
+    // carries `x-api-key` and no `Authorization`.
+    expect(request.headers.authorization).toBeUndefined();
   });
 
   it("authenticates the Google endpoint with x-goog-api-key", async () => {
@@ -281,7 +284,7 @@ describe("the request shape per configuration", () => {
     expect(response.status).toBe(200);
     const request = recorded();
     expect(request.headers["x-goog-api-key"]).toBe(ZEN_KEY);
-    expect(request.headers.authorization).toBe(`Bearer ${ZEN_KEY}`);
+    expect(request.headers.authorization).toBeUndefined();
   });
 
   it("adds the core-tool schemas for a free-tier responses model", async () => {
