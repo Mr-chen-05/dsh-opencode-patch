@@ -182,7 +182,7 @@ const ModelSchema = z.object({
 - With `anonymous`, the proxy strips `authorization`, `x-api-key` and `x-goog-api-key` and forwards keyless; 1.19.3 has an extra rule 2.x drops — `if (anonymous && !generation?.anonymous) return undefined` — so **1.19.3 requires the gateway's own generation path to declare the model anonymous**, while 2.x forwards any keyless request straight through.
 - `billingSource` is `"anonymous"`, `"free"`, `"byok"`, `"subscription"`, `"lite"` or `"balance"`, and `"anonymous"` skips accounting entirely.
 
-**Nothing in either line reads the session id's low bits as an admission rule.** §3.1 records the refutation in full.
+**The session id's low bits are not part of the `allowAnonymous` rule** — that gate is per model and says nothing about sessions. It is a SEPARATE rule, and §3.1 records it: the gateway does enforce a band on the session id's low twelve bits, and it is enforced independently of what the body carries and of which credential is present.
 
 `allowAnonymous` is **not present in the 2.x snapshot** (`packages/core/src/models-dev/snapshot.txt` carries no such flag, and the 2.x handler file no longer has the key). How a 2.x account decides free access is **unverified**; the 1.19.3 rule is the one we implement against.
 
@@ -210,27 +210,49 @@ Not a bug, but the cost of every item above: `lib/index.mjs` is read once at pro
 
 ## 3. Claims verified against upstream
 
-### 3.1 "The gateway passes only sessions whose low twelve bits are in `f[c-f]x`" — REFUTED
+### 3.1 "The gateway passes only sessions whose low twelve bits are in `f[c-f]x`" — CONFIRMED
 
-**The claim** (`src/session.ts`, PR #37, live-probe OmniRoute #16571): the gateway 403s any session id whose low twelve hex bits are outside `[0xFC0, 0xFFE]`, so a uniform 12-bit counter would pass ~1.54% of sessions.
+**The claim** (`src/session.ts`, PR #37, live-probe OmniRoute #16571): the gateway refuses any session id whose low twelve hex bits are outside `[0xFC0, 0xFFE]`, answering `403 FreeTierError`. A uniform counter therefore passes ~1.5% of sessions and dooms the rest at mint.
 
-**What upstream actually does.** `counter` resets to 0 when the millisecond changes and becomes 1 on the first id of that millisecond. Verified by porting the vendor's `create()` byte-for-byte and running it — see `scripts/verify-session-band.ts`:
+**This section used to say REFUTED, and that was the error. Two mistakes, one each.**
+
+_The simulation modelled the wrong direction._ `packages/opencode/src/id/id.ts` mints
 
 ```
-upstream OpenCode CLI (packages/opencode/src/id/id.ts)
-samples             : 200000
-distinct low-12     : 0x1
-in band [fc0,ffe]   : 0 (0.0000%)
-  => upstream NEVER lands in the claimed band.
+now = BigInt(Date.now()) * 4096n + BigInt(++counter)   // counter resets每毫秒
+now = direction === "descending" ? ~now : now
 ```
 
-**Why the claim fails.** A rule admitting only `[0xFC0, 0xFFE]` would reject `0x001` — the value the OpenCode CLI produces for essentially every session. It cannot be an admission gate because it would gate out the vendor's own client. The refutation is confirmed against **both** generators and **both** major versions (1.19.3 and 2.0.32 are identical here).
+and **sessions use `descending`**. The port in `scripts/verify-session-band.ts` reproduced `create()` without that step, so it reported the ASCENDING residue — `0x001`, outside the band — and concluded the band could not be a rule. With the inversion, the low twelve bits are `0xFFF - counter`: `0xFFE` for the first id of a millisecond, and still in band for any client minting fewer than 64 in one millisecond. The script now reports both directions side by side.
 
-**What is still true.** Free-tier requests do sometimes answer 403. Some rule applies; it is not this one. And §1.5 now names a rule that _is_ real: `allowAnonymous` on the model entry.
+_The live probe could not have observed the thing it claimed to test._ All five ids — `0xfc5`, `0x001`, `0xffe`, `0x000`, `0xfff` — answered identically:
 
-**Cost of the wrong fix.** Clamping collapses our entropy from 4096 possible low-12 values to 63, and it does so in the bits the timestamp occupies — the one part upstream reads back with `timestamp(id)`. It cannot help, and it degrades the id.
+```
+401  Go requires a credential
+```
 
-**Status.** The clamp and its test are still in the tree. Removing them is a one-line revert plus the test, and it wants its own commit and its own live re-probe rather than a drive-by. Recommended next step: probe with a `0x001`-style id and a legacy key, and record the answer.
+That is the CREDENTIAL check, on a Go-plane request with no Go credential. Every probe was refused before the session was ever considered, so the table proved nothing about sessions; the one variable that mattered was held constant at "missing".
+
+**What the gateway actually does — measured.** Replaying the vendor client's own captured request body (179,166 bytes) through the same runtime, changing nothing but the session header:
+
+| session id | low twelve bits | answer |
+| --- | --- | --- |
+| captured from the real client | in band | `200` |
+| freshly minted, vendor descending | `0xFFE` | `200` |
+| freshly minted, vendor ascending | `0x001` | `500` |
+| this plugin's old hash-derived id | arbitrary | `500` |
+| ascending, low twelve forced to `0xFFE` | `0xFFE` | `200` |
+| ascending, low twelve forced to `0xFC0` | `0xFC0` | `200` |
+| ascending, low twelve `0x001` | `0x001` | `403 FreeTierError` |
+| descending, `counter=3000` | `0x447` | `500` |
+
+Only the low twelve bits decide. Direction is not checked; both a descending id and an ascending one whose residue is in the band are admitted.
+
+**Where the band comes from.** It is a consequence, not a rule the vendor enforces on itself: minting descending puts the residue at `0xFFF - counter`, and a real client's counter is a small number inside one millisecond.
+
+**What this plugin does now.** `counter = 1`, because exactly one id is minted per session — the vendor's own value for the first id of a millisecond. Inverting `(ms << 12) + 1` lands on `0xFFE` with no clamp: `src/session.ts` mentions no band at all. The clamp PR #37 introduced was a correct reading of the gateway and is no longer needed; keeping it would have been the wrong shape to ship, not the wrong answer.
+
+**What the wrong version cost.** A refutation that reads clean, a section of this document asserting it three times, and a clamp removed as "disproven" — and then rediscovered by replaying the real client. The lesson is the one in "the general method" below: a probe that cannot see past the credential check is not a probe of the session.
 
 ### 3.2 "`init.body` is undefined on DSH's dispatch path, so injection was skipped" — VERIFIED
 
@@ -316,19 +338,11 @@ That is the "kept until it stops ANSWERING" probe the source comments kept askin
 - `RETAINED_MODEL_IDS` → `cat-jam-free`, `exo-free`, `muse-spark-1.2-contributor-free`; `step-5-preview-free` removed.
 - `RETIRED_ZEN_MODEL_IDS` → `muse-spark-1.2-contributor` only. `muse-spark-1.2` answered `401` on zen and `muse-spark-1.2-contributor-free` answered `403`, so both were being hidden while being served.
 
-### The session "pass band" is refuted LIVE
+### The session band, measured LIVE — CONFIRMED
 
-Five session ids were minted with low-12 values `0xfc5`, `0x001`, `0xffe`, `0x000` and `0xfff` and sent to `POST /zen/go/v1/chat/completions`. All five answered identically:
+The earlier version of this section recorded the opposite. It sent five ids to `POST /zen/go/v1/chat/completions` on a Go plane with no Go credential, and all five answered `401 Go requires a credential` — the credential check, never the session. Refused before the session was read, the probe could not distinguish a good id from a bad one.
 
-```
-BAND      low12=0xfc5  401  Go requires a credential
-UPSTREAM  low12=0x001  401  Go requires a credential
-BAND2     low12=0xffe  401  Go requires a credential
-ZERO      low12=0x000  401  Go requires a credential
-MAX       low12=0xfff  401  Go requires a credential
-```
-
-The session header was accepted every time; the only complaint was the credential. So the low twelve bits do not decide admission, and the clamp in `src/session.ts` is gone. That is the third independent refutation, after the vendor's generator and the 200k-id simulation.
+Repeated properly — the vendor client's captured body, its own credential, only the session changed — the band is enforced, and the table is in §3.1.
 
 ## 3.9 The bundled shim was stale — RESOLVED
 
@@ -404,4 +418,4 @@ It checks, and exits non-zero on any failure:
 3. Compare the distribution against the claimed constraint. A constraint the upstream violates in its common case is not a constraint.
 4. When a claim is about what the GATEWAY does, probe the gateway. `401`/`403` means the model exists and the credential is missing; `400`/`410` means it is gone. That one table settled the free-tier, deprecation and retirement questions at once.
 
-For the session id specifically, `scripts/verify-session-band.ts` reproduces the refutation in §3.1 against a byte-for-byte port of the vendor's generator.
+For the session id specifically, `scripts/verify-session-band.ts` runs a byte-for-byte port of the vendor's generator in BOTH directions, which is what makes the source of the band visible: ascending never lands in it, descending always does.
