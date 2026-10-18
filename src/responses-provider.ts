@@ -791,6 +791,38 @@ export const unroutedDeclaredModels = (
   return gaps.toSorted((a, b) => a.localeCompare(b));
 };
 
+/**
+ * Declared models the bundled catalog does not describe.
+ *
+ * Two populations, and both are worth naming once at startup: an id NEWER than
+ * the bundled snapshot (the shim is generated, so it lags the vendor between
+ * releases) and an id the vendor has marked `deprecated` (the shim drops those by
+ * design). Either way the model is served from the DEPLOYMENT's configuration —
+ * the host lists it, the route speaks it — but this plugin can add no metadata:
+ * no context window, no modalities, no reasoning levels. Saying so is the
+ * difference between "the plugin is ignoring my model" and "the plugin has never
+ * seen that id".
+ *
+ * @param declaredByPlane - the ids the deployment declared, per plane route.
+ * @returns one `id (plane)` entry per undescribed model, sorted for a stable log.
+ */
+export const undescribedDeclaredModels = (
+  declaredByPlane: ReadonlyMap<string, ReadonlySet<string>>
+): string[] => {
+  const gaps: string[] = [];
+  for (const [plane, ids] of declaredByPlane) {
+    const catalog =
+      plane === "opencode-go" ? getLiveGoCatalog() : getLiveZenCatalog();
+    const known = new Set(catalog.map((spec) => spec.id));
+    for (const id of ids) {
+      if (!known.has(id)) {
+        gaps.push(`${id} (${plane})`);
+      }
+    }
+  }
+  return gaps.toSorted((a, b) => a.localeCompare(b));
+};
+
 export const narrowToDeclared = <T extends { readonly id: string }>(
   models: readonly T[],
   declared?: ReadonlySet<string>
@@ -892,6 +924,15 @@ export const registerResponsesProvider = async (
     if (ids !== undefined) {
       declaredByPlane.set(plane, ids);
     }
+  }
+  const undescribed = undescribedDeclaredModels(declaredByPlane);
+  if (undescribed.length > 0) {
+    ctx.logger?.info?.(
+      `[dsh-opencode-patch] ${undescribed.length} declared model(s) are not ` +
+        `described by the catalog (newer than it, or deprecated): ` +
+        `${undescribed.join(", ")} — they are served from the deployment's ` +
+        "configuration, without catalog metadata"
+    );
   }
   /** Protocols some route in this composition serves, as `plane:protocol`. */
   const served = new Set<string>();

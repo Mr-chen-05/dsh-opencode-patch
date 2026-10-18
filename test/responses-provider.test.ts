@@ -35,6 +35,7 @@ import {
   modelsForSdk,
   narrowToDeclared,
   registerResponsesProvider,
+  undescribedDeclaredModels,
   unroutedDeclaredModels,
   GOOGLE_INTERNAL_ROUTE,
   SELF_MOUNTED_ROUTES,
@@ -1637,5 +1638,31 @@ describe("routing · a declared protocol beats the catalog's", () => {
     expect(
       internalRouteFor("opencode", "claude-opus-5", "@ai-sdk/anthropic")
     ).toBe("opencode-anthropic");
+  });
+});
+
+describe("responses-provider · declared models the catalog cannot describe", () => {
+  it("names an id the bundled snapshot does not carry", () => {
+    // The everyday cause is a release newer than the shim, or an id the vendor has
+    // since marked deprecated (the shim drops those). Either way the model is
+    // served from the deployment's configuration and this plugin adds no metadata,
+    // and saying so is the difference between "ignored" and "never seen".
+    const declared = new Map([
+      ["opencode", new Set(["ll-alpha-free", "step-5-preview-free"])],
+    ]);
+    expect(undescribedDeclaredModels(declared)).toEqual([
+      "ll-alpha-free (opencode)",
+      "step-5-preview-free (opencode)",
+    ]);
+  });
+
+  it("says nothing about ids the catalog knows", () => {
+    const [spec] = getLiveZenCatalog();
+    if (spec === undefined) {
+      throw new Error("the zen catalog is empty");
+    }
+    expect(
+      undescribedDeclaredModels(new Map([["opencode", new Set([spec.id])]]))
+    ).toEqual([]);
   });
 });
