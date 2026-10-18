@@ -131,7 +131,12 @@ describe("OpenAI v2 Responses Endpoint (/responses)", () => {
     expect(body.tools).toBeUndefined();
   });
 
-  it("respects injectCoreTools: false configuration", async () => {
+  it("respects injectCoreTools: false, and the gateway then refuses a free model", async () => {
+    // Turning the fallback off is honoured — nothing is injected — and the
+    // consequence is now visible rather than implied: a free-tier body with no
+    // tools answers `403 FreeTierError` (measured against the live gateway, and
+    // modelled by the mock). The configuration is the operator's choice; the
+    // refusal is the gateway's.
     const result = await runner.execute("opencode", "/zen/v1/responses", {
       body: {
         input: [],
@@ -141,7 +146,7 @@ describe("OpenAI v2 Responses Endpoint (/responses)", () => {
       config: { injectCoreTools: false },
     });
 
-    expect(result.status).toBe(200);
+    expect(result.status).toBe(403);
     const recorded = result.request!;
     const body = recorded.body as { tools?: unknown[] };
     expect(body.tools).toBeUndefined();

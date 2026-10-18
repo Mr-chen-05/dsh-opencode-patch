@@ -46,8 +46,16 @@ export const ZEN_KEY = "sk-mock-zen";
 /** The Go key every test stubs. */
 export const GO_KEY = "sk-mock-go";
 
-/** A session id in the format the gateway accepts (`ses_` + 12 hex + 14 base62). */
-export const MOCK_SESSION = "ses_0123456789abCDEFGHIJKLMNOP";
+/**
+ * A session id the gateway ACCEPTS: `ses_` + 12 hex + 14 base62, with the low
+ * twelve bits in the band `0xFC0..0xFFE`.
+ *
+ * The 12 hex digits are `~((ms << 12) + counter)` for a descending id, so a real
+ * one always lands in that band; `0xFFE` is what `counter = 1` produces. A
+ * syntactically valid id outside the band is refused with `403 FreeTierError` —
+ * measured — which is exactly what this fixture used to be.
+ */
+export const MOCK_SESSION = "ses_eb1e9e706ffeCDEFGHIJKLMNOP";
 
 /** The key a plane's requests should carry, per the stubs above. */
 export const keyFor = (plane: TestPlane): string =>

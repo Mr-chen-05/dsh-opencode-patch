@@ -49,7 +49,7 @@ import {
 } from "./helpers.ts";
 import type { GatewayRequest, MockReply } from "./opencode-gateway.ts";
 
-const PARENT_VALUE = "ses_fedcba987654ZYXWVUTSRQPONM";
+const PARENT_VALUE = "ses_eb1e9e706ffdZYXWVUTSRQPONM";
 
 const als = new AsyncLocalStorage<ActiveTurnState>();
 
@@ -389,5 +389,71 @@ describe("the request shape per configuration", () => {
     expect(request.headers.authorization).toBe(
       `Bearer ${keyFor("opencode-go")}`
     );
+  });
+});
+
+/**
+ * The gateway's own rules, asserted against the MOCK rather than through the
+ * plugin.
+ *
+ * Every case here is a measurement taken against the live gateway and then
+ * reproduced by `handleGatewayRequest`. They are what would have caught the
+ * session-id bug years earlier: our ids were syntactically valid and the gateway
+ * refused them, which nothing in this suite modelled until now.
+ */
+describe("the gateway's rules, as measured", () => {
+  const IN_BAND = "ses_eb1e9e706ffeCDEFGHIJKLMNOP";
+  const OUT_OF_BAND = "ses_0123456789abCDEFGHIJKLMNOP";
+  const TOOLS = [
+    {
+      function: { name: "read", parameters: { type: "object" } },
+      type: "function",
+    },
+  ];
+
+  const send = (
+    session: string,
+    body: Record<string, unknown>
+  ): Promise<Response> =>
+    fetch(`${gateway.origin}/zen/v1/chat/completions`, {
+      body: JSON.stringify(body),
+      headers: {
+        authorization: `Bearer ${ZEN_KEY}`,
+        "content-type": "application/json",
+        "x-opencode-session": session,
+        "x-opencode-session-id": session,
+      },
+      method: "POST",
+    });
+
+  const freeBody = (tools?: unknown): Record<string, unknown> => ({
+    max_tokens: 32,
+    messages: [{ content: "hi", role: "user" }],
+    model: "space-bunny-free",
+    ...(tools === undefined ? {} : { tools }),
+  });
+
+  it("refuses a session id outside the admitted band, whatever its shape", async () => {
+    const response = await send(OUT_OF_BAND, freeBody(TOOLS));
+    expect(response.status).toBe(403);
+    const payload = (await response.json()) as {
+      error: { type: string };
+    };
+    const { error } = payload;
+    expect(error.type).toBe("FreeTierError");
+  });
+
+  it("admits the same request when the session is in the band", async () => {
+    const response = await send(IN_BAND, freeBody(TOOLS));
+    expect(response.status).toBe(200);
+  });
+
+  it("refuses a free-tier model whose body carries no tools", async () => {
+    const response = await send(IN_BAND, freeBody());
+    expect(response.status).toBe(403);
+    const payload = (await response.json()) as {
+      error: { type: string };
+    };
+    expect(payload.error.type).toBe("FreeTierError");
   });
 });

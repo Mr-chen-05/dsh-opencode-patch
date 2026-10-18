@@ -65,7 +65,7 @@ describe("Client Headers, Session Affinity & Lineage", () => {
     const client = new ClientSimulator({
       generation: "1.19.3",
       project: "dsh-affinity-test",
-      sessionId: "ses_0123456789abCDEFGHIJKLMNOP",
+      sessionId: "ses_eb1e9e706ffeCDEFGHIJKLMNOP",
     });
 
     const result = await runner.execute("opencode", "/zen/v1/responses", {
@@ -84,7 +84,7 @@ describe("Client Headers, Session Affinity & Lineage", () => {
   it("injects affinity pair for relay / non-OpenCode providers", async () => {
     const client = new ClientSimulator({
       generation: "1.19.3",
-      sessionId: "ses_relay0000000000000000000",
+      sessionId: "ses_eb1e9e706fferalay0000000000",
     });
 
     const result = await runner.execute("opencode", "/zen/v1/responses", {
@@ -99,10 +99,10 @@ describe("Client Headers, Session Affinity & Lineage", () => {
   });
 
   it("propagates parent lineage headers for subagents and child sessions", async () => {
-    const parentId = "ses_parent123456789abcdef012";
+    const parentId = "ses_eb1e9e706ffeparent12345678";
     const client = new ClientSimulator({
       parentSessionId: parentId,
-      sessionId: "ses_child0123456789abcdef0123",
+      sessionId: "ses_eb1e9e706ffchild0123456789",
     });
 
     const result = await runner.execute("opencode", "/zen/v1/responses", {

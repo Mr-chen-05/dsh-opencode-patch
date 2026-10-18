@@ -488,6 +488,35 @@ const matchRoute = (path: string): RouteMatch | undefined => {
   return undefined;
 };
 
+/**
+ * What the live gateway actually enforces, measured against it and replayed
+ * through a non-Bun client so the transport was not the variable:
+ *
+ * - a session id whose low twelve bits fall OUTSIDE `0xFC0..0xFFE` is refused with
+ *   `403 FreeTierError`; ascending `0xFFE`/`0xFC0` pass, ascending `0x001` fails,
+ *   descending ids land in the band because `0xFFF - counter` is how the vendor's
+ *   own construction works;
+ * - a free-tier model called with NO `tools` in the body is refused the same way
+ *   (`src/tool-fallback.ts` exists for exactly that reason).
+ *
+ * Both are enforced here so the suite FAILS if the plugin regresses to an id the
+ * gateway would refuse or drops the tool fallback — neither is visible otherwise.
+ */
+const SESSION_BAND_MIN = 0xfc0;
+const SESSION_BAND_MAX = 0xffe;
+
+const FREE_TIER_MESSAGE =
+  "OpenCode's free tier can only be used from within OpenCode. Download it at https://opencode.ai and keep building.";
+
+/** The low twelve bits of a session id, or `undefined` when it is not one. */
+const sessionLow12 = (id: string): number | undefined => {
+  const hex = id.slice(4, 16);
+  if (!/^[0-9a-f]{12}$/u.test(hex)) {
+    return undefined;
+  }
+  return Number.parseInt(hex, 16) % 0x1000;
+};
+
 export const handleGatewayRequest = (
   exchange: GatewayExchange,
   options: OpenCodeGatewayOptions = {}
@@ -576,6 +605,14 @@ export const handleGatewayRequest = (
     if (session === undefined || session.length === 0) {
       return refuse(400, "MissingSessionID", "missing_session_id", "session");
     }
+    const low12 = sessionLow12(session);
+    if (
+      low12 === undefined ||
+      low12 < SESSION_BAND_MIN ||
+      low12 > SESSION_BAND_MAX
+    ) {
+      return refuse(403, FREE_TIER_MESSAGE, "FreeTierError", "session_band");
+    }
   }
 
   if (endpoint.kind === "models") {
@@ -658,6 +695,17 @@ export const handleGatewayRequest = (
       "model_not_found",
       "model_unknown"
     );
+  }
+
+  // **A free-tier call must carry tools.** Measured: the same body with and
+  // without a `tools` array answers 200 and 403 FreeTierError respectively. It is
+  // why `src/tool-fallback.ts` injects read/bash for free ids, and asserting it
+  // here is what stops that injection being dropped without a visible failure.
+  if (model.includes("free")) {
+    const { tools } = isRecord(record.body) ? record.body : {};
+    if (!Array.isArray(tools) || tools.length === 0) {
+      return refuse(403, FREE_TIER_MESSAGE, "FreeTierError", "tools");
+    }
   }
   if (expected !== endpoint.protocol) {
     return refuse(

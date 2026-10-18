@@ -97,7 +97,7 @@ describe("Gateway Error Codes & Failure Responses", () => {
       headers: {
         authorization: `Bearer ${ZEN_KEY}`,
         "content-type": "application/json",
-        "x-opencode-session-id": "ses_0123456789abCDEFGHIJKLMNOP",
+        "x-opencode-session-id": "ses_eb1e9e706ffeCDEFGHIJKLMNOP",
       },
       method: "POST",
     });

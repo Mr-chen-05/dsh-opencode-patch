@@ -489,7 +489,7 @@ describe("patchFetch", () => {
   it("uses the configured session id env outside a turn", async () => {
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const { capture, mockFetch } = createCaptureFetch();
-    process.env.MY_SESSION_ID = "ses_0123456789abZZZZZZZZZZZZZZ";
+    process.env.MY_SESSION_ID = "ses_eb1e9e706ffeZZZZZZZZZZZZZZ";
     try {
       const patched = patchFetch(
         mockFetch,
@@ -500,7 +500,7 @@ describe("patchFetch", () => {
         method: "POST",
       });
       expect(headerOf(capture.init, SESSION_HEADER)).toBe(
-        "ses_0123456789abZZZZZZZZZZZZZZ"
+        "ses_eb1e9e706ffeZZZZZZZZZZZZZZ"
       );
     } finally {
       delete process.env.MY_SESSION_ID;
@@ -587,7 +587,7 @@ describe("patchFetch", () => {
     expect(replaced).not.toBe("ses_dsh_default");
     expect(replaced).toMatch(/^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/u);
 
-    process.env.OPENCODE_SESSION_ID = "ses_0123456789abZZZZZZZZZZZZZZ";
+    process.env.OPENCODE_SESSION_ID = "ses_eb1e9e706ffeZZZZZZZZZZZZZZ";
     const { capture: envCap, mockFetch: envFetch } = createCaptureFetch();
     await patchFetch(
       envFetch,
@@ -597,7 +597,7 @@ describe("patchFetch", () => {
       headers: { [SESSION_HEADER]: "bogus" },
     });
     expect(headerOf(envCap.init, SESSION_HEADER)).toBe(
-      "ses_0123456789abZZZZZZZZZZZZZZ"
+      "ses_eb1e9e706ffeZZZZZZZZZZZZZZ"
     );
   });
 
