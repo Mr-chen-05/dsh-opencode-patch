@@ -16,6 +16,8 @@ OpenCode serves its models on **four different API shapes**, and which one a mod
 
 Counts are the shipped catalog. They are asserted against this table by `catalog.test.ts`, because a count written into prose does not regenerate with the data it counts.
 
+**The original route's own format is the case that does nothing.** A model that speaks the route's protocol names no SDK, because that protocol IS the default; the route the user configured already speaks it, so the call stays there. No hidden route, no redirect, no merge — which is why a deployment whose models are all completions mounts nothing at all, and why the whole apparatus below exists only for the models that are not.
+
 **"OpenAI" is two of the four served shapes.** Chat Completions and Responses are different wire formats, and a model that needs Responses does not work on the completions endpoint. The default is not "OpenAI" either. It is whatever api the route itself was registered with, and a model that names no SDK speaks it.
 
 DSH picks a transport from the provider row's protocol. If that protocol is not the one the model is served on, the gateway does not fall back. It answers `500`. So the plugin's job is to send each model to the endpoint its own SDK names, without asking the user to configure anything.
