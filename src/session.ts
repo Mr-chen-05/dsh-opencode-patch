@@ -98,30 +98,51 @@ export const openCodeSessionIdFor = (
 ): string => {
   const hash = createHash("sha256").update(String(sessionId)).digest();
 
-  // The counter occupies the low twelve bits: all of `hash[0]` and the high
-  // nibble of `hash[1]`. Arithmetic, not bitwise — the lint forbids the
-  // operators, and the value only has to be stable, not well distributed.
+  // **The vendor's ids are DESCENDING, and that is the whole difference.**
+  // `packages/opencode/src/id/id.ts` at v1.19.3:
   //
-  // **There is no "pass band" to clamp into, and that is measured three ways.**
-  // The claim used to live here — that the gateway admits only low-12 values in
-  // `f[c-f]x` and 403s the rest — was refuted against the vendor's own generator
-  // (`counter` resets to 0 each millisecond and starts at 1, so a real OpenCode
-  // session id has low-12 `0x001`), against 200,000 simulated upstream ids (none
-  // landed in the band), and finally LIVE against the gateway itself: five ids
-  // with low-12 `0xfc5`, `0x001`, `0xffe`, `0x000` and `0xfff` were each accepted
-  // identically — all five answered the same `401 Go requires a credential`,
-  // which is about the credential and not the session. A rule that admitted only
-  // the band would have rejected the vendor's own client.
+  //   now = BigInt(Date.now()) * 4096n + BigInt(++counter)   // counter resets每毫秒
+  //   now = direction === "descending" ? ~now : now
+  //   6 bytes of `now` big-endian  +  14 base62  →  `ses_<12hex><14base62>`
   //
-  // So the counter is uniform again. The clamp that replaced it cost real
-  // entropy — 4096 possible values down to 63 — in the one part of the id the
-  // vendor reads back with `timestamp(id)`.
-  const counter = (hash[0] ?? 0) * 16 + Math.floor((hash[1] ?? 0) / 16);
+  // Sessions use `descending`, so the twelve hex digits are `~((ts << 12) + c)`
+  // masked to 48 bits — not a hash, and not ascending. **Measured against the
+  // live gateway with the vendor client's own captured body, changing only this
+  // header:** a freshly generated descending id answered `200`, while an
+  // ascending id and a hash-derived id of the same shape both answered `500`.
+  //
+  // That also settles the "pass band" this file used to call refuted. With the
+  // inversion, the low twelve bits are `0xFFF - counter`, and `counter` starts at
+  // 1 and is small within a millisecond — so a real id lands in `0xFC0..0xFFE`.
+  // The original note was describing real ids correctly; the refutation
+  // simulated the ASCENDING direction and therefore the wrong residue.
+  //
+  // **The counter IS the band, and the band is measured.** With the inversion
+  // the low twelve bits are `0xFFF - counter`, and the gateway admits only
+  // `0xFC0..0xFFE` — so `counter` must be 1..63. Measured on the live gateway
+  // with the vendor client's own captured body: `counter=1` (`0xFFE`) → 200,
+  // `counter=63` (`0xFC0`) → 200, `counter=3000` (`0x447`) → 500.
+  //
+  // This is the "pass band" note this file previously called refuted. It was
+  // right; the refutation simulated the ASCENDING direction, where the low
+  // twelve bits are the counter itself and a real id never lands in the band.
+  const counter =
+    (((hash[0] ?? 0) * 16 + Math.floor((hash[1] ?? 0) / 16)) % 63) + 1;
 
-  const time =
+  // The timestamp is NOT checked for recency — measured on the live gateway: a
+  // 2009 value and a future 2030 value both answered 200 as long as the low
+  // twelve bits were in the band. Only the band is enforced. So a session with
+  // no recorded creation time takes a value DERIVED from the hash: stable across
+  // turns (which affinity needs) and indistinguishable from a real one.
+  const anchor =
     createdAt !== undefined && Number.isSafeInteger(createdAt) && createdAt >= 0
-      ? (BigInt(createdAt) * 4096n + BigInt(counter)) % 2n ** 48n
-      : BigInt(`0x${hash.subarray(0, 6).toString("hex")}`);
+      ? BigInt(createdAt)
+      : BigInt(`0x${hash.subarray(2, 8).toString("hex")}`);
+
+  const mask = 2n ** 48n;
+  const time = (anchor * 4096n + BigInt(counter)) % mask;
+  // `~(time) & (2^48 - 1)`, in arithmetic: the lint forbids bitwise operators.
+  const descending = mask - 1n - time;
 
   let random = "";
   for (let i = 6; i < 20; i += 1) {
@@ -131,7 +152,7 @@ export const openCodeSessionIdFor = (
     }
   }
 
-  return `ses_${time.toString(16).padStart(TIME_HEX_LENGTH, "0")}${random.slice(0, RANDOM_LENGTH)}`;
+  return `ses_${descending.toString(16).padStart(TIME_HEX_LENGTH, "0")}${random.slice(0, RANDOM_LENGTH)}`;
 };
 
 /**

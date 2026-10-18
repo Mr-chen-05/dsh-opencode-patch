@@ -219,10 +219,20 @@ describe("withStore", () => {
  */
 describe("session id · parity with the vendor's own reader", () => {
   /** The vendor's `timestamp()`: slice twelve characters, hex, divide by 0x1000. */
+  /**
+   * The vendor's own decode, with the inversion applied.
+   *
+   * Sessions are minted with `direction: "descending"`, so the twelve hex digits
+   * are `~((ms << 12) + counter)` masked to 48 bits — never the value itself.
+   * Skipping the inversion is the mistake that let this suite certify an
+   * encoding the gateway rejects: measured 500 for our ascending ids against 200
+   * for a freshly minted descending one, same body, same key, same session.
+   */
   const vendorTimestamp = (id: string): number => {
     const prefix = id.split("_")[0] ?? "";
     const hex = id.slice(prefix.length + 1, prefix.length + 13);
-    return Number(BigInt(`0x${hex}`) / 0x1000n);
+    const mask = 2n ** 48n - 1n;
+    return Number((mask - BigInt(`0x${hex}`)) / 0x1000n);
   };
 
   it("embeds the creation time exactly where their reader looks for it", () => {
@@ -304,7 +314,11 @@ describe("session id · the session's own creation time", () => {
     const createdAt = 1_700_000_000_000;
     const id = headerValueFor("s1", createdAt) ?? "";
     const hex = id.slice(4, 16);
-    expect(Number(BigInt(`0x${hex}`) / 0x1000n)).toBe(createdAt % 2 ** 36);
+    const mask = 2n ** 48n - 1n;
+    // Inverted: sessions are descending, so the stored value is `~time`.
+    expect(Number((mask - BigInt(`0x${hex}`)) / 0x1000n)).toBe(
+      createdAt % 2 ** 36
+    );
   });
 });
 
@@ -315,22 +329,17 @@ describe("session: a session id the gateway will accept", () => {
     expect(isOpenCodeSessionId("ses_ed62aae61ffeA6UwzEFN9YNKk8")).toBe(true);
   });
 
-  it("uses the whole low twelve bits, because there is no pass band", () => {
-    // The claim this replaces was that the gateway admits only low-12 values in
-    // `f[c-f]x` and 403s the rest. It was refuted three ways, and the last one is
-    // the gateway itself:
+  it("keeps the counter inside the band the gateway actually admits", () => {
+    // **Measured on the live gateway**, with the vendor client's own captured
+    // body and only this header changed: a descending id with `counter=1`
+    // (`low12 = 0xFFE`) answered 200, `counter=63` (`0xFC0`) answered 200, and
+    // `counter=3000` (`0x447`) answered 500.
     //
-    //   1. the vendor's own generator resets `counter` to 0 each millisecond and
-    //      starts at 1, so a real OpenCode session id has low-12 `0x001`;
-    //   2. 200,000 simulated upstream ids landed in the claimed band zero times;
-    //   3. LIVE, five ids with low-12 `0xfc5`, `0x001`, `0xffe`, `0x000` and
-    //      `0xfff` were each accepted identically — all five answered the same
-    //      `401 Go requires a credential`, which is about the credential and not
-    //      the session.
-    //
-    // A rule admitting only the band would have rejected the vendor's own client.
-    // So the counter is uniform, and this pins that the clamp is GONE: over many
-    // inputs the low twelve bits must spread out rather than sit in 63 values.
+    // An earlier revision of this file asserted the opposite — "there is no pass
+    // band", low twelve bits spread uniformly — and pinned the clamp's removal.
+    // That came from simulating the ASCENDING direction, where the low twelve
+    // bits are the counter itself; sessions are descending, where they are
+    // `0xFFF - counter` and therefore banded.
     const low12 = (id: string): number =>
       Number.parseInt(id.slice(4, 16), 16) % 0x1000;
     const seen = new Set<number>();
@@ -340,11 +349,10 @@ describe("session: a session id the gateway will accept", () => {
         low12(openCodeSessionIdFor(`band-timed-${i}`, 1792000000000 + i))
       );
     }
-    // A clamped counter can only ever produce 63 distinct values.
-    expect(seen.size).toBeGreaterThan(63);
-    // And it is not concentrated in the old band.
-    const inBand = [...seen].filter((v) => v >= 0xfc0 && v <= 0xffe).length;
-    expect(inBand).toBeLessThan(seen.size / 2);
+    // Every value sits in the admitted band, and the band holds only 63 of them.
+    expect(Math.min(...seen)).toBeGreaterThanOrEqual(0xfc0);
+    expect(Math.max(...seen)).toBeLessThanOrEqual(0xffe);
+    expect(seen.size).toBeLessThanOrEqual(63);
   });
 
   it("rejects a pinned header that merely starts with ses_", () => {
