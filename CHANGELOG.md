@@ -6,6 +6,14 @@ This project is an evolution of [**`nobu121/dsh-opencode-session`**](https://git
 
 ---
 
+## [1.2.3](https://github.com/viztor/dsh-opencode-patch/compare/v1.2.2...v1.2.3) (2026-10-19)
+
+
+### Fixes
+
+* **peer:** accept the 0.2.1 line on both channels, and say so in the README ([980ac44](https://github.com/viztor/dsh-opencode-patch/commit/980ac44d8ce100ff715d3ed5c4ba59b460dcbbf4))
+* **peer:** accept the 0.2.1 line on both channels, and say so in the README ([4664388](https://github.com/viztor/dsh-opencode-patch/commit/4664388c03560df4e3e5f05764e66ba15eab0b90))
+
 ## [1.2.2](https://github.com/viztor/dsh-opencode-patch/compare/v1.2.1...v1.2.2) (2026-10-19)
 
 
