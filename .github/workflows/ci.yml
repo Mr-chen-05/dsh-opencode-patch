@@ -130,7 +130,8 @@ jobs:
       - name: report a stale limits table (pushes to main)
         if: github.event_name == 'push'
         run: |
-          pnpm run limits:shim || echo "::warning::src/go-limits-data.ts is stale — the vendor's docs page moved since this commit.
+          pnpm run limits:shim \
+            || echo "::warning::src/go-limits-data.ts is stale - the vendor's docs page moved since this commit."
 
       # The nightly run exists to NOTICE vendor drift, and drift is the normal
       # case - the sources move most days. Failing here meant a red run every
