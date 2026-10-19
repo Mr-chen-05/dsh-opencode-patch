@@ -24,9 +24,11 @@ import {
   type EndpointFamily,
   type KeySourcePolicy,
   readBoolean,
+  readPositiveInteger,
   readString,
   readStringList,
 } from "./config-values.ts";
+import { isRecord } from "./guards.ts";
 
 export {
   DEFAULT_ENDPOINT_FAMILY,
@@ -37,6 +39,45 @@ export {
   type EndpointFamily,
   type KeySourcePolicy,
 };
+
+/**
+ * Optional user-defined overrides for a specific model in configuration.
+ * Allows tuning contextWindow, maxTokens, name, reasoningEfforts, etc. per model.
+ */
+/**
+ * One model's wire routing, in the shape the catalog uses.
+ *
+ * `api` is a pi protocol (`openai-completions`, `openai-responses`,
+ * `anthropic-messages`, `google-generative-ai`); `baseURL` is the endpoint that
+ * model is sent to. Both are optional, and an absent field means "whatever the
+ * shim and its live refresh computed".
+ */
+export interface ModelRouteConfig {
+  /** The pi protocol this model speaks. */
+  readonly api?: string;
+  /** The endpoint this model is sent to, when it differs from the catalog's. */
+  readonly baseURL?: string;
+}
+
+export interface ModelOverrideConfig {
+  /** Custom context window limit in tokens. */
+  readonly contextWindow?: number;
+  /** Custom maximum output generation tokens. */
+  readonly maxTokens?: number;
+  /** Custom display name. */
+  readonly name?: string;
+  /** Custom reasoning efforts to offer. */
+  readonly reasoningEfforts?: readonly string[];
+  /** Custom input modalities (e.g. ["text", "image"]). */
+  readonly inputModalities?: readonly ("text" | "image")[];
+  /** Custom token pricing override. */
+  readonly cost?: {
+    readonly input: number;
+    readonly output: number;
+    readonly cache_read?: number;
+    readonly cache_write?: number;
+  };
+}
 
 /**
  * URL substrings that mark a request as OpenCode gateway traffic even when no
@@ -83,36 +124,6 @@ export const DEFAULT_USAGE_KEY_ENV = "OPENCODE_GO_API_KEY";
  * same values.
  */
 /**
- * Several credentials, one active at a time, as a deployment declares them.
- *
- * Entries are credential REFERENCES, never values: the pool resolves them
- * through the same seam every other route uses, so a deployment's key stays
- * where it put it.
- */
-export interface CredentialPoolConfig {
-  /** Whether the deployment opted in. Without this, nothing about the pool runs. */
-  readonly enabled: boolean;
-  /** Credential references for the Zen plane, in preference order. */
-  readonly zen: readonly string[];
-  /** Credential references for the Go plane, in preference order. */
-  readonly go: readonly string[];
-}
-
-/**
- * The credential pool's default: off, with nothing in it.
- *
- * Declared apart from {@link CONFIG_DEFAULTS} and explicitly typed, because
- * that table is `as const` and a nested array inside it becomes readonly — which
- * the schema's `string[]` will not accept. The same reason
- * {@link DEFAULT_GATEWAY_URLS} lives outside it.
- */
-export const DEFAULT_CREDENTIAL_POOL: CredentialPoolConfig = {
-  enabled: false,
-  go: [],
-  zen: [],
-};
-
-/**
  * Model ids withheld from every listing, whatever the catalog says about them.
  *
  * The counterpart to the retention list, and for the same reason: a model the
@@ -126,7 +137,6 @@ export const DEFAULT_HIDDEN_MODELS: readonly string[] = [];
 
 export const CONFIG_DEFAULTS = {
   credentialOrg: undefined as string | undefined,
-  credentialPool: DEFAULT_CREDENTIAL_POOL,
   debug: false,
   enrichModels: true,
   endpoint: DEFAULT_ENDPOINT_FAMILY,
@@ -138,6 +148,10 @@ export const CONFIG_DEFAULTS = {
   injectProject: DEFAULT_INJECT_PROJECT,
   injectUserAgent: true,
   keySource: DEFAULT_KEY_SOURCE,
+  maxContextWindow: undefined as number | undefined,
+  modelOverrides: {} as Readonly<Record<string, ModelOverrideConfig>>,
+  modelRoutes: {} as Readonly<Record<string, ModelRouteConfig>>,
+  internalRoutes: true,
   originClient: DEFAULT_ORIGIN_CLIENT,
   providers: DEFAULT_PROVIDERS,
   readOpencodeStore: false,
@@ -149,7 +163,6 @@ export const CONFIG_DEFAULTS = {
 /** The raw shape a cordis row's `config` may carry (all optional). */
 export interface PluginConfig {
   credentialOrg?: string;
-  credentialPool?: { enabled?: boolean; go?: string[]; zen?: string[] };
   debug?: boolean;
   debugFile?: string;
   enrichModels?: boolean;
@@ -162,6 +175,30 @@ export interface PluginConfig {
   injectProject?: boolean;
   injectUserAgent?: boolean;
   keySource?: KeySourcePolicy;
+  maxContextWindow?: number;
+  modelOverrides?: Record<string, ModelOverrideConfig>;
+  /**
+   * Per-model wire routing, in the shape the catalog uses: `api` is the protocol
+   * and `baseURL` the endpoint for that model.
+   *
+   * This is the OVERRIDE layer over what the shim and its live refresh computed.
+   * A model whose protocol the catalog puts on an internal route can be pinned
+   * here instead, and a curated deployment that declares its own providers for
+   * the other protocols can switch {@link internalRoutes} off entirely.
+   */
+  modelRoutes?: Record<string, ModelRouteConfig>;
+  /**
+   * Whether to mount the internal per-protocol routes.
+   *
+   * On (default) the plugin registers a route for every protocol a plane serves,
+   * so a declared model that speaks Anthropic or Google is reachable with no
+   * configuration. Each mounted route is a provider whose model list is the
+   * WHOLE protocol catalog — the price of not being able to see the deployment's
+   * own selection from inside a plugin. A deployment that writes its own provider
+   * entries for those protocols turns this off and declares `modelRoutes` for the
+   * models that need it.
+   */
+  internalRoutes?: boolean;
   originClient?: string;
   providers?: string[];
   readOpencodeStore?: boolean;
@@ -177,15 +214,13 @@ export interface ResolvedPluginConfig {
    * The org to send with an account credential, when the credential does not
    * carry one itself.
    *
-   * A session token is only half a credential: the gateway gates the free tier
-   * on the org that arrived with it. A login performed by this plugin stores the
-   * org beside the token, so a deployment that logged in needs nothing here —
-   * this is for one whose token came from somewhere else, which is the case
-   * until the login surface exists.
+   * A session token needs the org it belongs to: measured on a paid model,
+   * `200` with the org and `403` without. It never unlocked the free tier —
+   * nothing sent from a request does. A login performed by this plugin stores
+   * the org beside the token, so a deployment that logged in needs nothing
+   * here — this is for one whose token came from somewhere else.
    */
   readonly credentialOrg: string | undefined;
-  /** The credential pool as configured. Off and empty unless declared. */
-  readonly credentialPool: CredentialPoolConfig;
   debug: boolean;
   debugFile?: string;
   enrichModels: boolean;
@@ -209,6 +244,14 @@ export interface ResolvedPluginConfig {
   injectUserAgent: boolean;
   /** Which credential source wins when more than one resolves. */
   keySource: KeySourcePolicy;
+  /** Optional ceiling to clamp model context windows. */
+  maxContextWindow?: number;
+  /** Optional per-model configuration overrides. */
+  readonly modelOverrides: Readonly<Record<string, ModelOverrideConfig>>;
+  /** The per-model protocol/base overrides, keyed by model id. */
+  readonly modelRoutes: Readonly<Record<string, ModelRouteConfig>>;
+  /** Whether the internal per-protocol routes are mounted. */
+  readonly internalRoutes: boolean;
   originClient: string;
   providers: Set<string>;
   /**
@@ -257,22 +300,107 @@ const resolvedEndpoint = (raw: unknown): EndpointFamily => {
 };
 
 /**
- * The pool's configuration, with the deployment's own defaults filling in.
+ * Read the per-model routing overrides.
  *
- * A row that omits the section entirely, or sets the switch without listing
- * anything, resolves to a pool that serves nothing — which is the same as no
- * pool, and is what `createCredentialPool` turns into "resolve the profile's
- * own credential".
+ * An entry without a usable field is dropped rather than repaired: a typo must
+ * not silently pin a model to an endpoint nobody meant.
+ *
+ * @param raw - the config value.
+ * @returns the overrides, keyed by model id.
  */
-const resolveCredentialPool = (
-  raw: PluginConfig["credentialPool"]
-): CredentialPoolConfig => {
-  const pool = raw ?? {};
-  return {
-    enabled: readBoolean(pool.enabled, DEFAULT_CREDENTIAL_POOL.enabled),
-    go: readStringList(pool.go),
-    zen: readStringList(pool.zen),
-  };
+const resolveModelRoutes = (
+  raw: unknown
+): Readonly<Record<string, ModelRouteConfig>> => {
+  if (!isRecord(raw)) {
+    return {};
+  }
+  const result: Record<string, ModelRouteConfig> = {};
+  for (const [modelId, value] of Object.entries(raw)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    const api = readString(value.api);
+    const baseURL = readString(value.baseURL ?? value.base_url);
+    if (api === undefined && baseURL === undefined) {
+      continue;
+    }
+    result[modelId] = {
+      ...(api === undefined ? {} : { api }),
+      ...(baseURL === undefined ? {} : { baseURL }),
+    };
+  }
+  return result;
+};
+
+const resolveModelOverrides = (
+  raw: unknown
+): Readonly<Record<string, ModelOverrideConfig>> => {
+  if (!isRecord(raw)) {
+    return {};
+  }
+  const result: Record<string, ModelOverrideConfig> = {};
+  for (const [modelId, value] of Object.entries(raw)) {
+    if (!isRecord(value)) {
+      continue;
+    }
+    const contextWindow = readPositiveInteger(
+      value.contextWindow ?? value.context_window
+    );
+    const maxTokens = readPositiveInteger(
+      value.maxTokens ?? value.max_output_tokens
+    );
+    const name = readString(value.name);
+    const reasoningEfforts = readStringList(
+      value.reasoningEfforts ?? value.efforts
+    );
+    let rawModalities: readonly unknown[] | undefined;
+    if (Array.isArray(value.inputModalities)) {
+      rawModalities = value.inputModalities;
+    } else if (Array.isArray(value.modalities)) {
+      rawModalities = value.modalities;
+    }
+    const inputModalities =
+      rawModalities === undefined
+        ? undefined
+        : rawModalities.filter(
+            (m: unknown): m is "text" | "image" => m === "text" || m === "image"
+          );
+    const cost = isRecord(value.cost)
+      ? {
+          input: typeof value.cost.input === "number" ? value.cost.input : 0,
+          output: typeof value.cost.output === "number" ? value.cost.output : 0,
+          ...(typeof value.cost.cache_read === "number"
+            ? { cache_read: value.cost.cache_read }
+            : {}),
+          ...(typeof value.cost.cache_write === "number"
+            ? { cache_write: value.cost.cache_write }
+            : {}),
+        }
+      : undefined;
+
+    const entry: ModelOverrideConfig = {};
+    if (contextWindow !== undefined) {
+      Object.assign(entry, { contextWindow });
+    }
+    if (maxTokens !== undefined) {
+      Object.assign(entry, { maxTokens });
+    }
+    if (name !== undefined) {
+      Object.assign(entry, { name });
+    }
+    if (reasoningEfforts.length > 0) {
+      Object.assign(entry, { reasoningEfforts });
+    }
+    if (inputModalities !== undefined) {
+      Object.assign(entry, { inputModalities });
+    }
+    if (cost !== undefined) {
+      Object.assign(entry, { cost });
+    }
+
+    result[modelId] = entry;
+  }
+  return result;
 };
 
 export const resolveConfig = (
@@ -285,7 +413,6 @@ export const resolveConfig = (
 
   return {
     credentialOrg: readString(config.credentialOrg),
-    credentialPool: resolveCredentialPool(config.credentialPool),
     debug: readBoolean(config.debug, CONFIG_DEFAULTS.debug),
     debugFile: readString(config.debugFile),
     enrichModels: readBoolean(
@@ -315,6 +442,13 @@ export const resolveConfig = (
       CONFIG_DEFAULTS.injectUserAgent
     ),
     keySource: resolvedKeySource(config.keySource),
+    maxContextWindow: readPositiveInteger(config.maxContextWindow),
+    modelOverrides: resolveModelOverrides(config.modelOverrides),
+    modelRoutes: resolveModelRoutes(config.modelRoutes),
+    internalRoutes: readBoolean(
+      config.internalRoutes,
+      CONFIG_DEFAULTS.internalRoutes
+    ),
     originClient:
       readString(config.originClient) ?? CONFIG_DEFAULTS.originClient,
     providers: new Set(
@@ -464,6 +598,35 @@ export const Config = z.object({
         "migration; an unrecognised value falls back to auto."
     )
     .volatile(),
+  maxContextWindow: z
+    .number()
+    .volatile()
+    .description(
+      "Optional ceiling to clamp model context windows (e.g. 131072, 262144)."
+    ),
+  modelOverrides: z
+    .any()
+    .default({})
+    .volatile()
+    .description(
+      "Optional per-model overrides for contextWindow, maxTokens, and metadata."
+    ),
+  modelRoutes: z
+    .any()
+    .default({})
+    .volatile()
+    .description(
+      "Per-model wire routing overrides: { <id>: { api, baseURL } }. The api " +
+        "names a pi protocol; baseURL replaces the catalog's endpoint."
+    ),
+  internalRoutes: z
+    .boolean()
+    .default(CONFIG_DEFAULTS.internalRoutes)
+    .volatile()
+    .description(
+      "Mount the internal per-protocol routes. Off for a deployment that " +
+        "declares its own providers for the other protocols."
+    ),
   usageBaseURL: z
     .string()
     .default(CONFIG_DEFAULTS.usageBaseURL)
@@ -476,38 +639,6 @@ export const Config = z.object({
       "The org id (wrk_...) to send with an account credential. A login through " +
         "this plugin stores the org with the token, so this is only for a token " +
         "that came from elsewhere."
-    ),
-  credentialPool: z
-    .object({
-      enabled: z
-        .boolean()
-        .default(CONFIG_DEFAULTS.credentialPool.enabled)
-        .description(
-          "Rotate several credentials behind one reference. Off by default: " +
-            "with this false the plugin resolves exactly what the profile " +
-            "declares, whatever this section lists."
-        ),
-      zen: z
-        .array(z.string())
-        .default([...CONFIG_DEFAULTS.credentialPool.zen])
-        .description(
-          "Credential references for the Zen plane, in preference order."
-        ),
-      go: z
-        .array(z.string())
-        .default([...CONFIG_DEFAULTS.credentialPool.go])
-        .description(
-          "Credential references for the Go plane, in preference order."
-        ),
-    })
-    .default({
-      enabled: DEFAULT_CREDENTIAL_POOL.enabled,
-      go: [...DEFAULT_CREDENTIAL_POOL.go],
-      zen: [...DEFAULT_CREDENTIAL_POOL.zen],
-    })
-    .description(
-      "Several credentials, one active at a time. Opt-in: a deployment opts " +
-        "in here AND points a route at this pool's reference."
     ),
   debug: z
     .boolean()

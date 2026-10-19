@@ -10,14 +10,14 @@ A **plane** is one gateway base URL with its own catalog and its own credential.
 
 | Plane | Route id | Base URL | Credential | Models |
 | :-- | :-- | :-- | :-- | --: |
-| Zen (pay-as-you-go, free tier) | `opencode` | the `endpoint` family's | `OPENCODE_API_KEY` | 86 served / 124 listed |
-| Go (subscription) | `opencode-go` | the `endpoint` family's | `OPENCODE_GO_API_KEY` | 30 served / 37 listed |
+| Zen (pay-as-you-go, free tier) | `opencode` | the `endpoint` family's | `OPENCODE_API_KEY` | 84 served / 127 listed |
+| Go (subscription) | `opencode-go` | the `endpoint` family's | `OPENCODE_GO_API_KEY` | 29 served / 32 listed |
 
 **There is no longer one base URL per plane to quote.** The gateway answers on two endpoint families and the `endpoint` setting picks one: `auto` follows the catalog, which today names `…/inference/openai/v1` and `…/inference/go/openai/v1`, and `legacy` pins the older `…/zen/v1` and `…/zen/go/v1`. Both are still served and they are entitled separately, which is why the choice is the user's rather than a migration. The dated measurement below was taken on the legacy family.
 
 A plane is a property of the **account and the base URL**, never of a model. The same model id can exist on both planes and be served on a different shape in each.
 
-**The two numbers per plane are two different questions**, and stating only one of them is how this table contradicted the section below it: _served_ is what the shim ships after retired ids are dropped, and _listed_ is everything `models.dev` carries for that provider, including the retired ones. The per-shape counts below are the served ones.
+**The two numbers per plane are two different questions**, and stating only one of them is how this table contradicted the section below it: _served_ is what the shim ships after the registry's deprecated rows are dropped, and _listed_ is everything the registry carries for that provider, including the deprecated ones. The per-shape counts below are the served ones.
 
 ## 2. Shapes
 
@@ -25,13 +25,13 @@ A **shape** is one wire protocol, named by the SDK a model declares in the catal
 
 | SDK in the catalog  | Protocol                | Zen |    Go |
 | :------------------ | :---------------------- | --: | ----: |
-| _(none)_            | `openai-completions`    |  29 |    19 |
+| _(none)_            | `openai-completions`    |  27 |    18 |
 | `@ai-sdk/openai`    | `openai-responses`      |  30 | **5** |
 | `@ai-sdk/anthropic` | `anthropic-messages`    |  18 | **5** |
 | `@ai-sdk/mistral`   | `mistral-conversations` |   1 |     — |
 | `@ai-sdk/google`    | `google-generative-ai`  |   8 | **1** |
 
-**Absence is the signal, and it is a real one.** Both planes set a provider-level `npm` of `@ai-sdk/openai-compatible` in `models.dev`, and **no model declares it explicitly**: 0 of 86 on Zen, 0 of 18 on Go. A model that speaks the completions shape simply omits `provider.npm` and inherits it. So "no SDK" does not mean "unknown"; it means _the provider default_, which is the protocol the route was itself registered with.
+**Absence is the signal, and it is a real one.** Both planes set a provider-level `npm` of `@ai-sdk/openai-compatible` in `models.dev`, and **no model declares it explicitly**: 0 of 84 on Zen, 0 of 29 on Go. A model that speaks the completions shape simply omits `provider.npm` and inherits it. So "no SDK" does not mean "unknown"; it means _the provider default_, which is the protocol the route was itself registered with.
 
 That is why the servability check treats `undefined` as servable, and why `@ai-sdk/openai-compatible` is deliberately **not** in `PROTOCOL_FOR_SDK`: listing it would record the default as though it were an override. The coverage guard still covers the case where a model declares it explicitly. None do today, and if one did, the test would name it rather than drop the model.
 
@@ -99,14 +99,14 @@ One model, every stage. The left column is what a user can see; the right column
 
 | # | The user sees | What runs | Where |
 | --: | :-- | :-- | :-- |
-| 1 | a model in the picker | the generated shim answers before any network call, `models.dev` refreshes it, and the gateway's own listing is merged in additively, so a row is only dropped when the retirement list names it | `catalog-data.ts` → `models-catalog.ts` → `models-discovery.ts` |
+| 1 | a model in the picker | the generated shim answers before any network call, `models.dev` refreshes it, and the gateway's own listing is merged in additively, so a row is only dropped when the registry marks it deprecated | `catalog-data.ts` → `models-catalog.ts` → `models-discovery.ts` |
 | 2 | _(invisible)_ | each row carries the SDK the vendor ships (`provider_npm`). Nothing in the UI names it, and nothing the user sets can contradict it | the catalog |
 | 3 | one model selected | the composer sets `provider` + `model`; no route, protocol or endpoint appears anywhere in the interface | the host |
 | 4 | a turn starts | `llm/stream` fires; the hook claims the turn only for the routes this plugin declares, and leaves every other provider alone | `stream-hook.ts` |
 | 5 | _(invisible)_ | the session id is derived from `ses_` + the session's real `createdAt` + a hash suffix, and the session's `cwd` becomes the project name | `session.ts` · `cordis-context.ts` |
 | 6 | _(invisible)_ | **the redirect is decided**: `(plane, SDK) → protocol → route`. A model needing a shape other than its route's is re-dispatched to the route that speaks it | `responses-routes.ts` → `stream-hook.ts` |
 | 7 | _(invisible)_ | the route's adapter is the host's own `llm-pi-ai`, mounted by the plugin per route, with that plane's base URL, catalog and credential | `responses-provider.ts` |
-| 8 | _(invisible)_ | the request is intercepted and given what the gateway expects: origin proof, `x-opencode-session` always, parent-session lineage, and the free-tier `read`/`bash` schemas when the body lacks them | `fetch-patch.ts` · `tool-fallback.ts` |
+| 8 | _(invisible)_ | the request is intercepted and given what the gateway expects: origin proof (the client, the project, and the turn's message id), `x-opencode-session` always, parent-session lineage, and the free-tier `read`/`bash` schemas when the body lacks them | `fetch-patch.ts` · `tool-fallback.ts` |
 | 9 | the reply streams in | the gateway answers; the plugin has changed nothing about the response | — |
 | 10 | a spend figure | the turn's usage event is priced per **plane**, so a Go turn and a Zen turn never share one number | `session-cost.ts` · `usage.ts` |
 | 11 | a quota ring or a spend pill | the meter polls the host service and renders the affecting window, or the session spend | `usage-pill.tsx` · `usage-panel.tsx` · `usage-ui.ts` |
@@ -185,7 +185,7 @@ What the bridge is, precisely:
 - **The adapter is the wrapper's own class.** `PiAiAdapter`, reached through the loader — so the request translation, the snapshot discipline and the retry handling are the wrapper's, not a reimplementation. What the bridge builds by hand is the profile that class consumes: the timeout and image defaults read from the wrapper's own constants, the retry policy read from the harness's own table.
 - **The wire protocol is pi's own implementation**, and the one runtime pi import in this entire plugin is the lazy module that carries it. Everything else handed to the adapter is a plain object; pi reads fields and never checks identity, so the interoperate-by-structure claim is measured, not hoped. The dependency is pinned to a version the wrapper's own requirement accepts, and a test reads both live and fails the day either side moves.
 - **The route is `opencode-google`, and it stays internal.** Not `google` — that name belongs to a deployment that may want the real Google AI Studio, and taking it would be the hijack this design refuses. The picker lists the models under the plane route; the stream hook dispatches the call, exactly as it does for the protocol routes.
-- **The credential is the deployment's own.** The inherited `apiKeyEnv` reference, resolved through the credentials service with the launch environment as fallback, and a miss that fails loud — handing pi an `undefined` for a named reference would let it bill whatever ambient key it finds first. The pool in `credentials.md` is not wired here: the bridge is zero-configuration, and the pool must stay opt-in.
+- **The credential is the deployment's own.** The inherited `apiKeyEnv` reference, resolved through the credentials service with the launch environment as fallback, and a miss that fails loud — handing pi an `undefined` for a named reference would let it bill whatever ambient key it finds first. The bridge is zero-configuration by construction: it resolves exactly the reference the deployment declared.
 
 ### What is verified, and in what composition
 

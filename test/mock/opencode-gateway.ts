@@ -1,26 +1,8 @@
 /**
  * The OpenCode gateway, mocked — the vendor's endpoints as a Vite plugin.
  *
- * The live suite (`test/e2e/`) proves the vendor still answers the shapes this
- * plugin was built against; it cannot prove what the plugin sends, because it
- * needs a key and the public internet. This server is the other half: a
- * deterministic stand-in for `opencode.ai` that serves every endpoint the
- * gateway serves, in the wire format its protocol speaks, and *refuses* a
- * request that does not carry the shape that endpoint requires — an unknown
- * path, a model sent to an endpoint that cannot speak its format, a missing
- * session header, a placeholder credential.
- *
- * It is a Vite plugin rather than a bare `node:http` handler because that is
- * what this stack already runs: `vite-plus` re-exports Vite, so the mock boots
- * as a normal middleware-mode dev server (`gateway-server.ts`), and the same
- * plugin can be dropped into any `vite.config.ts` to answer these endpoints
- * during a manual run.
- *
- * The contract encoded here is the vendor's, written down again on purpose:
- * the family roots, the per-protocol paths and auth headers, and the
- * model → protocol map come from `docs/redirect-planes.md`, which records what
- * was measured. A copy that cannot disagree with the code under test could not
- * fail it.
+ * Divided cleanly by wire protocols (responses, completions, messages, google,
+ * catalog, console-auth, usage-quota) under `test/mock/protocols/`.
  *
  * @module dsh-opencode-patch/mock-gateway
  */
@@ -35,65 +17,189 @@ import {
   OPENCODE_ZEN_CATALOG,
 } from "../../src/catalog-data.ts";
 import { isRecord } from "../../src/guards.ts";
+import {
+  anthropicStream,
+  anthropicUnary,
+  completionsStream,
+  completionsUnary,
+  extractGoogleModel,
+  googleStream,
+  googleUnary,
+  MOCK_TEXT,
+  modelsListing,
+  responsesStream,
+  responsesUnary,
+  usageResponse,
+  type MockUsageOptions,
+  type WireReply as ShapeReply,
+} from "./protocols/index.ts";
+
+export { MOCK_TEXT };
+export type { MockUsageOptions };
+
+export interface MockAuthOptions {
+  readonly accessToken?: string;
+  readonly deviceCode?: string;
+  readonly expiresInSeconds?: number;
+  readonly intervalSeconds?: number;
+  readonly orgs?: readonly { readonly id: string; readonly name: string }[];
+  readonly pollOutcome?:
+    | "denied"
+    | "expired"
+    | "failed"
+    | "granted"
+    | "pending"
+    | "slow_down";
+  readonly refreshToken?: string;
+  readonly userCode?: string;
+  readonly userEmail?: string;
+  readonly userId?: string;
+}
+
+const deviceCodeResponse = (options?: MockAuthOptions): ShapeReply => ({
+  body: JSON.stringify({
+    device_code: options?.deviceCode ?? "dev_mock_code_12345",
+    expires_in: options?.expiresInSeconds ?? 600,
+    interval: options?.intervalSeconds ?? 1,
+    user_code: options?.userCode ?? "WDJB-MJHT",
+    verification_uri: "/console/device",
+  }),
+  contentType: JSON_CONTENT_TYPE,
+  status: 200,
+});
+
+const deviceTokenResponse = (options?: MockAuthOptions): ShapeReply => {
+  const outcome = options?.pollOutcome ?? "granted";
+  if (outcome === "pending") {
+    return {
+      body: JSON.stringify({
+        error: {
+          message: "Authorization pending",
+          type: "authorization_pending",
+        },
+      }),
+      contentType: JSON_CONTENT_TYPE,
+      status: 400,
+    };
+  }
+  if (outcome === "slow_down") {
+    return {
+      body: JSON.stringify({
+        error: { message: "Slow down", type: "slow_down" },
+        interval: 10,
+      }),
+      contentType: JSON_CONTENT_TYPE,
+      status: 400,
+    };
+  }
+  if (outcome === "denied") {
+    return {
+      body: JSON.stringify({
+        error: {
+          message: "The user denied authorization",
+          type: "access_denied",
+        },
+      }),
+      contentType: JSON_CONTENT_TYPE,
+      status: 400,
+    };
+  }
+  if (outcome === "expired") {
+    return {
+      body: JSON.stringify({
+        error: { message: "The code has expired", type: "expired_token" },
+      }),
+      contentType: JSON_CONTENT_TYPE,
+      status: 400,
+    };
+  }
+  if (outcome === "failed") {
+    return {
+      body: JSON.stringify({
+        error: { message: "Internal error", type: "server_error" },
+      }),
+      contentType: JSON_CONTENT_TYPE,
+      status: 500,
+    };
+  }
+  return {
+    body: JSON.stringify({
+      access_token: options?.accessToken ?? "mock-access-token-12345",
+      account: options?.userId ?? "acc_mock_user_123",
+      expires_in: options?.expiresInSeconds ?? 3600,
+      org: options?.orgs?.[0]?.id ?? "wrk_mock_org_456",
+      refresh_token: options?.refreshToken ?? "mock-refresh-token-67890",
+    }),
+    contentType: JSON_CONTENT_TYPE,
+    status: 200,
+  };
+};
+
+const userResponse = (options?: MockAuthOptions): ShapeReply => ({
+  body: JSON.stringify({
+    email: options?.userEmail ?? "developer@example.com",
+    id: options?.userId ?? "acc_mock_user_123",
+  }),
+  contentType: JSON_CONTENT_TYPE,
+  status: 200,
+});
+
+const orgsResponse = (options?: MockAuthOptions): ShapeReply => ({
+  body: JSON.stringify(
+    options?.orgs ?? [
+      { id: "wrk_mock_org_456", name: "Default Org" },
+      { id: "wrk_mock_org_789", name: "Secondary Org" },
+    ]
+  ),
+  contentType: JSON_CONTENT_TYPE,
+  status: 200,
+});
 
 /** The plane a request's base URL belongs to. */
 export type GatewayPlane = "opencode" | "opencode-go";
 
 /** The endpoint family a path names, by the last segment it carries. */
 export type GatewayKind =
+  | "api-orgs"
+  | "api-user"
+  | "auth-device-code"
+  | "auth-device-token"
   | "completions"
   | "google"
   | "messages"
   | "models"
-  | "responses";
+  | "responses"
+  | "usage";
 
 /** One request the gateway saw, in the shape the tests assert on. */
 export interface GatewayRequest {
-  /** The parsed JSON body, when the body was JSON. */
   body: unknown;
-  /** The raw body text, so a shape assertion does not depend on parsing. */
   bodyText: string;
-  /** Lower-cased request headers; repeated headers are joined with ", ". */
   headers: Record<string, string>;
-  /** The endpoint family, when the path matched one. */
   kind: GatewayKind | null;
   method: string;
-  /** The model id: from the body, or from the path for Google requests. */
   model: string | null;
-  /** The request path, without the query. */
   path: string;
-  /** The plane the base URL belongs to, when the path matched a family. */
   plane: GatewayPlane | null;
-  /** The protocol the matched endpoint speaks. */
   protocol: string | null;
-  /** The query string as received, including the leading "?". */
   query: string;
-  /** Why the gateway refused, or null when it answered. */
   reject: string | null;
-  /** The status the gateway answered with. */
   status: number;
 }
 
-/** A reply the behaviour override may substitute for the fixture. */
-export interface MockReply {
-  body: string;
-  contentType?: string;
-  status: number;
-}
+export type MockReply = ShapeReply;
 
-/** Decides the answer for a request that passed every contract check. */
 export type GatewayBehavior = (
   request: GatewayRequest
 ) => MockReply | undefined;
 
 export interface OpenCodeGatewayOptions {
-  /** Substitute or reshape a reply after validation, e.g. a forced 403. */
+  auth?: MockAuthOptions;
   behavior?: GatewayBehavior;
-  /** Called once per request, with the same record the tests read. */
   onRequest?: (request: GatewayRequest) => void;
+  usage?: MockUsageOptions;
 }
 
-/** What the middleware hands the handler: method, URL, headers and raw body. */
 export interface GatewayExchange {
   bodyText: string;
   headers: IncomingHttpHeaders;
@@ -101,38 +207,30 @@ export interface GatewayExchange {
   url: string;
 }
 
-/** The record and the reply for one exchange. */
 export interface GatewayDecision {
   record: GatewayRequest;
   reply: MockReply;
 }
 
-/** The text every protocol fixture streams, in two deltas. */
-export const MOCK_TEXT = "Hello from the mock gateway.";
-
 const JSON_CONTENT_TYPE = "application/json";
 const SSE_CONTENT_TYPE = "text/event-stream";
 
-/**
- * The base each plane answers on, both families.
- *
- * The legacy roots are the measured constants; the catalog family is read from
- * the generated shim, because following the vendor's own address is what
- * `auto` means — a move there is a shim regeneration, not a bug this server
- * should report.
- *
- * Order does not matter here: the matcher requires the root to be followed by
- * a `/`, so `/zen/v1` cannot claim a `/zen/go/v1/…` path and the two
- * `inference` roots cannot claim each other's either.
- */
 const FAMILY_ROOTS: readonly { plane: GatewayPlane; root: string }[] = [
   { plane: "opencode-go", root: "/zen/go/v1" },
   { plane: "opencode", root: "/zen/v1" },
   { plane: "opencode-go", root: new URL(OPENCODE_PLANE_API.go).pathname },
   { plane: "opencode", root: new URL(OPENCODE_PLANE_API.zen).pathname },
+  // **The inference family is not one root per plane.** Its anthropic and google
+  // protocols live at their own paths, which the vendor's `GET /console/api/config`
+  // declares per model. Measured there; hard-coded here because this file MOCKS
+  // the gateway and a mock that derives its routes from the code under test
+  // cannot catch a wrong route.
+  { plane: "opencode-go", root: "/inference/go/anthropic/v1" },
+  { plane: "opencode-go", root: "/inference/go/google/v1beta" },
+  { plane: "opencode", root: "/inference/anthropic/v1" },
+  { plane: "opencode", root: "/inference/google/v1beta" },
 ];
 
-/** One endpoint, matched against the path left after the family root. */
 const ENDPOINTS: readonly {
   kind: GatewayKind;
   pattern: RegExp;
@@ -159,18 +257,66 @@ const ENDPOINTS: readonly {
     protocol: "google-generative-ai",
   },
   { kind: "models", pattern: /^\/models$/u, protocol: null },
+  { kind: "usage", pattern: /^\/usage$/u, protocol: "usage" },
 ];
 
-/** Which wire header each endpoint's credential travels in. */
 const WIRE_HEADER: Readonly<Record<GatewayKind, string>> = {
+  "api-orgs": "authorization",
+  "api-user": "authorization",
+  "auth-device-code": "",
+  "auth-device-token": "",
   completions: "authorization",
   google: "x-goog-api-key",
   messages: "x-api-key",
   models: "authorization",
   responses: "authorization",
+  usage: "authorization",
 };
 
-/** The adapter's placeholders, which the gateway answers with 401. */
+const CONSOLE_ROUTES: readonly {
+  kind: GatewayKind;
+  method: string;
+  pattern: RegExp;
+  plane: GatewayPlane;
+  protocol: string | null;
+}[] = [
+  {
+    kind: "auth-device-code",
+    method: "POST",
+    pattern: /^\/(?:console\/)?auth\/device\/code$/u,
+    plane: "opencode",
+    protocol: null,
+  },
+  {
+    kind: "auth-device-token",
+    method: "POST",
+    pattern: /^\/(?:console\/)?auth\/device\/token$/u,
+    plane: "opencode",
+    protocol: null,
+  },
+  {
+    kind: "api-user",
+    method: "GET",
+    pattern: /^\/(?:console\/)?api\/user$/u,
+    plane: "opencode",
+    protocol: null,
+  },
+  {
+    kind: "api-orgs",
+    method: "GET",
+    pattern: /^\/(?:console\/)?api\/orgs$/u,
+    plane: "opencode",
+    protocol: null,
+  },
+  {
+    kind: "usage",
+    method: "GET",
+    pattern: /^\/usage$/u,
+    plane: "opencode-go",
+    protocol: "usage",
+  },
+];
+
 const PLACEHOLDER_KEYS: ReadonlySet<string> = new Set([
   "none",
   "null",
@@ -178,7 +324,6 @@ const PLACEHOLDER_KEYS: ReadonlySet<string> = new Set([
   "unused",
 ]);
 
-/** The SDK a model declares → the protocol its endpoint must speak. */
 const SDK_PROTOCOL: Readonly<Record<string, string>> = {
   "@ai-sdk/anthropic": "anthropic-messages",
   "@ai-sdk/google": "google-generative-ai",
@@ -191,11 +336,6 @@ type CatalogSpec = (typeof OPENCODE_ZEN_CATALOG)[number];
 const catalogFor = (plane: GatewayPlane): readonly CatalogSpec[] =>
   plane === "opencode" ? OPENCODE_ZEN_CATALOG : OPENCODE_GO_CATALOG;
 
-/**
- * The protocol this plane must serve `id` on, or undefined when the plane has
- * no such model. A model the catalog does not describe is unknown; a model
- * whose declared SDK has no served protocol is unsupported everywhere.
- */
 const protocolForModel = (
   plane: GatewayPlane,
   id: string
@@ -210,204 +350,10 @@ const protocolForModel = (
   return SDK_PROTOCOL[spec.provider_npm] ?? "unsupported";
 };
 
-const sseEvent = (name: string, payload: unknown): string =>
-  `event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`;
+type LlmGatewayKind = "completions" | "google" | "messages" | "responses";
 
-const sseData = (payload: unknown): string =>
-  `data: ${JSON.stringify(payload)}\n\n`;
-
-/** The Responses-API stream pi's parser requires, in its own event order. */
-const responsesStream = (model: string): string =>
-  [
-    sseEvent("response.created", {
-      response: { id: "resp_mock", model, status: "in_progress" },
-      type: "response.created",
-    }),
-    sseEvent("response.output_item.added", {
-      item: {
-        content: [],
-        id: "msg_mock",
-        role: "assistant",
-        type: "message",
-      },
-      output_index: 0,
-      type: "response.output_item.added",
-    }),
-    sseEvent("response.output_text.delta", {
-      delta: "Hello from ",
-      output_index: 0,
-      type: "response.output_text.delta",
-    }),
-    sseEvent("response.output_text.delta", {
-      delta: "the mock gateway.",
-      output_index: 0,
-      type: "response.output_text.delta",
-    }),
-    sseEvent("response.output_item.done", {
-      item: {
-        content: [{ text: MOCK_TEXT, type: "output_text" }],
-        id: "msg_mock",
-        role: "assistant",
-        type: "message",
-      },
-      output_index: 0,
-      type: "response.output_item.done",
-    }),
-    sseEvent("response.completed", {
-      response: {
-        id: "resp_mock",
-        model,
-        status: "completed",
-        usage: { input_tokens: 5, output_tokens: 6, total_tokens: 11 },
-      },
-      type: "response.completed",
-    }),
-  ].join("");
-
-/** The Anthropic Messages stream, event for event. */
-const anthropicStream = (model: string): string =>
-  [
-    sseEvent("message_start", {
-      message: {
-        content: [],
-        id: "msg_mock",
-        model,
-        role: "assistant",
-        stop_reason: null,
-        stop_sequence: null,
-        type: "message",
-        usage: { input_tokens: 5, output_tokens: 1 },
-      },
-      type: "message_start",
-    }),
-    sseEvent("content_block_start", {
-      content_block: { text: "", type: "text" },
-      index: 0,
-      type: "content_block_start",
-    }),
-    sseEvent("content_block_delta", {
-      delta: { text: "Hello from ", type: "text_delta" },
-      index: 0,
-      type: "content_block_delta",
-    }),
-    sseEvent("content_block_delta", {
-      delta: { text: "the mock gateway.", type: "text_delta" },
-      index: 0,
-      type: "content_block_delta",
-    }),
-    sseEvent("content_block_stop", { index: 0, type: "content_block_stop" }),
-    sseEvent("message_delta", {
-      delta: { stop_reason: "end_turn", stop_sequence: null },
-      type: "message_delta",
-      usage: { output_tokens: 6 },
-    }),
-    sseEvent("message_stop", { type: "message_stop" }),
-  ].join("");
-
-/** The Chat Completions stream, ending in the sentinel the SDK waits for. */
-const completionsStream = (model: string): string =>
-  [
-    sseData({
-      choices: [
-        { delta: { content: "Hello from ", role: "assistant" }, index: 0 },
-      ],
-      created: 1_700_000_000,
-      id: "chatcmpl_mock",
-      model,
-      object: "chat.completion.chunk",
-    }),
-    sseData({
-      choices: [{ delta: { content: "the mock gateway." }, index: 0 }],
-      created: 1_700_000_000,
-      id: "chatcmpl_mock",
-      model,
-      object: "chat.completion.chunk",
-    }),
-    sseData({
-      choices: [{ delta: {}, finish_reason: "stop", index: 0 }],
-      created: 1_700_000_000,
-      id: "chatcmpl_mock",
-      model,
-      object: "chat.completion.chunk",
-      usage: { completion_tokens: 6, prompt_tokens: 5, total_tokens: 11 },
-    }),
-    "data: [DONE]\n\n",
-  ].join("");
-
-/** The Google `streamGenerateContent` stream, ending on `finishReason`. */
-const googleStream = (model: string): string =>
-  [
-    sseData({
-      candidates: [
-        {
-          content: { parts: [{ text: "Hello from " }], role: "model" },
-          index: 0,
-        },
-      ],
-      modelVersion: model,
-      usageMetadata: {
-        candidatesTokenCount: 3,
-        promptTokenCount: 5,
-        totalTokenCount: 8,
-      },
-    }),
-    sseData({
-      candidates: [
-        {
-          content: { parts: [{ text: "the mock gateway." }], role: "model" },
-          finishReason: "STOP",
-          index: 0,
-        },
-      ],
-      modelVersion: model,
-      usageMetadata: {
-        candidatesTokenCount: 6,
-        promptTokenCount: 5,
-        totalTokenCount: 11,
-      },
-    }),
-  ].join("");
-
-/** One row of the listing envelope the gateway's `/models` answers with. */
-interface ModelRow {
-  created: number;
-  id: string;
-  object: string;
-  owned_by: string;
-}
-
-/**
- * The `/models` listing: one catalogued row and one the catalog does not
- * describe, because the gateway adds models before the shim knows them.
- */
-const modelsListing = (plane: GatewayPlane): string => {
-  const rows: ModelRow[] = [
-    {
-      created: 1_700_000_000,
-      id: "mock-unknown-model",
-      object: "model",
-      owned_by: "opencode",
-    },
-  ];
-  const [first] = catalogFor(plane);
-  if (first !== undefined) {
-    rows.unshift({
-      created: 1_700_000_000,
-      id: first.id,
-      object: "model",
-      owned_by: "opencode",
-    });
-  }
-  return JSON.stringify({ data: rows, object: "list" });
-};
-
-/**
- * The fixture for one streaming endpoint. `/models` never reaches this — its
- * listing answers earlier, before any model check.
- */
-/** The stream fixture each streaming endpoint answers with. */
 const STREAM_FOR_KIND: Readonly<
-  Record<Exclude<GatewayKind, "models">, (model: string) => string>
+  Record<LlmGatewayKind, (model: string) => string>
 > = {
   completions: completionsStream,
   google: googleStream,
@@ -415,16 +361,36 @@ const STREAM_FOR_KIND: Readonly<
   responses: responsesStream,
 };
 
-/**
- * The fixture for one streaming endpoint. `/models` never reaches this — its
- * listing answers earlier, before any model check.
- */
+const UNARY_FOR_KIND: Readonly<
+  Record<LlmGatewayKind, (model: string) => string>
+> = {
+  completions: completionsUnary,
+  google: googleUnary,
+  messages: anthropicUnary,
+  responses: responsesUnary,
+};
+
+const isStreamingRequest = (
+  kind: LlmGatewayKind,
+  path: string,
+  body: unknown
+): boolean => {
+  if (kind === "google") {
+    return path.includes(":streamGenerateContent");
+  }
+  if (isRecord(body) && typeof body.stream === "boolean") {
+    return body.stream;
+  }
+  return true;
+};
+
 const fixtureReply = (
-  kind: Exclude<GatewayKind, "models">,
-  model: string
+  kind: LlmGatewayKind,
+  model: string,
+  streaming: boolean
 ): MockReply => ({
-  body: STREAM_FOR_KIND[kind](model),
-  contentType: SSE_CONTENT_TYPE,
+  body: streaming ? STREAM_FOR_KIND[kind](model) : UNARY_FOR_KIND[kind](model),
+  contentType: streaming ? SSE_CONTENT_TYPE : JSON_CONTENT_TYPE,
   status: 200,
 });
 
@@ -470,7 +436,6 @@ const modelFromBody = (body: unknown): string | null => {
   return typeof model === "string" && model.length > 0 ? model : null;
 };
 
-/** A credential the gateway would accept: present, non-empty, not a sentinel. */
 const isCredential = (value: string | undefined): boolean => {
   if (value === undefined) {
     return false;
@@ -483,20 +448,17 @@ const isCredential = (value: string | undefined): boolean => {
 };
 
 interface RouteMatch {
-  endpoint: (typeof ENDPOINTS)[number] | undefined;
+  endpoint:
+    | {
+        kind: GatewayKind;
+        pattern?: RegExp;
+        protocol: string | null;
+      }
+    | undefined;
   match: RegExpExecArray | null;
   plane: GatewayPlane;
 }
 
-/**
- * Match a path against both families and every endpoint.
- *
- * A path under a known family with no known endpoint returns a match with an
- * undefined endpoint, so the refusal can say "unknown endpoint on <plane>"
- * rather than the misleading "no route" — that is the shape of the historical
- * double-`/v1` bug (`…/zen/v1/v1/messages`), and the reason the distinction is
- * kept.
- */
 const matchRoute = (path: string): RouteMatch | undefined => {
   for (const family of FAMILY_ROOTS) {
     if (!path.startsWith(`${family.root}/`)) {
@@ -511,16 +473,50 @@ const matchRoute = (path: string): RouteMatch | undefined => {
     }
     return { endpoint: undefined, match: null, plane: family.plane };
   }
+
+  for (const route of CONSOLE_ROUTES) {
+    const match = route.pattern.exec(path);
+    if (match !== null) {
+      return {
+        endpoint: { kind: route.kind, protocol: route.protocol },
+        match,
+        plane: route.plane,
+      };
+    }
+  }
+
   return undefined;
 };
 
 /**
- * Answer one exchange against the vendor contract.
+ * What the live gateway actually enforces, measured against it and replayed
+ * through a non-Bun client so the transport was not the variable:
  *
- * The checks run in the gateway's own order — route, method, credential,
- * session, body, model, protocol — so each refusal names exactly one fault and
- * a test can assert the reason without disentangling several.
+ * - a session id whose low twelve bits fall OUTSIDE `0xFC0..0xFFE` is refused with
+ *   `403 FreeTierError`; ascending `0xFFE`/`0xFC0` pass, ascending `0x001` fails,
+ *   descending ids land in the band because `0xFFF - counter` is how the vendor's
+ *   own construction works;
+ * - a free-tier model called with NO `tools` in the body is refused the same way
+ *   (`src/tool-fallback.ts` exists for exactly that reason).
+ *
+ * Both are enforced here so the suite FAILS if the plugin regresses to an id the
+ * gateway would refuse or drops the tool fallback — neither is visible otherwise.
  */
+const SESSION_BAND_MIN = 0xfc0;
+const SESSION_BAND_MAX = 0xffe;
+
+const FREE_TIER_MESSAGE =
+  "OpenCode's free tier can only be used from within OpenCode. Download it at https://opencode.ai and keep building.";
+
+/** The low twelve bits of a session id, or `undefined` when it is not one. */
+const sessionLow12 = (id: string): number | undefined => {
+  const hex = id.slice(4, 16);
+  if (!/^[0-9a-f]{12}$/u.test(hex)) {
+    return undefined;
+  }
+  return Number.parseInt(hex, 16) % 0x1000;
+};
+
 export const handleGatewayRequest = (
   exchange: GatewayExchange,
   options: OpenCodeGatewayOptions = {}
@@ -564,7 +560,7 @@ export const handleGatewayRequest = (
   if (matched === undefined) {
     return refuse(404, `no route for ${url.pathname}`, "not_found", "no_route");
   }
-  const { endpoint, match, plane } = matched;
+  const { endpoint, plane } = matched;
   record.plane = plane;
   if (endpoint === undefined) {
     return refuse(
@@ -577,7 +573,13 @@ export const handleGatewayRequest = (
   record.kind = endpoint.kind;
   record.protocol = endpoint.protocol;
 
-  const expectedMethod = endpoint.kind === "models" ? "GET" : "POST";
+  const expectedMethod =
+    endpoint.kind === "models" ||
+    endpoint.kind === "api-user" ||
+    endpoint.kind === "api-orgs" ||
+    endpoint.kind === "usage"
+      ? "GET"
+      : "POST";
   if (record.method !== expectedMethod) {
     return refuse(
       405,
@@ -588,13 +590,41 @@ export const handleGatewayRequest = (
   }
 
   const wireHeader = WIRE_HEADER[endpoint.kind];
-  if (!isCredential(headers[wireHeader])) {
+  // Endpoints that carry no model are judged on the credential alone. A model
+  // endpoint is judged per model, after the model is known: a free one is admitted
+  // with no credential at all.
+  const perModelCredential =
+    endpoint.kind === "completions" ||
+    endpoint.kind === "responses" ||
+    endpoint.kind === "messages" ||
+    endpoint.kind === "google";
+  if (
+    wireHeader.length > 0 &&
+    !perModelCredential &&
+    !isCredential(headers[wireHeader])
+  ) {
     return refuse(401, "Invalid API key", "invalid_api_key", "credential");
   }
 
-  const session = headers["x-opencode-session-id"];
-  if (session === undefined || session.length === 0) {
-    return refuse(400, "MissingSessionID", "missing_session_id", "session");
+  const requiresSession =
+    endpoint.kind === "completions" ||
+    endpoint.kind === "google" ||
+    endpoint.kind === "messages" ||
+    endpoint.kind === "models" ||
+    endpoint.kind === "responses";
+  if (requiresSession) {
+    const session = headers["x-opencode-session-id"];
+    if (session === undefined || session.length === 0) {
+      return refuse(400, "MissingSessionID", "missing_session_id", "session");
+    }
+    const low12 = sessionLow12(session);
+    if (
+      low12 === undefined ||
+      low12 < SESSION_BAND_MIN ||
+      low12 > SESSION_BAND_MAX
+    ) {
+      return refuse(403, FREE_TIER_MESSAGE, "FreeTierError", "session_band");
+    }
   }
 
   if (endpoint.kind === "models") {
@@ -606,6 +636,43 @@ export const handleGatewayRequest = (
         status: 200,
       }
     );
+  }
+
+  if (endpoint.kind === "usage") {
+    const usageReply = options.behavior?.(record);
+    return accept(usageReply ?? usageResponse(options.usage));
+  }
+
+  if (endpoint.kind === "auth-device-code") {
+    const codeReply = options.behavior?.(record);
+    return accept(codeReply ?? deviceCodeResponse(options.auth));
+  }
+
+  if (endpoint.kind === "auth-device-token") {
+    const tokenReply = options.behavior?.(record);
+    const generated = deviceTokenResponse(options.auth);
+    if (generated.status >= 400 && tokenReply === undefined) {
+      const parsed = JSON.parse(generated.body) as {
+        error: { message: string; type: string };
+      };
+      return refuse(
+        generated.status,
+        parsed.error.message,
+        parsed.error.type,
+        options.auth?.pollOutcome ?? "token"
+      );
+    }
+    return accept(tokenReply ?? generated);
+  }
+
+  if (endpoint.kind === "api-user") {
+    const userReply = options.behavior?.(record);
+    return accept(userReply ?? userResponse(options.auth));
+  }
+
+  if (endpoint.kind === "api-orgs") {
+    const orgsReply = options.behavior?.(record);
+    return accept(orgsReply ?? orgsResponse(options.auth));
   }
 
   const { ok, parsed } = parseBody(exchange.bodyText);
@@ -621,7 +688,7 @@ export const handleGatewayRequest = (
 
   const model =
     endpoint.kind === "google"
-      ? (match?.[1] ?? null)
+      ? extractGoogleModel(url.pathname)
       : modelFromBody(record.body);
   record.model = model;
   if (model === null) {
@@ -641,6 +708,79 @@ export const handleGatewayRequest = (
       "model_unknown"
     );
   }
+
+  // **The credential, judged per model.** The gateway admits a free model with NO
+  // credential at all or with the literal `public` (`allowAnonymous` on the model
+  // entry — measured: a keyless free-tier request answers 200), and requires a
+  // real one everywhere else. A placeholder that is neither absent nor `public`
+  // is still refused, on any model.
+  if (wireHeader.length > 0) {
+    const presented = headers[wireHeader];
+    const bare = presented
+      ?.replace(/^Bearer\s+/iu, "")
+      .trim()
+      .toLowerCase();
+    const admitted =
+      isCredential(presented) ||
+      (model.includes("free") &&
+        (bare === undefined || bare.length === 0 || bare === "public"));
+    if (!admitted) {
+      return refuse(401, "Invalid API key", "invalid_api_key", "credential");
+    }
+  }
+
+  // **Each protocol has its own contract, and the mock enforces it.** The auth
+  // headers are already required above (`x-api-key` for Messages, `x-goog-api-key`
+  // for Google); these are the rest of each wire format:
+  //
+  // - Anthropic identifies itself by version on every call — the official client's
+  //   `@ai-sdk/anthropic` sends `anthropic-version: 2023-06-01`, and the vendor's
+  //   own API answers a request without it as a client error;
+  // - Anthropic bodies carry `max_tokens` and `messages` (the system prompt is a
+  //   separate field, not a message role);
+  // - Gemini bodies are `contents[].parts[]`, not `messages`.
+  const requestBody = isRecord(record.body) ? record.body : {};
+  if (endpoint.kind === "messages") {
+    const version = headers["anthropic-version"];
+    if (typeof version !== "string" || version.length === 0) {
+      return refuse(
+        400,
+        "anthropic-version: header is required",
+        "invalid_request",
+        "anthropic_version"
+      );
+    }
+    if (
+      !Array.isArray(requestBody.messages) ||
+      typeof requestBody.max_tokens !== "number"
+    ) {
+      return refuse(
+        400,
+        "max_tokens and messages are required",
+        "invalid_request",
+        "messages_body"
+      );
+    }
+  }
+  if (endpoint.kind === "google" && !Array.isArray(requestBody.contents)) {
+    return refuse(
+      400,
+      "contents: field is required",
+      "invalid_request",
+      "contents"
+    );
+  }
+
+  // **A free-tier call must carry tools.** Measured: the same body with and
+  // without a `tools` array answers 200 and 403 FreeTierError respectively. It is
+  // why `src/tool-fallback.ts` injects read/bash for free ids, and asserting it
+  // here is what stops that injection being dropped without a visible failure.
+  if (model.includes("free")) {
+    const { tools } = isRecord(record.body) ? record.body : {};
+    if (!Array.isArray(tools) || tools.length === 0) {
+      return refuse(403, FREE_TIER_MESSAGE, "FreeTierError", "tools");
+    }
+  }
   if (expected !== endpoint.protocol) {
     return refuse(
       400,
@@ -650,8 +790,13 @@ export const handleGatewayRequest = (
     );
   }
 
+  const streaming = isStreamingRequest(
+    endpoint.kind,
+    url.pathname,
+    record.body
+  );
   const override = options.behavior?.(record);
-  return accept(override ?? fixtureReply(endpoint.kind, model));
+  return accept(override ?? fixtureReply(endpoint.kind, model, streaming));
 };
 
 const readBody = (request: IncomingMessage): Promise<string> =>
@@ -666,10 +811,6 @@ const readBody = (request: IncomingMessage): Promise<string> =>
     request.on("error", reject);
   });
 
-/**
- * The mock as a Vite plugin: every request the server receives is answered
- * here, so nothing is read from disk and no other middleware runs.
- */
 export const openCodeGateway = (
   options: OpenCodeGatewayOptions = {}
 ): Plugin => ({

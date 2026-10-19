@@ -46,6 +46,7 @@ import {
 } from "../src/go-discovery.ts";
 import {
   clearCapturedApiKeys,
+  getCapturedApiKey,
   isPlaceholderApiKey,
   recordCapturedApiKey,
 } from "../src/key-capture.ts";
@@ -500,6 +501,23 @@ describe("toGoBaseURL and resolveGoBaseURL", () => {
     expect(toGoBaseURL(ZEN_BASE)).toBe(GO_BASE);
     expect(toGoBaseURL("https://proxy.test/opencode.ai/zen/v1")).toBe(
       "https://proxy.test/opencode.ai/zen/go/v1"
+    );
+  });
+
+  it("rewrites the INFERENCE family onto the Go plane too", () => {
+    // The catalog now names the inference family for the `opencode` provider
+    // (`api: https://opencode.ai/inference/openai/v1`), so a base discovered
+    // from a provider row is very often that family. Rewriting only `zen/v1`
+    // left it untouched and the meter asked `…/inference/openai/v1/usage` — a
+    // path that does not exist. Measured: the only public quota route in either
+    // 1.19.3 or 2.0.32 is `packages/console/app/src/routes/zen/go/v1/usage.ts`,
+    // and the inference proxy table has no `/inference/.../usage` entry.
+    expect(toGoBaseURL("https://opencode.ai/inference/openai/v1")).toBe(
+      GO_BASE
+    );
+    expect(toGoBaseURL("https://opencode.ai/inference/v1")).toBe(GO_BASE);
+    expect(toGoBaseURL("https://opencode.ai/inference/go/openai/v1")).toBe(
+      GO_BASE
     );
   });
 
@@ -1076,6 +1094,36 @@ describe("gaps characterised while pinning the policy", () => {
     );
     const routed = await resolveRoutedKey(context, "opencode-go", "request");
     expect(routed.key).toBe("sk-real-captured");
+  });
+
+  it("treats the gateway's keyless sentinel as not a credential", async () => {
+    // A keyless request — no key at all, or the literal `public` — is the
+    // vendor's own anonymous path: the proxy strips the sentinel before
+    // forwarding (`packages/console/app/src/lib/inference-proxy.ts`, both 1.19
+    // and 2.x: `const anonymous = !key || key === "public"`).
+    // `docs/upstream-findings.md` §1.5. Old code omitted it, so the literal was
+    // captured, then forwarded as a real Bearer, turning an anonymous request
+    // into an authenticated one.
+    expect(isPlaceholderApiKey("public")).toBe(true);
+    expect(isPlaceholderApiKey("PUBLIC")).toBe(true);
+
+    // Never captured from a live request, however it arrives.
+    clearCapturedApiKeys();
+    recordCapturedApiKey("public", "opencode-go", GO_REQUEST);
+    expect(getCapturedApiKey("opencode-go")).toBeUndefined();
+
+    // And never used as a declared env credential, so a free turn goes out
+    // keyless rather than carrying the sentinel.
+    const context = composition([
+      registryEntry("opencode-go", {
+        headers: { authorization: "Bearer public" },
+      }),
+    ]);
+    process.env.OPENCODE_GO_API_KEY = "public";
+    expect(
+      await resolveGoApiKey(context, "opencode-go", "auto")
+    ).toBeUndefined();
+    expect(discoverGoConfig(context).literalKey).toBeUndefined();
   });
 
   it("filters a Zen key out of the Go endpoint however it was filed", async () => {

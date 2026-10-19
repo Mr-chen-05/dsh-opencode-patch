@@ -18,27 +18,20 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { appendFileSync } from "node:fs";
 
 import {
+  type ModelOverrideConfig,
   type PluginConfig,
   type ResolvedPluginConfig,
   resolveConfig,
 } from "./config.ts";
-import { ConsoleAuthClient } from "./console-auth.ts";
-import {
-  type CordisContext,
-  readCredentialPoolRotator,
-  readCredentialsWriter,
-  readEntryOptions,
-} from "./cordis-context.ts";
+import { type CordisContext, readEntryOptions } from "./cordis-context.ts";
 import { recordDebug } from "./debug.ts";
 import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
-import { isFetchFunction } from "./guards.ts";
+import { isFetchFunction, isRecord } from "./guards.ts";
 import { LEGACY_NAME, LEGACY_PKG, name } from "./identity.ts";
-import { createLoginCredentialReader } from "./login-credential.ts";
-import { LoginService } from "./login-service.ts";
+import { getCapturedApiKey, isPlaceholderApiKey } from "./key-capture.ts";
 import {
   type CatalogModelSpec,
   getLiveGoCatalog,
@@ -51,11 +44,9 @@ import {
   decoratePlaneAdapters,
   hideResponsesRoute,
 } from "./models-discovery.ts";
-import { orgFor, setOrg } from "./org-cache.ts";
 import { registerResponsesProvider } from "./responses-provider.ts";
 import { isServableSdk } from "./responses-routes.ts";
 import { createStreamHook } from "./stream-hook.ts";
-import { createTokenStore } from "./token-store.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
 import { GoUsageService } from "./usage.ts";
 
@@ -65,16 +56,31 @@ import { GoUsageService } from "./usage.ts";
  * Models whose SDK no route serves are dropped: offering them would be offering
  * a model that cannot work, and the user has no way to tell that from the row.
  */
-const toDiscovered = (specs: readonly CatalogModelSpec[]) =>
+const toDiscovered = (
+  specs: readonly CatalogModelSpec[],
+  maxContextWindow?: number,
+  modelOverrides?: Readonly<Record<string, ModelOverrideConfig>>
+) =>
   specs
     .filter((m) => isServableSdk(m.provider_npm))
-    .map((m) => ({
-      contextWindow: m.context_window,
-      id: m.id,
-      inputModalities: sanitizeModalities(m.input_modalities),
-      maxTokens: m.max_output_tokens,
-      name: m.name,
-    }));
+    .map((m) => {
+      const override = modelOverrides?.[m.id];
+      const baseContext = override?.contextWindow ?? m.context_window;
+      const contextWindow =
+        typeof maxContextWindow === "number" && maxContextWindow > 0
+          ? Math.min(baseContext, maxContextWindow)
+          : baseContext;
+      return {
+        contextWindow,
+        id: m.id,
+        inputModalities:
+          override?.inputModalities === undefined
+            ? sanitizeModalities(m.input_modalities)
+            : [...override.inputModalities],
+        maxTokens: override?.maxTokens ?? m.max_output_tokens,
+        name: override?.name ?? m.name,
+      };
+    });
 
 /** Tell a row still configured under the pre-rename id/package to update. */
 const logRenameNotice = (ctx: CordisContext): void => {
@@ -135,14 +141,6 @@ const installUsageService = (
   ctx: CordisContext,
   config: ResolvedPluginConfig
 ): void => {
-  // TEMPORARY diagnostic: the meter renders nothing when this service is
-  // absent, and "absent" has two causes — the switch is off, or the composition
-  // has no `plugin`. Say which. Remove once the meter renders.
-  ctx.logger?.info?.(
-    "[dsh-opencode-patch] usage service: enabled=%s plugin=%s",
-    config.usageEnabled,
-    typeof ctx.plugin
-  );
   if (!config.usageEnabled) {
     ctx.logger?.info?.(
       "[dsh-opencode-patch] usage service NOT registered; the meter will render nothing"
@@ -161,7 +159,7 @@ const installUsageService = (
     // `ctx.provide` publishes the same service under the same name, which is what
     // the client looks for - and a meter that cannot mount is otherwise a
     // silence with no way to tell it from a meter whose service answered
-    // nothing. The pool rotator took this route for the same reason.
+    // nothing.
     mountByProvide(ctx, "opencodeGoUsage", GoUsageService, usageOptions);
     return;
   }
@@ -178,6 +176,63 @@ const installUsageService = (
       error
     );
   }
+  verifyUsageService(ctx);
+};
+
+/**
+ * Confirm the usage service is REACHABLE from the context, and say so either way.
+ *
+ * The client reported, from a browser console:
+ *
+ *   the usage meter is not rendering: no usage service: remote.opencodeGoUsage.read is missing
+ *
+ * That names the client's half as fine (the contribution mounts, the descriptor
+ * names `service: "opencodeGoUsage"`). The Gateway exposes a namespace from the
+ * host's registry, so what is missing is a Service it can find — and there are
+ * three ways that happens with nothing in the client to show it:
+ *
+ *  1. the host never registered it (this installer threw, or `usageEnabled` is off
+ *     in the row the host actually loaded);
+ *  2. it registered under another key;
+ *  3. it registered as a VALUE (`ctx.provide`) rather than a Service, and the
+ *     Gateway's "source-mode discovery" scans services, so a provided value is
+ *     invisible to it even though `ctx.get` can see it.
+ *
+ * Cases 2 and 3 are indistinguishable from the client and from here, so this reads
+ * the service back through the same context and reports what it found: whether it
+ * resolved, and whether it carries the `typertRemote` binding the Gateway scans
+ * for. One line, once per process, so the next console says which case it is
+ * instead of a meter that is merely absent.
+ */
+const verifyUsageService = (ctx: CordisContext): void => {
+  let resolved: unknown;
+  try {
+    resolved =
+      typeof ctx.get === "function" ? ctx.get("opencodeGoUsage") : undefined;
+  } catch {
+    // An unregistered name answers undefined on some hosts and throws on others.
+    resolved = undefined;
+  }
+  if (!isRecord(resolved)) {
+    ctx.logger?.warn?.(
+      "[dsh-opencode-patch] the usage service did not register: ctx.get('opencodeGoUsage') answered nothing",
+      "the meter will render nothing with 'no usage service'"
+    );
+    return;
+  }
+  const binding: unknown = resolved.typertRemote;
+  if (!isRecord(binding)) {
+    ctx.logger?.warn?.(
+      "[dsh-opencode-patch] the usage service registered but carries no typertRemote binding",
+      "the Gateway's source-mode discovery will not find it; ctx.provide() publishes a value, not a Service",
+      "the meter will render nothing with 'no usage service'"
+    );
+    return;
+  }
+  ctx.logger?.info?.(
+    "[dsh-opencode-patch] the usage service is reachable with a typertRemote binding for namespace %s",
+    typeof binding.namespace === "string" ? binding.namespace : "(unnamed)"
+  );
 };
 
 /**
@@ -201,72 +256,11 @@ const installFetchPatch = (
     return false;
   }
 
-  // Rotation is driven by the credential failures this interceptor is the only
-  // place to see — including the ones from routes the WRAPPER serves and from
-  // the Go plane, neither of which passes through a route of ours. The pool
-  // itself lives with the provider mount, so this asks it for a rotator and
-  // reports what it saw.
-  /**
-   * The org each plane's credential belongs to, read once and kept.
-   *
-   * A session token is only half a credential — the gateway gates the free tier
-   * on the org that arrived with it — so the request path needs this on every
-   * call, and a store read per request would be a file read per request. The
-   * cache is warmed at mount and refreshed when a credential failure suggests it
-   * is stale; `undefined` is a real answer, because a plane whose credential is
-   * a plain key has no org and must not carry a header for one.
-   */
-  // The cache is shared with the login service, which writes it when a login
-  // completes: a grant can appear long after startup, and a value read once would
-  // miss it.
-  const warmOrg = async (plane: string): Promise<void> => {
-    try {
-      const store = createTokenStore({
-        credentials: readCredentialsWriter(ctx),
-        plane,
-        scope: name,
-      });
-      const login = await store?.read();
-      setOrg(plane, login?.orgId);
-    } catch {
-      // A store that cannot be read leaves the plane without an org rather than
-      // failing a request: a key deployment is exactly this case, and it is the
-      // default.
-      setOrg(plane, undefined);
-    }
-  };
-  const rotateAfterFailure = async (
-    plane: string,
-    status: number
-  ): Promise<void> => {
-    const rotate = readCredentialPoolRotator(ctx);
-    if (rotate === undefined) {
-      return;
-    }
-    await rotate(plane, status);
-  };
-
-  // Use the unpatched fetch for refresh: a refresh inherits the active turn,
-  // so running it through this patch could recursively ask for the same login.
-  const loginCredential = createLoginCredentialReader(
-    ctx,
-    config.readOpencodeStore,
-    new ConsoleAuthClient({ fetch: originalFetch })
-  );
   const patched = patchFetch(originalFetch, als, config, {
-    loginCredential,
-    onCredentialFailure: (plane, status) => {
-      void rotateAfterFailure(plane, status);
-    },
-    // The org is part of the credential, not a setting: it comes from the stored
-    // login for the plane the request is bound for, and a plane whose credential
-    // is a plain key has none.
-    //
     // The configured value wins, because it is the one thing here the user said
-    // out loud. A login's org is inferred from a grant; `credentialOrg` is a
-    // declaration, and the rule this whole file is arranged around is that a
-    // declaration outranks an inference.
-    resolveOrg: (plane) => config.credentialOrg ?? orgFor(plane),
+    // out loud. There is no login to infer an org from: this build carries the
+    // API key path only.
+    resolveOrg: () => config.credentialOrg,
     // One JSONL line per request the interceptor touched, when the deployment
     // asked for debugging. It is the only way to see a request that was patched
     // wrongly: the gateway's answer for a malformed session id reads exactly
@@ -280,18 +274,15 @@ const installFetchPatch = (
       : {}),
   });
 
-  // Warm the org cache before the first request can need it. Best-effort and
-  // deliberately not awaited: a store that cannot be read leaves a plane without
-  // an org, which is the key deployment's normal state.
-  for (const plane of ["opencode", "opencode-go"]) {
-    void warmOrg(plane);
-  }
-
   ctx.effect?.(() => {
     globalThis.fetch = patched;
-    ctx.logger?.info?.(
-      "[dsh-opencode-patch] active for providers [%s]",
-      [...config.providers].join(", ")
+    // Console as well as the logger: the logger's default exporter only buffers,
+    // so a boot line that says "the plugin loaded" has to reach stdout to be worth
+    // anything when someone is checking whether a build was picked up.
+    console.info(
+      `[dsh-opencode-patch] active for providers [${[...config.providers].join(
+        ", "
+      )}]`
     );
     // Decorate discovery in the same effect so disabling the plugin restores
     // both the gateway fetch behavior and the Host discovery method.
@@ -309,7 +300,11 @@ const installFetchPatch = (
     // and every live reload would stack another wrapper. Installed before the
     // stream hook is used, because the redirect asks it whether the route is
     // really registered.
-    const stopCatalogHiding = hideResponsesRoute(ctx, config);
+    // Told which planes are keyless, so the picker can offer only what such a
+    // deployment can actually call (the official client's rule).
+    const stopCatalogHiding = hideResponsesRoute(ctx, config, {
+      hasCredential: hasPlaneCredential,
+    });
     // Own the Responses route from here, so the user configures nothing: they
     // keep the `opencode` provider and key they already have. Best-effort — a
     // route declared in the profile still works if this cannot register.
@@ -329,13 +324,9 @@ const installFetchPatch = (
       stopResponsesProvider = undefined;
     };
     void (async () => {
-      // The resolved config rides in: the credential pool is opt-in through
-      // it, and a mount without it can only serve the profile's own key.
-      const stop = await registerResponsesProvider(
-        ctx,
-        config,
-        loginCredential
-      );
+      // The resolved config rides in: the mount reads the endpoint family and
+      // the installation-store switch from it.
+      const stop = await registerResponsesProvider(ctx, config);
       if (released) {
         stop?.();
         return;
@@ -388,14 +379,30 @@ const installModelDiscovery = (
     }
     llm.registerModelDiscovery(name, () =>
       Promise.resolve(
-        toDiscovered([...getLiveGoCatalog(), ...getLiveZenCatalog()])
+        toDiscovered(
+          [...getLiveGoCatalog(), ...getLiveZenCatalog()],
+          config.maxContextWindow,
+          config.modelOverrides
+        )
       )
     );
     llm.registerModelDiscovery("opencode-go", () =>
-      Promise.resolve(toDiscovered(getLiveGoCatalog()))
+      Promise.resolve(
+        toDiscovered(
+          getLiveGoCatalog(),
+          config.maxContextWindow,
+          config.modelOverrides
+        )
+      )
     );
     llm.registerModelDiscovery("opencode", () =>
-      Promise.resolve(toDiscovered(getLiveZenCatalog()))
+      Promise.resolve(
+        toDiscovered(
+          getLiveZenCatalog(),
+          config.maxContextWindow,
+          config.modelOverrides
+        )
+      )
     );
   } catch {
     // Model discovery registration is non-fatal
@@ -420,51 +427,41 @@ const installModelDiscovery = (
  * @param rawConfig - the row config, if any.
  */
 /**
- * Mount the login service, so a settings card has something to call.
+ * Whether this plane holds a credential the gateway would accept.
  *
- * Unlike the meter's service this has no switch: a login is an action the user
- * takes, not a behaviour the plugin runs, and mounting a remote that answers
- * "nothing is stored" until they take it is the whole of its default state. What
- * it needs is a composition with `plugin`, the same one the meter needs.
+ * Deliberately synchronous and deliberately generous: a declared env key, a key
+ * captured from a live request, or an org written by a completed login. The
+ * SQLite store is not consulted because it is opt-in and off by default, and
+ * calling a deployment "keyless" when it does hold a credential would hide models
+ * it can actually use.
  *
- * @param ctx - the host context.
+ * @param plane - the gateway plane.
+ * @returns whether any credential is known for it.
  */
-const installLoginService = (ctx: CordisContext): void => {
-  if (typeof ctx.plugin !== "function") {
-    mountByProvide(ctx, "opencodeLogin", LoginService, {});
-    return;
+const hasPlaneCredential = (plane: string): boolean => {
+  const declared =
+    plane === "opencode-go"
+      ? process.env.OPENCODE_GO_API_KEY
+      : process.env.OPENCODE_API_KEY;
+  if (
+    typeof declared === "string" &&
+    declared.length > 0 &&
+    !isPlaceholderApiKey(declared)
+  ) {
+    return true;
   }
-  try {
-    ctx.plugin(LoginService, {});
-  } catch (error) {
-    ctx.logger?.warn?.(
-      "[dsh-opencode-patch] the login service did not mount",
-      error
-    );
-  }
+  return getCapturedApiKey(plane) !== undefined;
 };
 
 export const apply = (
   ctx: CordisContext,
   rawConfig: PluginConfig = {}
 ): void => {
-  // TEMPORARY: the host terminal has shown none of this plugin's output, so a
-  // file is the one channel that can be read back — and it answers whether the
-  // host half runs at all. Remove once the meter renders.
-  try {
-    appendFileSync(
-      "/tmp/dsh-opencode-patch.log",
-      `[dsh-opencode-patch] apply() ran; providers=[${[...resolveConfig(rawConfig).providers].join(",")}]\n`
-    );
-  } catch {
-    // A missing /tmp write must not stop the plugin.
-  }
   const config = resolveConfig(rawConfig);
   const als = new AsyncLocalStorage<ActiveTurnState>();
 
   logRenameNotice(ctx);
   installUsageService(ctx, config);
-  installLoginService(ctx);
 
   if (!installFetchPatch(ctx, config, als)) {
     return;

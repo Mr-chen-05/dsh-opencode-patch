@@ -19,7 +19,6 @@ import { SettingsBooleanField } from "./settings-boolean-field.tsx";
 import { SettingsChoiceField } from "./settings-choice-field.tsx";
 import type { Translate } from "./settings-copy.ts";
 import { CARD_FIELDS, type CardFieldSpec } from "./settings-fields.ts";
-import { LoginSection, type LoginRemoteCalls } from "./settings-login.tsx";
 import { UsageSummary } from "./settings-usage.tsx";
 import type { GoUsage } from "./usage-contract.ts";
 
@@ -70,7 +69,6 @@ export interface CardProps {
    * late is still reached and a host that mounts none shows a row that says so.
    */
 
-  login?: LoginRemoteCalls;
   edit: (field: string, text: string) => void;
   resetField: (field: string) => void;
   save: () => void;
@@ -178,21 +176,6 @@ export const OpencodeCard: React.FC<CardProps> = (props: CardProps) => {
         card: this is a settings page, so it borrows the page's own row language
         (flat, hairline separator) rather than the composer popover's material.
       */}
-      {props.login !== undefined && (
-        <div
-          style={{
-            borderBottom: "0.5px solid var(--dsw-alias-border-l2)",
-            // Room to breathe: these blocks are three different things - who is
-            // signed in, what the quota is, and the form - and 12px made them
-            // read as one crowded column, with the hairline doing all the
-            // separating.
-            marginBottom: 20,
-            paddingBottom: 16,
-          }}
-        >
-          <LoginSection getLocale={props.getLocale} login={props.login} t={t} />
-        </div>
-      )}
       {props.readUsage !== undefined && (
         <div
           style={{

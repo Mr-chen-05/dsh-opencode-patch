@@ -4,17 +4,19 @@ How this plugin makes OpenCode's models speak the protocol each of them is actua
 
 ## 1. Why routing exists
 
-OpenCode serves its models on **four different API shapes**, and which one a model lives on is a property of the model, not of the account. The per-plane counts, and the tables that go with them, live in [`redirect-planes.md`](./redirect-planes.md) §2; what follows is why the plugin has to care. Measured 2026-10-05:
+OpenCode serves its models on **four different API shapes**, and which one a model lives on is a property of the model, not of the account. The per-plane counts, and the tables that go with them, live in [`redirect-planes.md`](./redirect-planes.md) §2; what follows is why the plugin has to care. Measured 2026-10-17:
 
 | API shape | Wire endpoint | Which models | Signal in the catalog |
 | :-- | :-- | :-- | :-- |
-| OpenAI **Chat Completions** | `POST /zen/v1/chat/completions` | **the default**: 29 of 86 | the model names **no** SDK |
-| OpenAI **Responses** | `POST /zen/v1/responses` | 30 of 86 | `@ai-sdk/openai` |
-| Anthropic **Messages** | `POST /zen/v1/messages` | 18 of 86 | `@ai-sdk/anthropic` |
-| Google **Generative AI** | `POST /zen/v1/models/<id>:streamGenerateContent` | 8 of 86 | `@ai-sdk/google` |
-| Mistral **Conversations** | `POST /zen/v1/chat/completions` | 1 of 86 | `@ai-sdk/mistral` |
+| OpenAI **Chat Completions** | `POST /zen/v1/chat/completions` | **the default**: 27 of 84 | the model names **no** SDK |
+| OpenAI **Responses** | `POST /zen/v1/responses` | 30 of 84 | `@ai-sdk/openai` |
+| Anthropic **Messages** | `POST /zen/v1/messages` | 18 of 84 | `@ai-sdk/anthropic` |
+| Google **Generative AI** | `POST /zen/v1/models/<id>:streamGenerateContent` | 8 of 84 | `@ai-sdk/google` |
+| Mistral **Conversations** | `POST /zen/v1/chat/completions` | 1 of 84 | `@ai-sdk/mistral` |
 
 Counts are the shipped catalog. They are asserted against this table by `catalog.test.ts`, because a count written into prose does not regenerate with the data it counts.
+
+**The original route's own format is the case that does nothing.** A model that speaks the route's protocol names no SDK, because that protocol IS the default; the route the user configured already speaks it, so the call stays there. No hidden route, no redirect, no merge — which is why a deployment whose models are all completions mounts nothing at all, and why the whole apparatus below exists only for the models that are not.
 
 **"OpenAI" is two of the four served shapes.** Chat Completions and Responses are different wire formats, and a model that needs Responses does not work on the completions endpoint. The default is not "OpenAI" either. It is whatever api the route itself was registered with, and a model that names no SDK speaks it.
 
@@ -44,6 +46,58 @@ Three steps, all data-driven:
 3. The protocol names a route. `internalRouteFor(provider, model, providerNpm)` answers which route serves that model (`opencode-responses`, `opencode-anthropic`, `opencode-google`), and only for providers in `COMPLETIONS_ROUTES`, the routes this plugin claims. Anything else returns `undefined` and is left alone.
 
 `src/responses-provider.ts` then **mounts the host's own `llm-pi-ai`** under isolated auth scopes to serve those routes. That is the piece with four host contracts to survive; read its header before touching it. The plugin registers the routes, so the user configures nothing.
+
+### Why a provider cannot serve mixed protocols, in the harness's own terms
+
+Traced through `dsh-llm-pi-ai` and pi-ai, because "one provider, many protocols" keeps looking like it should work and never does:
+
+```
+profile → PiAiProviderProfile
+  → buildProvider (dsh-llm-pi-ai/lib/index.js:926)
+      catalog route AND no route-level `api` → reuseCatalogProvider (:908)
+      anything else                          → createProvider({ api: factory() })  (:931)
+  → snapshot.models.streamSimple(model, …)              host :1987
+  → dispatch                                            @earendil-works/pi-ai/dist/models.js:553
+```
+
+`createProvider` calls `input.api.stream(model, …)` — the ROUTE's implementation, so a route with an `api` speaks exactly one protocol and `model.api` is ignored. pi's own provider _does_ dispatch per model (`apiFor = single ?? byApi[model.api]`), and pi ships `opencode` with an api MAP of four protocols (`providers/opencode.js`), so the reused-catalog path genuinely supports mixed protocols — for models the installed catalog describes.
+
+**The wall is model materialization** (`lib/index.js:663-690`):
+
+```js
+const base = defaults.get(entry.id); // the installed catalog entry
+const api = request.api ?? base?.api ?? routeApi;
+if (api === void 0) invalid(provider, "… needs an api …");
+```
+
+with `routeApi = sharedCatalogApi(defaults)`, which answers the one protocol the route's shipped models agree on — **and `undefined` when they disagree**, which is always the case for `opencode`.
+
+| declared model | protocol it gets | outcome |
+| :-- | :-- | :-- |
+| described by the installed catalog | `base.api` (its own) | per-model dispatch, no help needed |
+| hand-written, not described | `request.api`, else `routeApi` | **INVALID_CONFIG** when both are absent |
+
+So: a route that names `api` pins every model on it; a route that does not name one gives hand-written models no protocol at all. That is why this plugin's answer is the three steps it implements rather than a single mixed-protocol provider:
+
+1. **declare the route again, hidden** — an internal route per protocol, with the right `api` and `baseURL` (`registerResponsesProvider`);
+2. **hide the mount** — `hideResponsesRoute` drops it from every listing, including the configurable-provider set and the browser catalog;
+3. **merge at the presentation layer** — discovery and `/models` enrichment describe the models on the route the user actually selected, never on the hidden ones.
+
+### When the automatic path is enough, and when it never is
+
+pi-ai's own `opencode` provider carries a four-protocol api map, so it dispatches per model natively. Reusing it instead of mounting routes needs three things at once, and a deployment loses the argument if it fails any of them:
+
+| condition | note |
+| :-- | :-- |
+| every declared id is in pi's installed snapshot | a hand-written id has no `base.api` |
+| the route declares no `api` | a declared `api` pins every model on the route |
+| pi's per-model `baseUrl` is current | the installed snapshot still says `…/zen` |
+
+The third is ours to fix and is fixed: the adapter decoration writes `baseUrl` (and `api`) on the model it answers, and pi passes that exact object down (`provider.streamSimple(requestModel, …)`), so the override reaches the wire.
+
+The first two cannot be fixed from a plugin. A hand-written id resolves to `request.api ?? base?.api ?? routeApi`, and `routeApi` is `sharedCatalogApi` — the one protocol the route's shipped models agree on, which is `undefined` for `opencode` because they do not agree. A route that names `api` pins every model on it instead. So: **any deployment that hand-writes a model needs a route that speaks its protocol**, which is why the hidden-route mechanism is structural rather than a workaround, and why the mount narrows to the declared ids — a deployment whose ids all speak the route's protocol mounts nothing at all.
+
+And the consequence for anything built on top: a model's protocol is not a property of the model object alone. It is the route's, chosen at profile resolution, so a model that needs a different protocol needs a route that speaks it.
 
 ### Why it is a table and not a model list
 
@@ -108,7 +162,7 @@ Four sources, in a fixed order, because they answer different questions:
 | Gateway `/models` | "what does **this account** actually have?" | per listing request |
 | `models-discovery.ts` | "what should `discoverModels` answer?" | per discovery call |
 
-**The merge is additive, and it never drops a row it cannot explain.** Adapter rows are preserved; canonical rows are appended when a model is missing; a row is omitted only when the provider-scoped retirement list names it, a fact rather than a guess. Display names and prices come from models.dev, because a gateway listing carries ids and little else.
+**The merge is additive, and it never drops a row it cannot explain.** Adapter rows are preserved; canonical rows are appended when a model is missing; a row is omitted only when the registry itself marks it `status: "deprecated"`, a fact rather than a guess. Display names and prices come from models.dev, because a gateway listing carries ids and little else.
 
 Two properties matter more than completeness:
 

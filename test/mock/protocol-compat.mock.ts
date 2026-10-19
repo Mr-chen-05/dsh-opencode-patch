@@ -41,7 +41,7 @@ import { piModelFor } from "../../src/pi-provider.ts";
 import { startMockGateway, type MockGateway } from "./gateway-server.ts";
 import {
   collectText,
-  FAMILY_ROOTS,
+  rootForProtocol,
   firstSpecFor,
   gatewayHarness,
   keyFor,
@@ -126,7 +126,7 @@ describe("plane × protocol × family", () => {
       expect(request.kind).toBe(kindForProtocol(protocol));
       expect(request.model).toBe(spec.id);
       expect(request.path).toBe(
-        `${FAMILY_ROOTS[family][plane]}${pathForProtocol(protocol, spec.id)}`
+        `${rootForProtocol(family, plane, protocol)}${pathForProtocol(protocol, spec.id)}`
       );
       expect(request.query).toBe(queryForProtocol(protocol));
       expect(request.headers[wireHeaderFor(protocol)]).toBe(

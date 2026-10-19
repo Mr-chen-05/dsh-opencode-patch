@@ -28,6 +28,7 @@ import { recordTurnUsage } from "./session-cost.ts";
 import {
   fallbackSessionId,
   headerValueFor,
+  newOpenCodeMessageId,
   SESSION_HEADER,
 } from "./session.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
@@ -146,12 +147,14 @@ export const createStreamHook = (
     // The message states the reason it COMPUTED and nothing it did not. An
     // earlier version blamed the Zen free tier for every unservable id, which was
     // wrong twice over: for an `opencode-go` request that plane has no free tier
-    // at all, and at the time the shape was the only reason left. Both halves are
-    // now computed - the shape AND the tier - because the exclusion was restored
-    // once it was measured that the free tier is not served from here on any
-    // credential this plugin can assemble. A diagnostic that asserts a cause it
-    // never checked is worse than none - it sends the reader to the wrong
-    // subsystem, which is exactly what it did.
+    // at all, and the filter's reasons here are about SHAPE - an SDK this plane
+    // has no route for. The filter did spend a round excluding free-tier ids, and
+    // this message computed that half too; the exclusion was withdrawn again when
+    // the decision was made to offer them (a refused free id answers with the
+    // gateway's own words, which is more use than an empty picker), so the shape
+    // reasons below are what remains. A diagnostic that asserts a cause it never
+    // checked is worse than none - it sends the reader to the wrong subsystem,
+    // which is exactly what it did.
     if (
       typeof options.model === "string" &&
       options.model.length > 0 &&
@@ -167,12 +170,7 @@ export const createStreamHook = (
       // was filtered on its tier sends the reader to the routing table for an
       // entitlement problem.
       let why: string;
-      if (plane === "zen" && spec?.is_free === true) {
-        why =
-          "it is a Zen free-tier id, and the free tier is not served from this " +
-          "plugin on any credential - measured with a session token, its org and " +
-          "every header the real client sends, a Zen -free model still answers 403";
-      } else if (sdk === undefined) {
+      if (sdk === undefined) {
         why = "it names no SDK this plane has a route for";
       } else if (UNSERVED_PLANE_SDKS.has(`${providerKey} + ${sdk}`)) {
         why = `its catalog SDK \`${sdk}\` is not served on this plane`;
@@ -213,8 +211,16 @@ export const createStreamHook = (
       // `400 ModelProtocolUnsupported` on `/messages`. The route decides the
       // plane, because the route is what the user configured.
       typeof options.model === "string"
-        ? findModelSpecOn(catalogPlaneForRoute(providerKey), options.model)
-            ?.provider_npm
+        ? (
+            findModelSpecOn(catalogPlaneForRoute(providerKey), options.model) ??
+            findModelSpec(options.model)
+          )?.provider_npm
+        : undefined,
+      // A route the deployment declared beats the catalog's own answer. The
+      // catalog is a snapshot; the deployment is the one place that can say it is
+      // wrong about a model.
+      typeof options.model === "string"
+        ? config.modelRoutes[options.model]?.api
         : undefined
     );
     // Take the call over only when the target route is really registered.
@@ -222,10 +228,22 @@ export const createStreamHook = (
     // error with a "no adapter for provider" one, which is harder to act on and
     // points at the wrong thing. Asked of the UNFILTERED registry — the route is
     // deliberately absent from every listing a user sees.
+    const isAvailable = (routeId: string): boolean => {
+      const llm: unknown = ctx.llm;
+      if (
+        isRecord(llm) &&
+        "adapters" in llm &&
+        llm.adapters instanceof Map &&
+        llm.adapters.has(routeId)
+      ) {
+        return true;
+      }
+      return isRouteRegistered(routeId);
+    };
     if (
       redirect !== undefined &&
       typeof ctx.llm?.stream === "function" &&
-      isRouteRegistered(redirect)
+      isAvailable(redirect)
     ) {
       return ctx.llm.stream({ ...options, provider: redirect });
     }
@@ -353,6 +371,7 @@ export const createStreamHook = (
         ...(parentValue === undefined ? {} : { parentValue }),
         ...(project === undefined ? {} : { project }),
         provider: providerKey,
+        requestValue: newOpenCodeMessageId(),
         value,
       },
       als

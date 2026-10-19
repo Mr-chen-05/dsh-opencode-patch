@@ -20,9 +20,6 @@
  *
  * Without `--write` it only reports what would change, so it is safe to run in CI
  * or by hand to answer "is the shim stale?".
- *
- * `RETIRED_*_MODEL_IDS` is deliberately NOT regenerated: retirement is a judgement
- * about what OpenCode CLI still offers, not a fact models.dev carries.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -33,10 +30,9 @@ import {
   OPENCODE_ZEN_CATALOG,
 } from "../src/catalog-data.ts";
 import {
-  isRetiredModel,
   type CatalogModelSpec,
   MODELS_DEV_TIMEOUT_MS,
-  MODELS_DEV_URL,
+  MODELS_OPENCODE_URL,
   parseModelsDevCatalog,
 } from "../src/models-catalog.ts";
 
@@ -51,12 +47,12 @@ const readPayload = async (): Promise<string> => {
   if (fromPath !== undefined) {
     return readFileSync(fromPath, "utf8");
   }
-  const response = await fetch(MODELS_DEV_URL, {
+  const response = await fetch(MODELS_OPENCODE_URL, {
     signal: AbortSignal.timeout(MODELS_DEV_TIMEOUT_MS),
   });
   if (!response.ok) {
     throw new Error(
-      `models.dev answered ${response.status} ${response.statusText}`
+      `models.opencode.ai answered ${response.status} ${response.statusText}`
     );
   }
   return response.text();
@@ -101,12 +97,11 @@ const literal = (spec: CatalogModelSpec): string => {
 const render = (specs: readonly CatalogModelSpec[]): string =>
   `[\n${specs.map((spec) => `${literal(spec)},`).join("\n")}\n]`;
 
-/** The models one provider contributes, retirement applied per provider. */
+/** The models one provider contributes. */
 const forProvider = (
   parsed: ReturnType<typeof parseModelsDevCatalog>,
   provider: "go" | "zen"
-): CatalogModelSpec[] =>
-  parsed[provider].filter((spec) => !isRetiredModel(provider, spec.id));
+): CatalogModelSpec[] => parsed[provider];
 
 /**
  * Replace one exported object literal, by its `export const NAME` anchor.
@@ -161,11 +156,27 @@ const renderPlaneApi = (
   zen: ${JSON.stringify(parsed.api.zen)},
 }`;
 
+/**
+ * The endpoint each wire family declares, per plane, keyed by its SDK package.
+ *
+ * The provider-level `api` is only the default family's address: anthropic and
+ * google are served at their own paths and the catalog records that per model.
+ * Emitting it keeps the mount reading DATA, so a vendor move is a regeneration.
+ */
+const renderFamilyApi = (
+  parsed: ReturnType<typeof parseModelsDevCatalog>
+): string =>
+  `{
+  go: ${JSON.stringify(parsed.familyApi.go)},
+  zen: ${JSON.stringify(parsed.familyApi.zen)},
+}`;
+
 const payload = await readPayload();
 const parsed = parseModelsDevCatalog(JSON.parse(payload));
 const go = forProvider(parsed, "go");
 const zen = forProvider(parsed, "zen");
 const planeApi = renderPlaneApi(parsed);
+const familyApi = renderFamilyApi(parsed);
 
 /** What the shim holds now, for the report. */
 const report = (
@@ -189,7 +200,7 @@ const report = (
 };
 
 console.log(
-  `source: ${fromPath ?? MODELS_DEV_URL} (${payload.length} bytes${fromPath === undefined ? "" : ", local"})`
+  `source: ${fromPath ?? MODELS_OPENCODE_URL} (${payload.length} bytes${fromPath === undefined ? "" : ", local"})`
 );
 report("opencode-go", OPENCODE_GO_CATALOG, go);
 report("opencode  ", OPENCODE_ZEN_CATALOG, zen);
@@ -231,5 +242,6 @@ let source = readFileSync(TARGET, "utf8");
 source = splice(source, "OPENCODE_GO_CATALOG", render(go));
 source = splice(source, "OPENCODE_ZEN_CATALOG", render(zen));
 source = spliceObject(source, "OPENCODE_PLANE_API", planeApi);
+source = spliceObject(source, "OPENCODE_FAMILY_API", familyApi);
 writeFileSync(TARGET, source);
 console.log(`\nwrote ${basename(TARGET.pathname)}`);

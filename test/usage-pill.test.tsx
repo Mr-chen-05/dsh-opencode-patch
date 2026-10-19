@@ -301,6 +301,34 @@ describe("usage-pill: UsagePill component gating", () => {
     subscribe: () => () => {},
   });
 
+  it("says WHY it renders nothing, once per distinct reason", () => {
+    // A meter that is absent and a meter that failed look identical on screen.
+    // The injector already computes a precise reason and this component used to
+    // destructure it as `_reason` and drop it, which is why "the meter is not
+    // shown" cost several rounds. Rendering nothing stays correct; staying silent
+    // about it does not.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const props = {
+        directory: undefined,
+        readUsage: async () => createMockUsage(),
+        reason: "no usage service: remote.opencodeGoUsage.read is missing",
+        t: (k: string) => k,
+      };
+      expect(UsagePill(props)).toBeNull();
+      // A re-render must not flood the console.
+      expect(UsagePill(props)).toBeNull();
+
+      const mine = warn.mock.calls
+        .map((args) => String(args[0]))
+        .filter((line) => line.includes("the usage meter is not rendering"));
+      expect(mine).toHaveLength(1);
+      expect(mine[0]).toContain("opencodeGoUsage.read is missing");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("renders null when active model is not opencode-go or deepseek-v4.1-flash", () => {
     const store = createStore({
       current: {

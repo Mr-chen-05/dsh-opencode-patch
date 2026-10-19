@@ -12,7 +12,6 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { name as pluginName } from "../src/identity.ts";
 import {
   apply,
   type CordisContext,
@@ -20,11 +19,8 @@ import {
   clearSessionUsageStore,
   RESPONSES_ROUTE,
 } from "../src/index.ts";
-import { clearCapturedApiKeys } from "../src/key-capture.ts";
-import { createTokenStore } from "../src/token-store.ts";
 import {
   collectUnknown,
-  createCredentialsSeam,
   createMockStream,
   isAsyncIterableLike,
   isRecord,
@@ -58,6 +54,54 @@ describe("apply (plugin lifecycle)", () => {
     expect(registered).toContain("opencode");
   });
 
+  it("applies modelOverrides and maxContextWindow to discovered models", async () => {
+    let discoverZen: (() => Promise<unknown>) | undefined;
+    const ctx = {
+      effect: () => {},
+      llm: {
+        registerModelDiscovery: (ns: string, fn: () => Promise<unknown>) => {
+          if (ns === "opencode") {
+            discoverZen = fn;
+          }
+        },
+      },
+      on: () => {},
+    } as unknown as CordisContext;
+
+    apply(ctx, {
+      enrichModels: true,
+      maxContextWindow: 262_144,
+      modelOverrides: {
+        "gpt-5.4": {
+          contextWindow: 131_072,
+          inputModalities: ["text"],
+          maxTokens: 16_384,
+          name: "GPT-5.4 Lifecycle Override",
+        },
+      },
+    });
+
+    expect(discoverZen).toBeDefined();
+    const discovered = (await discoverZen!()) as {
+      contextWindow: number;
+      id: string;
+      inputModalities: string[];
+      maxTokens: number;
+      name: string;
+    }[];
+    const gpt = discovered.find((m) => m.id === "gpt-5.4");
+    expect(gpt).toBeDefined();
+    expect(gpt?.contextWindow).toBe(131_072);
+    expect(gpt?.name).toBe("GPT-5.4 Lifecycle Override");
+    expect(gpt?.maxTokens).toBe(16_384);
+    expect(gpt?.inputModalities).toEqual(["text"]);
+
+    // Another model has its context clamped to maxContextWindow (262,144)
+    const sonnet = discovered.find((m) => m.id === "claude-sonnet-4-5");
+    expect(sonnet).toBeDefined();
+    expect(sonnet?.contextWindow).toBe(262_144);
+  });
+
   it("registers the usage service only while the meter is on", () => {
     // The meter toggle is ONE switch with two halves in two processes: the Host
     // registers the remote face here, and the client's meter injector mounts
@@ -81,31 +125,75 @@ describe("apply (plugin lifecycle)", () => {
     expect(mounted).toContain("GoUsageService");
   });
 
-  it("registers the login service, which has no switch to be off", () => {
-    // A login is an action the user takes, not a behaviour the plugin runs, so
-    // there is no setting that could turn its remote off: the service answers
-    // "nothing is stored" until someone signs in, and that IS its default state.
-    const mounted: string[] = [];
-    const ctx = {
+  it("reports WHY the usage service is unreachable, in each of the three ways", () => {
+    // A browser console carried:
+    //
+    //   the usage meter is not rendering: no usage service:
+    //   remote.opencodeGoUsage.read is missing
+    //
+    // That proves the CLIENT half is fine — the contribution mounts and its
+    // descriptor names `service: "opencodeGoUsage"`. What is missing is a Service
+    // the Gateway's source-mode discovery can find, and there are three ways that
+    // happens with nothing on the client to show it: it never registered, it
+    // registered under another key, or it registered as a VALUE (`ctx.provide`)
+    // rather than a Service. The three are indistinguishable from outside, so the
+    // host now names which one it is.
+    const messages: string[] = [];
+    const hostWith = (get: () => unknown): unknown => ({
       effect: () => {},
+      get,
       llm: {},
-      on: () => {},
-      plugin: (component: unknown) => {
-        mounted.push((component as { name?: string })?.name ?? "");
+      logger: {
+        info: (...args: unknown[]) => messages.push(args.map(String).join(" ")),
+        warn: (...args: unknown[]) => messages.push(args.map(String).join(" ")),
       },
-    } as unknown as CordisContext;
-
-    apply(ctx);
-    expect(mounted).toContain("LoginService");
-
-    // And a composition with no `plugin` gets no service rather than an error:
-    // the same guard the meter's installer has, for the same reason.
-    const bare = {
-      effect: () => {},
-      llm: {},
       on: () => {},
-    } as unknown as CordisContext;
-    expect(() => apply(bare)).not.toThrow();
+      plugin: () => {
+        /* the real path; not needed for these three cases */
+      },
+    });
+
+    // 1. Never registered: `ctx.get` answers nothing for the key.
+    apply(
+      hostWith(() => {
+        /* an unregistered name */
+      }) as never,
+      { usageEnabled: true }
+    );
+    expect(
+      messages.some(
+        (m) => m.includes("did not register") && m.includes("ctx.get")
+      )
+    ).toBe(true);
+
+    // 2. Registered, but with no `typertRemote` binding — a provided value, which
+    //    the Gateway's service scan cannot see.
+    messages.length = 0;
+    apply(hostWith(() => ({ read: async () => ({}) })) as never, {
+      usageEnabled: true,
+    });
+    expect(
+      messages.some(
+        (m) =>
+          m.includes("no typertRemote binding") && m.includes("ctx.provide")
+      )
+    ).toBe(true);
+
+    // 3. Registered and bound — the good case, reported as reachable.
+    messages.length = 0;
+    const bound = {
+      read: async () => ({}),
+      typertRemote: {
+        namespace: "opencodeGoUsage",
+        serviceKey: "opencodeGoUsage",
+      },
+    };
+    apply(hostWith(() => bound) as never, { usageEnabled: true });
+    expect(
+      messages.some(
+        (m) => m.includes("reachable") && m.includes("opencodeGoUsage")
+      )
+    ).toBe(true);
   });
 
   it("survives a composition with neither mount path, and reports it", () => {
@@ -192,92 +280,6 @@ describe("apply (plugin lifecycle)", () => {
       disposer();
     }
     expect(globalThis.fetch).toBe(originalFetch);
-  });
-
-  it("uses a refreshed login on primary routes through apply, without recursive fetch", async () => {
-    const { ctx: seamContext, credentials } = createCredentialsSeam();
-    const store = createTokenStore({
-      credentials,
-      plane: "opencode",
-      scope: pluginName,
-    });
-    expect(store).toBeDefined();
-    await store!.write({
-      accessToken: "st_old",
-      refreshToken: "rt_old",
-      expiresInSeconds: 10,
-      orgId: "org_fixture",
-    });
-    const sent: { url: string; headers: Headers }[] = [];
-    const original: typeof fetch = (input, init) => {
-      const url = input instanceof Request ? input.url : input.toString();
-      sent.push({ url, headers: new Headers(init?.headers) });
-      return Promise.resolve(
-        url.endsWith("/auth/device/token")
-          ? Response.json({
-              access_token: "st_refreshed",
-              refresh_token: "rt_refreshed",
-              expires_in: 3600,
-            })
-          : Response.json({ ok: true })
-      );
-    };
-    vi.stubGlobal("fetch", original);
-    vi.stubEnv("OPENCODE_API_KEY", "");
-    vi.stubEnv("OPENCODE_GO_API_KEY", "");
-    clearCapturedApiKeys();
-    let dispose: unknown;
-    let streamHook: unknown;
-    const ctx: CordisContext = {
-      ...seamContext,
-      effect: (fn: () => unknown) => {
-        dispose = fn();
-      },
-      on: (_event, fn) => {
-        streamHook = fn;
-      },
-    };
-    try {
-      apply(ctx);
-      // Run inside an active OpenCode turn: refresh must still bypass the patch.
-      const request = async function* request() {
-        yield await globalThis.fetch(
-          "https://opencode.ai/zen/go/v1/chat/completions",
-          { headers: { Authorization: "Bearer unused" } }
-        );
-      };
-      const hook = streamHook as (
-        options: unknown,
-        next: () => AsyncIterable<unknown>
-      ) => AsyncIterable<unknown>;
-      await collectUnknown(
-        hook(
-          {
-            provider: "opencode",
-            model: "deepseek-v4.1-flash",
-            sessionId: "fixture_session",
-          },
-          request
-        )
-      );
-      const model = sent.find((entry) =>
-        entry.url.includes("/chat/completions")
-      );
-      expect(model?.headers.get("authorization")).toBe("Bearer st_refreshed");
-      expect(model?.headers.get("x-opencode-org-id")).toBe("org_fixture");
-      expect(
-        sent.filter((entry) => entry.url.endsWith("/auth/device/token"))
-      ).toHaveLength(1);
-      await expect(store!.read()).resolves.toMatchObject({
-        accessToken: "st_refreshed",
-        refreshToken: "rt_refreshed",
-        orgId: "org_fixture",
-      });
-    } finally {
-      if (typeof dispose === "function") dispose();
-      vi.unstubAllEnvs();
-      clearCapturedApiKeys();
-    }
   });
 
   it("disposer does not clobber a replacement fetch", () => {
@@ -385,11 +387,7 @@ describe("apply (plugin lifecycle)", () => {
     }
   });
 
-  it("names the free tier when that is what filtered the model", () => {
-    // The reason is now COMPUTED from the same rule the filter applies, so a Zen
-    // free-tier id is reported as an entitlement problem rather than as a shape
-    // one. Naming the shape for a model filtered on its tier sends the reader to
-    // the routing table for something the routing table cannot fix.
+  it("serves free-tier models and warns only for truly unservable SDKs", () => {
     let streamHandler:
       | ((options: unknown, next: () => unknown) => unknown)
       | undefined;
@@ -423,19 +421,13 @@ describe("apply (plugin lifecycle)", () => {
       }
       streamHandler?.(
         { model: "space-bunny-free", provider: "opencode" },
-        () => {
-          // `next` is never reached for an unservable model.
-        }
+        () => {}
       );
-      const mine = warnings.filter((args) =>
-        String(args[0]).includes("cannot be served:")
-      );
-      expect(mine).toHaveLength(1);
-      const message = String(mine[0]?.[0]);
-      // The tier, not the shape - and it does not claim a route problem.
-      expect(message).toContain("free tier");
-      expect(message).not.toContain("names no SDK");
-      // And the Go plane's free models are not reported at all.
+      expect(
+        warnings.filter((args) => String(args[0]).includes("space-bunny-free"))
+      ).toHaveLength(0);
+
+      // And the Go plane's free models are not reported as unservable.
       streamHandler?.({ model: "beam-free", provider: "opencode-go" }, () => {
         // Served: the Go plane has no free tier to gate.
       });
@@ -466,7 +458,7 @@ describe("apply (plugin lifecycle)", () => {
       },
       llm: {
         listConfigurableProviders: () => [{ provider: "opencode" }],
-        listModels: async () => [{ id: "muse-spark-1.3-contributor-free" }],
+        listModels: async () => [{ id: "muse-spark-1.2" }],
         listProviders: () => [{ id: "opencode" }, { id: "opencode-responses" }],
         stream: (options: unknown) => {
           dispatched.push(options);
@@ -486,7 +478,7 @@ describe("apply (plugin lifecycle)", () => {
       throw new TypeError("stream handler not registered");
     }
     const result: unknown = streamHandler(
-      { model: "muse-spark-1.3-contributor-free", provider: "opencode" },
+      { model: "muse-spark-1.2", provider: "opencode" },
       () => {
         nextCalls += 1;
         return createMockStream("from-opencode-route");
@@ -495,7 +487,7 @@ describe("apply (plugin lifecycle)", () => {
 
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0]).toMatchObject({
-      model: "muse-spark-1.3-contributor-free",
+      model: "muse-spark-1.2",
       provider: "opencode-responses",
     });
     // The redirect replaces the dispatch; running both would bill twice.
@@ -593,7 +585,7 @@ describe("apply (plugin lifecycle)", () => {
       throw new TypeError("stream handler not registered");
     }
     const result: unknown = streamHandler(
-      { model: "muse-spark-1.3-contributor-free", provider: "opencode" },
+      { model: "beam-free", provider: "opencode" },
       () => {
         nextCalls += 1;
         return createMockStream("from-opencode-route");
@@ -629,7 +621,7 @@ describe("apply (plugin lifecycle)", () => {
     }
     const result: unknown = streamHandler(
       {
-        model: "muse-spark-1.3-contributor-free",
+        model: "beam-free",
         provider: "opencode",
         sessionId: "dsh-session-test-888",
       },
@@ -691,7 +683,7 @@ describe("apply (plugin lifecycle)", () => {
 
     const result: unknown = streamHandler(
       {
-        model: "muse-spark-1.3-contributor-free",
+        model: "beam-free",
         provider: "opencode",
         sessionId: "dsh-session-proxy-check",
       },
@@ -840,7 +832,7 @@ describe("apply (plugin lifecycle)", () => {
       }
       const result: unknown = streamHandler(
         {
-          model: "muse-spark-1.3-contributor-free",
+          model: "beam-free",
           provider: "opencode",
           sessionId: "session-debug-999",
         },
@@ -861,7 +853,7 @@ describe("apply (plugin lifecycle)", () => {
         throw new Error("debug entry is not an object");
       }
       expect(parsed.header).toBe("x-opencode-session");
-      expect(parsed.model).toBe("muse-spark-1.3-contributor-free");
+      expect(parsed.model).toBe("beam-free");
       expect(parsed.provider).toBe("opencode");
       expect(parsed.session).toBe("session-debug-999");
       expect(typeof parsed.value).toBe("string");

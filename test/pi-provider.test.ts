@@ -168,8 +168,11 @@ describe("pi-provider · the URL each protocol reaches", () => {
       "opencode",
       spec("claude-opus-5", "@ai-sdk/anthropic")
     );
-    // One level shorter than the others, because this SDK appends /v1/messages.
-    expect(url).toBe(`${OPENCODE_PLANE_API.zen}/messages?beta=true`);
+    // The Anthropic family has its own base, one level shorter than its
+    // declared `…/anthropic/v1` because this SDK appends /v1/messages.
+    expect(url).toBe(
+      "https://opencode.ai/inference/anthropic/v1/messages?beta=true"
+    );
   });
 
   it("sends a model with no SDK to the completions endpoint", async () => {
@@ -183,7 +186,7 @@ describe("pi-provider · the URL each protocol reaches", () => {
       spec("gemini-3.8-flash", "@ai-sdk/google")
     );
     expect(url).toBe(
-      `${OPENCODE_PLANE_API.zen}/models/gemini-3.8-flash:streamGenerateContent?alt=sse`
+      "https://opencode.ai/inference/google/v1beta/models/gemini-3.8-flash:streamGenerateContent?alt=sse"
     );
   });
 
@@ -222,23 +225,53 @@ describe("pi-provider · the tables themselves", () => {
     }
   });
 
-  it("takes every base from the catalog, so a move follows the data", () => {
-    // The base used to be a hard-coded `…/zen` string asserted here. The vendor
-    // moved `models.dev`'s provider entry to `…/inference/v1` and a deployment
-    // would have stayed on the older endpoint while its own catalog named the
-    // newer one - which is why the mount reads `OPENCODE_PLANE_API` now.
+  it("gives each wire family its own base on the inference family", () => {
+    // **Measured from the vendor's `GET /console/api/config`**, not derived. The
+    // inference family is NOT one base per plane: anthropic and google each live
+    // at their own path, and 26 of the zen catalog's models (18 anthropic, 8
+    // google) are reachable only through theirs. Deriving them by stripping `/v1`
+    // off one plane URL sent every one of them to `…/inference/openai`.
+    expect(BASE_FOR_PROTOCOL).toEqual({
+      opencode: {
+        "anthropic-messages": "https://opencode.ai/inference/anthropic",
+        "google-generative-ai": "https://opencode.ai/inference/google/v1beta",
+        "openai-completions": "https://opencode.ai/inference/openai/v1",
+        "openai-responses": "https://opencode.ai/inference/openai/v1",
+      },
+      "opencode-go": {
+        "anthropic-messages": "https://opencode.ai/inference/go/anthropic",
+        "google-generative-ai":
+          "https://opencode.ai/inference/go/google/v1beta",
+        "openai-completions": "https://opencode.ai/inference/go/openai/v1",
+        "openai-responses": "https://opencode.ai/inference/go/openai/v1",
+      },
+    });
+    // The Anthropic entry is the family's declared base minus its version
+    // segment, because pi-ai's SDK appends `/v1/messages` itself.
+  });
+
+  it("keeps the legacy family on one base for every protocol", () => {
+    // The older family genuinely is one address, which is why it keeps the old
+    // derivation while the inference family no longer does.
     for (const plane of ["opencode", "opencode-go"] as const) {
-      for (const [protocol, base] of Object.entries(BASE_FOR_PROTOCOL[plane])) {
-        const declared =
-          OPENCODE_PLANE_API[plane === "opencode" ? "zen" : "go"];
-        // The Anthropic endpoint is the base without its version segment, so it
-        // is the one protocol whose base is deliberately SHORTER than declared.
-        const expected =
-          protocol === "anthropic-messages"
-            ? declared.replace(/\/v1$/, "")
-            : declared;
-        expect(base, protocol).toBe(expected);
+      const zen =
+        plane === "opencode"
+          ? "https://opencode.ai/zen/v1"
+          : "https://opencode.ai/zen/go/v1";
+      for (const protocol of [
+        "openai-completions",
+        "openai-responses",
+        "google-generative-ai",
+      ]) {
+        expect(
+          baseForProtocol(plane, protocol, "legacy"),
+          `${plane}/${protocol}`
+        ).toBe(zen);
       }
+      // Anthropic is the one protocol whose base is the family's minus `/v1`.
+      expect(baseForProtocol(plane, "anthropic-messages", "legacy")).toBe(
+        zen.replace(/\/v1$/, "")
+      );
     }
   });
 

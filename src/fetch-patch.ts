@@ -21,13 +21,14 @@ import {
   recordCapturedApiKey,
   tierForRequest,
 } from "./key-capture.ts";
-import type {
-  LoginCredential,
-  LoginCredentialReader,
-} from "./login-credential.ts";
-import { enrichModelsResponse, isModelsListingUrl } from "./models-catalog.ts";
+import {
+  enrichModelsResponse,
+  findModelSpec,
+  isModelsListingUrl,
+} from "./models-catalog.ts";
 import {
   fallbackSessionId,
+  isOpenCodeMessageId,
   isOpenCodeSessionId,
   OPENCODE_UA,
   PARENT_SESSION_ALT_HEADER,
@@ -61,7 +62,82 @@ const gatewayPlaneFor = (url: string): string => {
   return "";
 };
 
+/**
+ * Whether the model a body names is one the gateway admits with no key.
+ *
+ * The gateway's free-tier rule is per-model, not per-plane: `allowAnonymous` on
+ * the model entry admits a request with no key at all, or with the literal
+ * `public`, and the proxy strips it before forwarding
+ * (`packages/console/app/src/lib/inference-proxy.ts`, identical in 1.19 and 2.x;
+ * `docs/upstream-findings.md` §1.5). So "no credential resolved" is only a fault
+ * for a model that NEEDS one, and reporting it for a free model sends the reader
+ * to set a key they do not need.
+ *
+ * The body is read rather than assumed, because the model is the only thing that
+ * decides. A plane-level check would be wrong in both directions: the Zen plane
+ * offers free models, and so does Go, which serves them by subscription key.
+ *
+ * @param body - the request body, when there is one to read.
+ * @returns whether the model it names is flagged free.
+ */
+const isFreeModelBody = (body: RequestInit["body"]): boolean => {
+  if (typeof body !== "string" || body.length === 0) {
+    return false;
+  }
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (typeof parsed !== "object" || parsed === null) {
+      return false;
+    }
+    const model: unknown = (parsed as Record<string, unknown>).model;
+    // Both JSON routes carry the id under `model`, the Responses API included.
+    if (typeof model !== "string" || model.length === 0) {
+      return false;
+    }
+    return findModelSpec(model)?.is_free === true;
+  } catch {
+    return false;
+  }
+};
+
 /** The credential header the request's protocol actually reads. */
+const toolNamesOf = (body: RequestInit["body"]): string => {
+  if (typeof body !== "string" || body.length === 0) {
+    return "";
+  }
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (typeof parsed !== "object" || parsed === null) {
+      return "";
+    }
+    const tools: unknown = (parsed as Record<string, unknown>).tools;
+    if (!Array.isArray(tools)) {
+      return "";
+    }
+    const names: string[] = [];
+    for (const tool of tools) {
+      if (typeof tool !== "object" || tool === null) {
+        continue;
+      }
+      const rec = tool as Record<string, unknown>;
+      const direct = rec.name;
+      if (typeof direct === "string") {
+        names.push(direct);
+        continue;
+      }
+      const fn = rec.function;
+      if (typeof fn === "object" && fn !== null) {
+        const fname = (fn as Record<string, unknown>).name;
+        if (typeof fname === "string") {
+          names.push(fname);
+        }
+      }
+    }
+    return names.join(",");
+  } catch {
+    return "";
+  }
+};
 const authHeaderFor = (url: string): string => {
   const path = new URL(url).pathname;
   if (path.endsWith("/messages")) {
@@ -108,6 +184,8 @@ const readHeaderSource = (
 };
 
 /** Whether the request already carries a session header (any casing). */
+const ANTHROPIC_VERSION = "2023-06-01";
+
 export const hasSessionHeader = (
   input: RequestInfo | URL,
   init?: RequestInit
@@ -182,20 +260,6 @@ const resolveSessionHeader = (
  * @param config - resolved plugin configuration.
  */
 /**
- * Told when the gateway refused a credential, so a pool can rotate.
- *
- * The interceptor is the only place in this plugin that sees EVERY gateway
- * response, including the ones made by routes the wrapper serves and by the Go
- * plane — which is why rotation is driven from here rather than from a route.
- * A rotation triggered by a route only reaches that route's plane; a
- * credential failure happens wherever the credential was used.
- *
- * @param plane - the gateway plane the request went to.
- * @param status - the HTTP status the gateway answered with.
- */
-export type CredentialFailureObserver = (plane: string, status: number) => void;
-
-/**
  * What the interceptor needs from the plugin beyond its configuration.
  *
  * An object rather than more positional parameters, because these are the
@@ -204,8 +268,6 @@ export type CredentialFailureObserver = (plane: string, status: number) => void;
  * what the running plugin knows.
  */
 export interface FetchPatchHooks {
-  /** Told when the gateway refused a credential, so a pool can rotate. */
-  readonly onCredentialFailure?: CredentialFailureObserver;
   /**
    * The org a plane's credential belongs to, when it has one.
    *
@@ -219,8 +281,6 @@ export interface FetchPatchHooks {
    * none — which is every key deployment, and the reason this is optional.
    */
   readonly resolveOrg?: (plane: string) => string | undefined;
-  /** Last-resort login lookup; returns the token with its own org. */
-  readonly loginCredential?: LoginCredentialReader;
   /**
    * One entry per claimed request, for the debug file.
    *
@@ -268,9 +328,18 @@ export const patchFetch = (
     }
 
     // Ensure an Authorization header is present if the caller omitted it or provided a dummy value.
-    let login: LoginCredential | undefined;
     const plane = gatewayPlaneFor(url);
     const wireHeader = authHeaderFor(url);
+    // **The Anthropic protocol identifies itself by version**, and nothing below
+    // this plugin sends it: `@earendil-works/pi-ai`'s anthropic adapter sets
+    // `anthropic-beta` and `anthropic-dangerous-direct-browser-access` but not
+    // `anthropic-version` (measured against the installed package), while the
+    // official client's `@ai-sdk/anthropic` sends `2023-06-01` on every call.
+    // The vendor's own API treats a Messages request without it as a client error,
+    // so the plugin supplies it rather than depending on the adapter.
+    if (wireHeader === "x-api-key" && !headers.has("anthropic-version")) {
+      headers.set("anthropic-version", ANTHROPIC_VERSION);
+    }
     const authHeader = headers.get(wireHeader);
     const wireKey = authHeader?.replace(/^Bearer\s+/iu, "").trim();
     if (
@@ -306,40 +375,46 @@ export const patchFetch = (
         isPlaceholderApiKey(declared)
           ? undefined
           : declared);
-      if (explicit === undefined && plane.length > 0) {
-        login = await hooks.loginCredential?.(plane);
-      }
+      // **API key only.** The credential ladder ends at the installation's own
+      // store: a login (device flow, session, credential pool) is v2 work and does
+      // not live here. `readOpencodeStore` is off unless the deployment opted in.
       const fallbackKey =
-        explicit ??
-        login?.accessToken ??
-        resolveOpencodeStoreKey(plane, config.readOpencodeStore);
+        explicit ?? resolveOpencodeStoreKey(plane, config.readOpencodeStore);
       if (typeof fallbackKey === "string" && fallbackKey.length > 0) {
         headers.set(
           wireHeader,
           wireHeader === "authorization" ? `Bearer ${fallbackKey}` : fallbackKey
         );
-        // Keep the Bearer fallback for callers that use it on other wire shapes.
-        // Never overwrite real request auth merely to add the protocol's header.
-        const bearer = headers.get("authorization");
-        if (
-          wireHeader !== "authorization" &&
-          (bearer === null ||
-            isPlaceholderApiKey(bearer.replace(/^Bearer\s+/iu, "")))
-        ) {
-          headers.set("authorization", `Bearer ${fallbackKey}`);
-        }
-      } else if (plane.length > 0 && !warnedNoCredential.has(plane)) {
-        // No credential resolved for a gateway request, so the adapter's own
-        // placeholder is what goes out and the gateway answers 401 - which the
-        // user reads as "API key invalid" with nothing to act on. The message
-        // states what was COMPUTED and nothing it was not: which sources were
-        // consulted and what each answered, so the reader can tell a missing env
-        // var from a missing login from a disabled store read.
+        // **One credential, on the protocol's own header, and nothing else.**
+        // The official client passes the key as an SDK option
+        // (`packages/opencode/src/provider/provider.ts:240`, `options: ok ? {} :
+        // { apiKey: "public" }`) and lets the SDK choose the header: `x-api-key`
+        // for `@ai-sdk/anthropic`, `x-goog-api-key` for `@ai-sdk/google`,
+        // `Authorization` for the openai family. Its only per-protocol header of
+        // its own is `anthropic-beta` (`:211-219`).
         //
-        // This is the guard the tier bug needed. A mis-classified tier made a
-        // captured, working key invisible here, the request went out with the
-        // placeholder, and the only symptom was an auth error on a credential
-        // that was fine.
+        // A "Bearer fallback" used to be added here for the non-authorization
+        // shapes, so an Anthropic request carried BOTH headers. That is a
+        // credential on a header the protocol does not read, and it is not what
+        // the client does.
+      } else if (
+        plane.length > 0 &&
+        !warnedNoCredential.has(plane) &&
+        // A free model is ADMITTED with no credential at all, so "no credential
+        // resolved" is not a failure there and saying it is sends the reader to
+        // a key they do not need. The gateway's own rule is per-model
+        // (`allowAnonymous` on the model entry, with no key or the literal
+        // `public` - `docs/upstream-findings.md` §1.5), so the model is asked
+        // rather than the plane. Keep the placeholder: the proxy strips it for
+        // an anonymous request anyway, so stripping it here would change nothing
+        // but would also deprive a keyless-but-paid model of a header to fill.
+        //
+        // `init.body` is read, not the `Request`: the tool-injection block below
+        // resolves a `Request`-carried body, and this check runs before it. A
+        // body the switch cannot see answers "not free", which is the safe
+        // side - the warning is the status quo, not a new failure.
+        !isFreeModelBody(init?.body)
+      ) {
         warnedNoCredential.add(plane);
         const sources: string[] = [
           `a key on the request: ${requestKey === undefined ? "none" : "present"}`,
@@ -349,7 +424,6 @@ export const patchFetch = (
           `${plane === "opencode-go" ? "OPENCODE_GO_API_KEY" : "OPENCODE_API_KEY"}: ${
             declared === undefined || declared.length === 0 ? "unset" : "set"
           }`,
-          `a stored login: ${login === undefined ? "none" : "none resolved"}`,
           `the installation's own store: ${
             config.readOpencodeStore ? "read" : "not enabled"
           }`,
@@ -361,22 +435,6 @@ export const patchFetch = (
       }
     }
 
-    // 1. Session headers, as the version this plugin emulates sends them.
-    //
-    // Read from the 1.x line's last release, v1.19.3, in
-    // `packages/opencode/src/session/llm/request.ts`:
-    //
-    //   x-opencode-session-id -> sessionID     always
-    //   x-opencode-session    -> sessionID     for opencode providers
-    //   x-opencode-request    -> user.id       for opencode providers
-    //   x-session-affinity    -> sessionID     for OTHER providers only
-    //   X-Session-Id          -> sessionID     for OTHER providers only
-    //
-    // So `x-opencode-session` and `x-opencode-session-id` carry the SAME value,
-    // and the affinity pair belongs to relays. 2.x changed the first of those to
-    // an affinity id and split the value; an earlier version of this block
-    // followed 2.x, which put a subagent in its own cache group. The plugin
-    // emulates 1.19.3, so it follows 1.19.3.
     // 1. Session headers, as the version this plugin emulates sends them.
     //
     // Read from the 1.x line's last release, v1.19.3, in
@@ -419,26 +477,33 @@ export const patchFetch = (
     }
 
     // 2b. The org, when this plane's credential belongs to one. A session token
-    // is only half a credential: the gateway gates the free tier on the org that
-    // arrived with it, and a request carrying one without the other is answered
-    // as though it carried a plain key.
-    // A selected login uses its own org, not a mutable cache that another
-    // request or a previous account may have populated. An explicit override
-    // still wins; absent login metadata must not revive a stale cached org.
+    // needs the org it belongs to — measured on a paid model: `200` with it,
+    // `403` without — and the free tier is refused with or without one, which is
+    // a gate no header cleared.
+    // The configured org wins, because it is the one thing here the user said out
+    // loud. The hook is the deployment's own source (an account that ships with
+    // the profile); there is no login to infer one from.
     const org =
-      config.credentialOrg ??
-      (login === undefined
-        ? hooks.resolveOrg?.(gatewayPlaneFor(url))
-        : login.orgId);
+      config.credentialOrg ?? hooks.resolveOrg?.(gatewayPlaneFor(url));
     if (org !== undefined && org.length > 0) {
       headers.set("x-opencode-org-id", org);
-    } else if (login !== undefined) {
-      headers.delete("x-opencode-org-id");
     }
 
     // 3. Client & Project origin headers: injected when enabled
     if (config.injectOriginHeaders) {
       headers.set("x-opencode-client", config.originClient);
+
+      // The message id, the one header of the captured set this block omitted.
+      // Read from v1.19.3's `request.ts`: `"x-opencode-request": input.user.id`,
+      // in the same branch as the client and project headers. The console reads
+      // it for per-request metrics and rewrites it to `x-opencode-request-id`
+      // before the request reaches the inference service
+      // (`inference-proxy.ts`); the turn store carries the value because a
+      // request cannot know its own message id.
+      const requestValue = state?.requestValue;
+      if (requestValue !== undefined && isOpenCodeMessageId(requestValue)) {
+        headers.set("x-opencode-request", requestValue);
+      }
 
       if (config.injectProject) {
         const project =
@@ -450,19 +515,51 @@ export const patchFetch = (
     }
 
     const newInit: RequestInit = { ...init, headers };
+    let requestToSend = input;
 
-    // 4. Core tool schema fallback for free-tier /responses models
-    if (init?.body !== undefined) {
-      const newBody = maybeInjectCoreTools(url, init.body, headers, {
+    // 4. Core tool schema fallback for free-tier /responses models.
+    //
+    // DSH sends inference as fetch(new Request(url, { body })) — so init.body
+    // is undefined and the old `init?.body !== undefined` guard skipped the
+    // whole block: Agent Team turns left with no bash and the gateway 403s
+    // the body as non-OpenCode. Read the body off whichever half carries it.
+    let bodySource: "request" | "init" | "none" = "none";
+    let bodyToPatch: RequestInit["body"] = init?.body;
+    if (bodyToPatch !== undefined) {
+      bodySource = "init";
+    } else if (input instanceof Request) {
+      try {
+        bodyToPatch = await input.clone().text();
+        bodySource = "request";
+      } catch {
+        bodyToPatch = undefined;
+      }
+    }
+    let finalBody = bodyToPatch;
+    if (bodyToPatch !== undefined) {
+      const newBody = maybeInjectCoreTools(url, bodyToPatch, headers, {
         enabled: config.injectCoreTools,
         modelMarker: config.freeModelMarker,
       });
-      if (newBody !== init.body) {
-        newInit.body = newBody;
+      if (newBody !== bodyToPatch) {
+        finalBody = newBody;
+        if (bodySource === "request" && input instanceof Request) {
+          // The input Request already owns the old body — clone() so the
+          // caller's stream is never consumed, and send a new Request.
+          // `method` is restated so the lint can see it — the Request copy
+          // carries the same method either way. The instanceof repeat is
+          // there for the type checker.
+          requestToSend = new Request(input, {
+            body: newBody,
+            method: input.method,
+          });
+        } else {
+          newInit.body = newBody;
+        }
       }
     }
 
-    const response = await original.call(this, input, newInit);
+    const response = await original.call(this, requestToSend, newInit);
 
     // One line per request the interceptor touched, so a run that misbehaves can
     // be read back instead of guessed at. Presence, never values: whether a
@@ -470,67 +567,33 @@ export const patchFetch = (
     // the credential itself has no business in a log.
     hooks.debug?.({
       auth: extractApiKeyFromHeaders(headers) !== undefined,
+      bodySource,
       claimed: true,
       org: headers.get("x-opencode-org-id") ?? null,
       plane: gatewayPlaneFor(url),
+      request: headers.get("x-opencode-request") ?? null,
       session: headers.get(SESSION_HEADER) ?? null,
       sessionFormat: isOpenCodeSessionId(headers.get(SESSION_HEADER)),
       status: response.status,
+      toolNames: toolNamesOf(finalBody),
       url,
       userAgent: headers.get("User-Agent") ?? null,
     });
 
-    // A refused credential or an exhausted rate limit is the one moment a pool
-    // can do something useful, and this is the only place that sees the answers
-    // of routes the wrapper serves — so the rotation is driven from here. The
-    // current request has already failed; this is about the next one.
+    // **A 403 is passed through untouched, with the gateway's own words.**
     //
-    // 403 is NOT included: the gateway answers a model the account has not
-    // enabled with 403, and rotating a key over that would move a deployment
-    // off a working credential for a model problem.
-    if (
-      hooks.onCredentialFailure !== undefined &&
-      (response.status === 401 || response.status === 429)
-    ) {
-      hooks.onCredentialFailure(gatewayPlaneFor(url), response.status);
-    }
-
-    // A 403 the gateway means as an entitlement answer is remapped to 400, so
-    // DSH's error classifier does not read it as an invalid API key ("AUTH").
+    // A revision remapped it to 400 here, so DSH's classifier would stop reading
+    // it as AUTH. That was the wrong trade: it rewrote a status the gateway
+    // chose, and the user asked for the opposite — keep the 403, keep the real
+    // message. `classifyPiAiError` will label a 403 "AUTH", and that is the
+    // classifier's reading; the message under it is the gateway's and is
+    // accurate, which is what matters. Do not rewrite what the gateway said.
     //
-    // The message states what was observed and nothing else. It used to say the
-    // free tier "can only be used from within OpenCode" and then recommend
-    // `space-bunny-free` in the same sentence - self-contradictory, and wrong:
-    // this plugin reaches the gateway through the host's adapter and does serve
-    // free models, so a refusal here is about this request, not about the tier.
-    // The gateway's own words are kept so the reader can search them.
-    if (response.status === 403) {
-      try {
-        const cloned = response.clone();
-        const text = await cloned.text();
-        if (
-          text.includes("FreeTierError") ||
-          text.includes("from within OpenCode")
-        ) {
-          return Response.json(
-            {
-              error: {
-                message:
-                  "The gateway refused this model for the credential in use (403 FreeTierError). If it is a free-tier id the refusal is about this request rather than the key - the same credential answers 200 for a paid model on the same endpoint. Reported as 400 so DSH does not read it as an invalid API key.",
-                type: "free_tier_restricted",
-              },
-            },
-            {
-              status: 400,
-              statusText: "Bad Request",
-            }
-          );
-        }
-      } catch {
-        // Fall back to original response on clone/text errors
-      }
-    }
-
+    // Measured 403 shapes on this gateway, none of them about a credential:
+    //   FreeTierError  "…can only be used from within OpenCode…"
+    //   server_error   "Upstream request failed: Model access is disabled"
+    //   WAF 1010       the request did not look like the OpenCode client
+    // The credential case is a 401 (`Missing API key`, `Invalid API key`).
     const method = (
       init?.method ??
       (typeof Request !== "undefined" && input instanceof Request

@@ -18,6 +18,7 @@ import {
   KEY_SOURCE_POLICIES,
   resolveConfig,
   type ActiveTurnState,
+  type ModelOverrideConfig,
   type PluginConfig,
 } from "../src/index.ts";
 
@@ -34,6 +35,7 @@ describe("resolveConfig", () => {
       "opencode-go",
       "opencode-responses",
       "opencode-anthropic",
+      "opencode-google",
       "opencode-go-responses",
       "opencode-go-anthropic",
     ]);
@@ -86,6 +88,79 @@ describe("resolveConfig", () => {
     expect(resolved.enrichModels).toBe(true);
   });
 
+  it("resolves and validates maxContextWindow when specified", () => {
+    expect(resolveConfig({}).maxContextWindow).toBeUndefined();
+    expect(resolveConfig({ maxContextWindow: 262_144 }).maxContextWindow).toBe(
+      262_144
+    );
+    expect(
+      resolveConfig({ maxContextWindow: "131072" as unknown as number })
+        .maxContextWindow
+    ).toBe(131_072);
+    expect(
+      resolveConfig({ maxContextWindow: -100 }).maxContextWindow
+    ).toBeUndefined();
+    expect(
+      resolveConfig({ maxContextWindow: 0 }).maxContextWindow
+    ).toBeUndefined();
+    expect(
+      resolveConfig({ maxContextWindow: "invalid" as unknown as number })
+        .maxContextWindow
+    ).toBeUndefined();
+  });
+
+  it("resolves and validates modelOverrides when specified", () => {
+    expect(resolveConfig({}).modelOverrides).toEqual({});
+    const overrides = {
+      "gpt-5.4": {
+        contextWindow: 131_072,
+        cost: { cache_read: 0.1, input: 1.5, output: 8 },
+        inputModalities: ["text" as const, "image" as const],
+        maxTokens: 32_000,
+        name: "GPT-5.4 Custom",
+        reasoningEfforts: ["none", "high"],
+      },
+    };
+    const resolved = resolveConfig({ modelOverrides: overrides });
+    expect(resolved.modelOverrides["gpt-5.4"]).toEqual(overrides["gpt-5.4"]);
+
+    // Test alias keys and edge cases
+    const aliasOverrides = {
+      "gemini-3.8-flash": {
+        context_window: 262_144,
+        cost: { cache_write: 0.2, input: 0.5, output: 2 },
+        efforts: ["minimal", "medium"],
+        max_output_tokens: 16_384,
+        modalities: ["text", "image"],
+      },
+      "invalid-entry": null,
+    };
+    const resolvedAliases = resolveConfig({
+      modelOverrides: aliasOverrides as unknown as Record<
+        string,
+        ModelOverrideConfig
+      >,
+    });
+    expect(resolvedAliases.modelOverrides["gemini-3.8-flash"]).toEqual({
+      contextWindow: 262_144,
+      cost: { cache_write: 0.2, input: 0.5, output: 2 },
+      inputModalities: ["text", "image"],
+      maxTokens: 16_384,
+      reasoningEfforts: ["minimal", "medium"],
+    });
+    expect(resolvedAliases.modelOverrides["invalid-entry"]).toBeUndefined();
+
+    // Invalid non-record input yields empty record
+    expect(
+      resolveConfig({
+        modelOverrides: "invalid" as unknown as Record<
+          string,
+          ModelOverrideConfig
+        >,
+      }).modelOverrides
+    ).toEqual({});
+  });
+
   it("preserves custom providers and configuration overrides", () => {
     const resolved = resolveConfig({
       debug: true,
@@ -114,6 +189,7 @@ describe("resolveConfig", () => {
       "opencode-go",
       "opencode-responses",
       "opencode-anthropic",
+      "opencode-google",
       "opencode-go-responses",
       "opencode-go-anthropic",
     ]);
@@ -122,6 +198,7 @@ describe("resolveConfig", () => {
       "opencode-go",
       "opencode-responses",
       "opencode-anthropic",
+      "opencode-google",
       "opencode-go-responses",
       "opencode-go-anthropic",
     ]);
@@ -151,6 +228,7 @@ describe("resolveConfig", () => {
       "opencode-go",
       "opencode-responses",
       "opencode-anthropic",
+      "opencode-google",
       "opencode-go-responses",
       "opencode-go-anthropic",
     ]);
@@ -191,6 +269,7 @@ describe("resolveConfig", () => {
       "opencode-go",
       "opencode-responses",
       "opencode-anthropic",
+      "opencode-google",
       "opencode-go-responses",
       "opencode-go-anthropic",
     ]);
@@ -208,7 +287,6 @@ describe("Config schema", () => {
     expect(Object.keys(validated).sort()).toEqual(
       [
         "credentialOrg",
-        "credentialPool",
         "debug",
         "enrichModels",
         "endpoint",
@@ -219,7 +297,11 @@ describe("Config schema", () => {
         "injectOriginHeaders",
         "injectProject",
         "injectUserAgent",
+        "internalRoutes",
         "keySource",
+        "maxContextWindow",
+        "modelOverrides",
+        "modelRoutes",
         "originClient",
         "providers",
         "readOpencodeStore",
@@ -231,10 +313,7 @@ describe("Config schema", () => {
       ].sort()
     );
     expect(resolveConfig(validated as PluginConfig)).toMatchObject({
-      // The pool's default is the whole contract: with no configuration at all,
-      // nothing about a credential pool runs.
       credentialOrg: undefined,
-      credentialPool: { enabled: false, go: [], zen: [] },
       debug: false,
       enrichModels: true,
       endpoint: "auto",
@@ -251,6 +330,7 @@ describe("Config schema", () => {
         "opencode-go",
         "opencode-responses",
         "opencode-anthropic",
+        "opencode-google",
         "opencode-go-responses",
         "opencode-go-anthropic",
       ]),
@@ -333,6 +413,7 @@ describe("isOpenCodeRequest (endpoint differentiation)", () => {
     "opencode-go",
     "opencode-responses",
     "opencode-anthropic",
+    "opencode-google",
     "opencode-go-responses",
     "opencode-go-anthropic",
   ]);

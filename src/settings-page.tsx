@@ -16,17 +16,10 @@ import {
 
 import { DEFAULT_PROVIDERS, readStringList } from "./config-values.ts";
 import { isRecord } from "./guards.ts";
-import {
-  parseLoginCancelResult,
-  parseLoginChallenge,
-  parseLoginPoll,
-  parseLoginState,
-  loginRemote,
-} from "./login-contract.ts";
 import { OpencodeCard } from "./settings-card.tsx";
 import { en, zh } from "./settings-copy.ts";
 import { SPECS } from "./settings-fields.ts";
-import type { LoginRemoteCalls } from "./settings-login.tsx";
+import { remoteNamespace } from "./settings-remote.ts";
 import { readGoUsage } from "./settings-usage.tsx";
 import { usageRemote } from "./usage-contract.ts";
 import { UsagePill } from "./usage-pill.tsx";
@@ -47,14 +40,15 @@ export const LEGACY_NS = "dsh-opencode";
 export const PKG = "dsh-opencode-patch";
 
 /**
- * Combined remote contribution for the plugin.
+ * The plugin's remote contribution: the meter, under the package name `PKG`.
  *
- * Joins `usageRemote` and `loginRemote` under the package name `PKG` so Typert
- * registers the package once, allowing `api-gateway` to mount both namespaces
- * (`opencodeGoUsage` and `opencodeLogin`) without a duplicate package collision.
+ * It is a contribution rather than a bare descriptor list because Typert
+ * enforces unique package names, and this is the one place the package is
+ * registered. The meter's namespace is the only one this build mounts — the
+ * sign-in row and its `opencodeLogin` namespace are v2 work.
  */
 export const patchRemote = {
-  descriptors: [...usageRemote.descriptors, ...loginRemote.descriptors],
+  descriptors: [...usageRemote.descriptors],
   package: PKG,
 };
 
@@ -77,115 +71,18 @@ export const SCOPED_PKG = "@viztor/dsh-opencode-patch";
  * (ui-model-selection/src/client/index.ts:107).
  */
 /**
- * The sign-in remote's three calls, or nothing when the host mounted none.
- *
- * The namespace is read off `ctx.remote` rather than declared as an inject key:
- * declaring `remote.opencodeLogin` would make it a HARD dependency and hold the
- * whole plugin until a host that mounts no login service answered.
- *
- * @param ctx - the settings context.
- * @returns the calls, or undefined when there is no login remote.
- */
-export const loginCalls = (ctx: ClientContext): LoginRemoteCalls => {
-  // Resolved per call rather than once, and the calls are returned even when there
-  // is nothing to resolve.
-  //
-  // The remote is mounted by an asynchronous `$mount` started in an effect, and this
-  // runs while the injector builds the card's props. Asking once answered `undefined`
-  // whenever the mount had not resolved yet, and the card renders nothing when
-  // `login` is undefined - so the row was absent, with no second chance and no retry,
-  // and the warning below blamed a missing service for what was a late one.
-  //
-  // Returning the calls unconditionally is what makes the row render at all, which
-  // has a cost worth stating: a host that mounts no login service now shows a row
-  // that says so rather than showing nothing. That is the better failure - "no row"
-  // and "no service" stop looking identical - and it is the opposite of the meter's
-  // choice, which hides itself instead.
-  const service = () => {
-    const remote = remoteNamespace(ctx.remote, "opencodeLogin");
-    if (remote === undefined) {
-      // Say what the remote DOES expose - the list that distinguishes "the host
-      // mounted no login service" from "this bundle is not the one that knows about
-      // it".
-      console.warn(
-        "[dsh-opencode-patch] login row: no opencodeLogin service on the remote",
-        Object.keys(ctx.remote ?? {})
-      );
-    }
-    return remote;
-  };
-  return {
-    // The plane travels with the call. There are TWO authentication routes - one
-    // per gateway plane - and a login writes its grant to the plane it names, so
-    // a row that never said which one always signed in on Zen and could describe
-    // no other. A login signs an ACCOUNT in and either grant serves both planes
-    // (`login-credential.ts` falls back to the other plane), so choosing here is
-    // about which grant you are writing and reading, not about locking you out.
-    begin: async (plane: string) =>
-      parseLoginChallenge(await unwrapRemote(service()?.begin?.({ plane }))),
-    cancel: async (flowId: string) => {
-      parseLoginCancelResult(
-        await unwrapRemote(service()?.cancel?.({ flowId }))
-      );
-    },
-    poll: async (flowId: string) =>
-      parseLoginPoll(await unwrapRemote(service()?.poll?.({ flowId }))),
-    read: async (plane: string) =>
-      parseLoginState(await unwrapRemote(service()?.state?.({ plane }))),
-  };
-};
-
-/**
  * Read a namespace off the host's remote face, or `undefined` when it is absent.
  *
- * Cordis guards property access on a remote service by NAME. A namespace this
- * bundle has not declared in `inject` throws
- * `cannot get property "remote.opencodeLogin" without inject` rather than
- * answering `undefined`, and an optional chain cannot catch a throw - which is
- * the error the reporter's screenshot showed, and why neither the meter nor the
- * sign-in row appeared. Declaring the names is not the answer either: a name in
- * `inject` is a HARD gate that stops the whole plugin activating until it exists,
- * which is what took the meter out once with "web boot: 1 entry did not activate".
- *
- * So the read is guarded, and the absence is reported by the caller that already
- * handles a genuine "the host mounted none".
- *
- * @param remote - the host's remote face.
- * @param namespace - the namespace to read.
- * @returns the namespace's calls, or `undefined` when it is not reachable.
+ * The implementation lives in `settings-remote.ts` and is shared with the
+ * settings card, which carried the same unguarded read after the meter was
+ * fixed. See that module for why the guard has to exist at all: Cordis guards
+ * property access by NAME and throws, and an optional chain cannot catch a
+ * throw.
  */
-const remoteNamespace = (
-  remote: unknown,
-  namespace: string
-):
-  | Record<string, ((query?: unknown) => Promise<unknown>) | undefined>
-  | undefined => {
-  try {
-    const face = (remote as Record<string, unknown> | undefined)?.[namespace];
-    if (face === undefined || face === null || typeof face !== "object") {
-      return undefined;
-    }
-    return face as Record<
-      string,
-      ((query?: unknown) => Promise<unknown>) | undefined
-    >;
-  } catch {
-    return undefined;
-  }
-};
+
+export { remoteNamespace } from "./settings-remote.ts";
 
 /** The value a Remote result carries, or a thrown failure. */
-export const unwrapRemote = async (result: unknown): Promise<unknown> => {
-  const resolved: unknown = await result;
-  if (isRecord(resolved) && resolved.ok === true) {
-    return resolved.value;
-  }
-  throw new Error(
-    isRecord(resolved) && typeof resolved.error === "string"
-      ? resolved.error
-      : "the login remote did not answer"
-  );
-};
 
 /**
  * Mount one remote contribution, reporting why when it cannot.
@@ -293,14 +190,6 @@ export interface ClientContext {
         sessionId?: string;
       }) => Promise<unknown>;
     };
-    // Structural view of the login remote; each answers a Remote result, whose
-    // `value` the caller unwraps.
-    opencodeLogin?: {
-      begin: (query?: { plane?: string }) => Promise<unknown>;
-      cancel: (query?: { flowId?: string }) => Promise<unknown>;
-      poll: (query?: { flowId?: string }) => Promise<unknown>;
-      state: (query?: { plane?: string }) => Promise<unknown>;
-    };
   };
   slots?: {
     inject: (
@@ -339,6 +228,19 @@ const isSettingsFormScope = (
 const noopDisposer = (): void => {
   /* no-op */
 };
+
+/**
+ * The slot registries this bundle has already put the meter into.
+ *
+ * Keyed on the REGISTRY, not on a boolean and not on the `apply` call. The host
+ * may run a plugin's client entry more than once in a page's life and the slot
+ * registry throws on a duplicate id, so a per-`apply` flag resets on the second
+ * run and turns that throw into a meter that disappears. A module-level boolean
+ * would fix that and then refuse a genuinely fresh registry — a second
+ * conversation surface, or a test's own slots — so the identity that matters is
+ * the registry itself.
+ */
+const meterRegisteredOn = new WeakSet<object>();
 
 /**
  * The session's model-directory store, or `undefined` when the service cannot
@@ -441,11 +343,10 @@ export const apply = (ctx: ClientContext): void => {
   // Mounting `usageRemote` and `loginRemote` separately with the same package
   // name ("dsh-opencode-patch") causes the second `$mount` call to throw
   // `Remote package "dsh-opencode-patch" is already registered` — dropping the
-  // login remote completely.
+  // remote completely.
   //
-  // Combining descriptors into one contribution registers the package ONCE and
-  // allows `api-gateway` to install both namespaces (`opencodeGoUsage` and
-  // `opencodeLogin`) together.
+  // One contribution registers the package ONCE, which is what lets `api-gateway`
+  // install the meter's namespace.
   ctx.effect?.(() => {
     const remotes = mountRemote(
       ctx,
@@ -555,28 +456,59 @@ export const apply = (ctx: ClientContext): void => {
   //   list slot "conversation.input.right" already has an entry with id
   //   "dsh-opencode-patch-usage" ... (registered by registerMeter)
   // Measured in a browser, after a restart, as the whole of the reported symptom.
-  let registered = false;
+  //
+  // The flag is MODULE-level, not per-`apply`. It was per-`apply`, and the host
+  // re-runs a plugin's client entry on a page load and on a rebind — so the
+  // second run started from `registered = false`, registered the same id again,
+  // and threw inside a render, which is a meter that vanishes rather than one
+  // that says why. The registration is also non-throwing now: a duplicate is a
+  // no-op, not an exception out of the entry.
   const registerMeter = (meterScope: ClientContext): void => {
-    if (registered) {
+    // Keyed on the ROOT context, captured in this closure — not on the argument.
+    // The three callers pass different scopes: the scoped inject hands over a
+    // CHILD scope, while the mount-ready path and the ten-second fallback hand
+    // over the root `ctx`. Keying on `meterScope.slots ?? meterScope` therefore
+    // produced two different keys for one activation, both guards passed, and the
+    // host threw on the duplicate:
+    //
+    //   list slot "conversation.input.right" already has an entry with id
+    //   "dsh-opencode-patch-usage" at priority 0 (registered by registerMeter)
+    //
+    // Measured in a browser console after the previous guard was added, which is
+    // what this replaces. Across a genuine re-activation the root context is a
+    // different object, so a fresh registration is still allowed.
+    if (meterRegisteredOn.has(ctx)) {
       return;
     }
-    registered = true;
+    meterRegisteredOn.add(ctx);
     // `conversation.input.right` renders in the composer bar's trailing controls,
     // immediately BEFORE `conversation.input.model` — so it is the seat beside
     // the model selector. `conversation.input.left` is the far end of the leading
     // tools group instead, a whole row away. Both are list slots, so both are
     // open to a plugin; this is the requested position.
-    meterScope.slots?.inject?.("conversation.input.right", () =>
-      meterScope.slots?.register?.(
-        {
-          id: "dsh-opencode-patch-usage",
-          inject: createUsageInjector(meterScope),
-          name: "conversation.input.right",
-          order: 50,
-        },
-        UsagePill
-      )
-    );
+    try {
+      meterScope.slots?.inject?.("conversation.input.right", () =>
+        meterScope.slots?.register?.(
+          {
+            id: "dsh-opencode-patch-usage",
+            inject: createUsageInjector(meterScope),
+            name: "conversation.input.right",
+            order: 50,
+          },
+          UsagePill
+        )
+      );
+    } catch (error) {
+      // Already registered by an earlier activation of this same bundle. The
+      // meter is present; a second registration is the thing that is not, and
+      // it must not become an exception out of the plugin entry. The client
+      // context carries no logger, so this reports the way the rest of the
+      // bundle does.
+      console.warn(
+        "[dsh-opencode-patch] the usage meter was already registered",
+        error
+      );
+    }
   };
 
   // `ctx.inject` is the host's own idiom for a cross-plugin service
@@ -601,6 +533,20 @@ export const apply = (ctx: ClientContext): void => {
   // namespace lazily at render time, when it is there.
   if (typeof ctx.inject === "function") {
     ctx.inject(["modelDirectories", "remote", "slots"], registerMeter);
+    // `ctx.inject` is a HARD gate: the callback runs only once ALL of those
+    // names exist. If one of them never appears — a host that mounts no remote
+    // face is the ordinary case — the meter is then absent with nothing to tell
+    // it from a host that serves no usage service. This is the documented second
+    // path ("a ten-second fallback calls it anyway so the read can report its
+    // own reason"); the comment still described it, but the code had lost it.
+    // The registration is idempotent per registry, so whichever path wins, the
+    // meter is registered once and a duplicate can never throw.
+    const fallback = setTimeout(() => {
+      registerMeter(ctx);
+    }, 10_000);
+    ctx.effect?.(() => () => {
+      clearTimeout(fallback);
+    });
   } else {
     registerMeter(ctx);
   }
@@ -658,7 +604,6 @@ export const apply = (ctx: ClientContext): void => {
                 readUsage: () => readGoUsage(ctx),
                 // The sign-in remote, when the host mounted one. Same shape as
                 // the meter's: the card calls, the host holds the credential.
-                login: loginCalls(ctx),
                 ...model.actions(),
               }),
               key: alias.key,

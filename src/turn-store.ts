@@ -18,6 +18,15 @@ export interface ActiveTurnState {
   parentValue?: string;
   project?: string;
   provider: string;
+  /**
+   * The `x-opencode-request` value for the turn: the id of the user message the
+   * turn answers, in the client's own `msg_` shape. Minted once per turn
+   * (`newOpenCodeMessageId` in `session.ts`) so every request the turn issues
+   * carries one id, as the client's own do; absent for requests issued outside
+   * any tracked turn — the usage and discovery calls — which send no such
+   * header.
+   */
+  requestValue?: string;
   value: string;
 }
 

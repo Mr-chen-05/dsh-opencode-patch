@@ -41,29 +41,15 @@ import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 
 import { DEFAULT_USAGE_KEY_ENV, type ResolvedPluginConfig } from "./config.ts";
-import {
-  type CordisContext,
-  readCredentialsResolver,
-  readCredentialsWriter,
-} from "./cordis-context.ts";
-import {
-  type CredentialPool,
-  createCredentialPool,
-  publishPoolKey,
-} from "./credential-pool.ts";
+import type { CordisContext } from "./cordis-context.ts";
 import { registerGoogleBridge } from "./google-bridge.ts";
 import { isFunctionLike, isRecord } from "./guards.ts";
-import {
-  createLoginCredentialReader,
-  type LoginCredentialReader,
-} from "./login-credential.ts";
 import {
   type CatalogModelSpec,
   getLiveGoCatalog,
   getLiveZenCatalog,
 } from "./models-catalog.ts";
-import { setOrg } from "./org-cache.ts";
-import { baseForProtocol } from "./pi-provider.ts";
+import { baseForProtocol, protocolFor } from "./pi-provider.ts";
 import {
   GOOGLE_INTERNAL_ROUTE,
   GOOGLE_SDK,
@@ -510,21 +496,6 @@ const sdksForProtocol = (protocol: string): string[] =>
  * the route's own endpoint, which is why the mount reads all three here rather
  * than from a module constant.
  */
-/**
- * The environment fallback the credential seam itself uses.
- *
- * A pool entry then behaves the same whether it was stored or exported, and a
- * blank is absent in both — which is the seam's rule, not this module's.
- */
-const fromEnvironment = (
-  ref: string
-): Promise<{ value?: string } | undefined> => {
-  const found = process.env[ref];
-  return Promise.resolve(
-    found === undefined || found.length === 0 ? undefined : { value: found }
-  );
-};
-
 const planeSource = (plane: string, ctx: unknown) =>
   plane === "opencode-go"
     ? { apiKeyEnv: DEFAULT_USAGE_KEY_ENV, catalog: getLiveGoCatalog() }
@@ -751,72 +722,158 @@ const mountScope = (
  * @returns the disposer withdrawing the mount, or `undefined` when nothing was
  *   mounted.
  */
+/**
+ * The model ids the deployment declared on one plane route.
+ *
+ * `ctx.llm` is the projection of the user's own configuration: `listModels(route)`
+ * answers what that route advertises, and a route the user wrote is exactly what
+ * we must not widen. Returns `undefined` when the service cannot answer — the
+ * caller then falls back to the catalog rather than mounting nothing.
+ *
+ * @param ctx - the host context.
+ * @param route - the plane route (`opencode`, `opencode-go`).
+ * @returns the declared ids, or `undefined` when unreadable.
+ */
+/**
+ * Narrow a route's models to the ones the deployment declared.
+ *
+ * The rule the mount needs and the whole reason it can be trusted: a route's
+ * model list is what a picker shows, so it may never be wider than the user's own
+ * configuration. `undefined` means "the declaration could not be read", which
+ * falls back to the full list rather than mounting nothing.
+ *
+ * @param models - the protocol's models, from the catalog.
+ * @param declared - the ids the user wrote, or `undefined` when unreadable.
+ * @returns `models` when unreadable, otherwise only the declared entries.
+ */
+/**
+ * Declared models that speak a protocol nothing in this composition serves.
+ *
+ * The case this exists for: `internalRoutes: false` turns the automatic mount off,
+ * and a declared model whose protocol differs from its provider's then has no
+ * route to answer for it. Silence would be the worst outcome — the model is in the
+ * picker and every call fails — so the caller logs these by name and protocol.
+ *
+ * A model the catalog does not describe is skipped: it cannot be known to need
+ * anything else, and guessing would produce a warning that is wrong more often
+ * than right.
+ *
+ * @param declaredByPlane - the ids the deployment declared, per plane route.
+ * @param served - the `plane:protocol` pairs some route serves.
+ * @returns one `id (protocol)` entry per unrouted model, sorted for a stable log.
+ */
+export const unroutedDeclaredModels = (
+  declaredByPlane: ReadonlyMap<string, ReadonlySet<string>>,
+  served: ReadonlySet<string>
+): string[] => {
+  const gaps: string[] = [];
+  for (const [plane, ids] of declaredByPlane) {
+    const entry = ROUTE_FOR_PLANE_PROTOCOL[plane];
+    if (entry === undefined) {
+      continue;
+    }
+    const catalog =
+      plane === "opencode-go" ? getLiveGoCatalog() : getLiveZenCatalog();
+    const byId = new Map(catalog.map((spec) => [spec.id, spec]));
+    for (const id of ids) {
+      const spec = byId.get(id);
+      const protocol = spec === undefined ? undefined : protocolFor(spec);
+      // A protocol the plane does not carry has no route to miss.
+      if (protocol === undefined || entry.routes[protocol] === undefined) {
+        continue;
+      }
+      if (served.has(`${plane}:${protocol}`)) {
+        continue;
+      }
+      gaps.push(`${id} (${plane} · ${protocol})`);
+    }
+  }
+  return gaps.toSorted((a, b) => a.localeCompare(b));
+};
+
+/**
+ * Declared models the bundled catalog does not describe.
+ *
+ * Two populations, and both are worth naming once at startup: an id NEWER than
+ * the bundled snapshot (the shim is generated, so it lags the vendor between
+ * releases) and an id the vendor has marked `deprecated` (the shim drops those by
+ * design). Either way the model is served from the DEPLOYMENT's configuration —
+ * the host lists it, the route speaks it — but this plugin can add no metadata:
+ * no context window, no modalities, no reasoning levels. Saying so is the
+ * difference between "the plugin is ignoring my model" and "the plugin has never
+ * seen that id".
+ *
+ * @param declaredByPlane - the ids the deployment declared, per plane route.
+ * @returns one `id (plane)` entry per undescribed model, sorted for a stable log.
+ */
+export const undescribedDeclaredModels = (
+  declaredByPlane: ReadonlyMap<string, ReadonlySet<string>>
+): string[] => {
+  const gaps: string[] = [];
+  for (const [plane, ids] of declaredByPlane) {
+    const catalog =
+      plane === "opencode-go" ? getLiveGoCatalog() : getLiveZenCatalog();
+    const known = new Set(catalog.map((spec) => spec.id));
+    for (const id of ids) {
+      if (!known.has(id)) {
+        gaps.push(`${id} (${plane})`);
+      }
+    }
+  }
+  return gaps.toSorted((a, b) => a.localeCompare(b));
+};
+
+export const narrowToDeclared = <T extends { readonly id: string }>(
+  models: readonly T[],
+  declared?: ReadonlySet<string>
+): readonly T[] =>
+  declared === undefined ? models : models.filter((m) => declared.has(m.id));
+
+const declaredModelsFor = async (
+  ctx: CordisContext,
+  route: string
+): Promise<ReadonlySet<string> | undefined> => {
+  const listModels = ctx.llm?.listModels;
+  if (typeof listModels !== "function") {
+    return undefined;
+  }
+  try {
+    const listed = await Reflect.apply(listModels, ctx.llm, [route]);
+    if (!Array.isArray(listed)) {
+      return undefined;
+    }
+    const ids = new Set<string>();
+    for (const entry of listed) {
+      const id = isRecord(entry) ? entry.id : undefined;
+      if (typeof id === "string" && id.length > 0) {
+        ids.add(id);
+      }
+    }
+    // **An empty list is not a declaration.** The host answers `[]` whenever the
+    // route's credential cannot be resolved (`dsh-llm-pi-ai/lib/index.js:1894`
+    // returns `[]` on MISSING_CREDENTIAL) — which is exactly the keyless
+    // deployment this plugin supports for free models. Reading that as "the user
+    // declared nothing" would mount no internal route at all and break the
+    // protocol split for a deployment that only lacks a key.
+    //
+    // A genuinely empty declaration is indistinguishable from this, and the two
+    // errors do not cost the same: mounting with the catalog is harmless because
+    // the mounted routes are hidden from every listing, while mounting nothing
+    // breaks dispatch.
+    return ids.size > 0 ? ids : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export const registerResponsesProvider = async (
   ctx: CordisContext,
-  config?: ResolvedPluginConfig,
-  loginCredential?: LoginCredentialReader
+  config?: ResolvedPluginConfig
 ): Promise<(() => void) | undefined> => {
   const { llm } = ctx;
   if (llm === undefined || typeof llm.registerAdapter !== "function") {
     return undefined;
   }
-  // Both planes' pools, or none. `createCredentialPool` answers undefined for a
-  // deployment that did not opt in, so everything below reads the same in the
-  // default composition: one undefined, and the profile's own credential.
-  const poolConfig = config?.credentialPool;
-  const credentials = readCredentialsWriter(ctx);
-  const resolveRef = readCredentialsResolver(ctx) ?? fromEnvironment;
-  // The rotator the fetch interceptor reads. Rotation is driven by credential
-  // failures the interceptor is the only place to see — including those from
-  // routes the WRAPPER serves and from the Go plane, neither of which passes
-  // through a route of ours. Registering the slot here rather than sharing a
-  // pool keeps rotation in one place, and an absent mount simply rotates
-  // nothing.
-  //
-  // `provide`, never an ad-hoc property set: this runs on a live context proxy
-  // while the fiber is running, and the proxy rejects a name that was never
-  // provided — `Object.assign(ctx, …)` here is a fatal load failure, not a
-  // rotation that quietly does not happen.
-  const rotateOnFailure = async (
-    plane: string,
-    _status: number
-  ): Promise<void> => {
-    if (plane !== "opencode" && plane !== "opencode-go") {
-      return;
-    }
-    const pool = poolFor(plane);
-    if (pool === undefined) {
-      return;
-    }
-    // The entry that was in use is the one the gateway refused, so it is marked
-    // failed BEFORE advancing: leaving it in rotation would hand the same key out
-    // again on the next lap, which is the failure this whole path exists to
-    // avoid. The failed request is over; this is about the next one, and the new
-    // key is published through the pool's own reference before this returns.
-    pool.markCurrentFailed();
-    await pool.next();
-  };
-  ctx.provide?.("credentialPoolRotator", rotateOnFailure);
-
-  const poolFor = (
-    plane: "opencode" | "opencode-go"
-  ): CredentialPool | undefined =>
-    poolConfig === undefined
-      ? undefined
-      : createCredentialPool({
-          config: poolConfig,
-          // Without this the pool selects but cannot WRITE, so a rotation
-          // would reach this plugin's routes and no others - which is the
-          // defect this wiring exists to remove.
-          credentials,
-          onPublishRefused: (reason) => {
-            ctx.logger?.info?.(
-              `[dsh-opencode-patch] credential pool for ${plane}: ${reason}`
-            );
-          },
-          plane,
-          resolveRef,
-        });
   const declared = declaredRoutes(llm);
   // The bridge route first. It registers on the real service through this
   // plugin's own adapter, so it needs nothing from the wrapper's mount below:
@@ -828,13 +885,6 @@ export const registerResponsesProvider = async (
     ? undefined
     : registerGoogleBridge({
         apiKeyRef: inheritedCredentialRef(ctx),
-        pool: poolFor("opencode"),
-        // The credential a login already stored, read the same way the org is.
-        loginToken: loginTokenReader(
-          ctx,
-          config?.readOpencodeStore === true,
-          loginCredential
-        ),
         // And, last, the installation's own store - off unless the deployment
         // opted in, which is what `config` carries here.
         readOpencodeStore: config?.readOpencodeStore === true,
@@ -875,6 +925,72 @@ export const registerResponsesProvider = async (
   // hand-picks the models it serves, and mounting over that would take the choice
   // away. Deferring is the point — this module exists so a deployment that
   // declares NOTHING still works, not to override one that does.
+  // **What the deployment declared, per plane.** The mount serves the protocols a
+  // declared model needs, with only those models: a route's model list is what the
+  // picker shows, and the whole protocol catalog there is how models nobody
+  // selected reached it. Read from the host, which holds the user's configuration.
+  const declaredByPlane = new Map<string, ReadonlySet<string>>();
+  for (const plane of ["opencode", "opencode-go"]) {
+    const ids = await declaredModelsFor(ctx, plane);
+    if (ids !== undefined) {
+      declaredByPlane.set(plane, ids);
+    }
+  }
+  for (const plane of ["opencode", "opencode-go"]) {
+    if (!declaredByPlane.has(plane)) {
+      console.info(
+        `[dsh-opencode-patch] ${plane}: the declared models could not be read ` +
+          "(no resolvable credential yet) — internal routes keep the catalog"
+      );
+    }
+  }
+  const undescribed = undescribedDeclaredModels(declaredByPlane);
+  if (undescribed.length > 0) {
+    // CONSOLE, not `ctx.logger`: cordis's logger only buffers (its default
+    // exporter pushes to a ring, `cordis/lib/index.js:596-607`) and no host
+    // package registers a console exporter — so a `logger.info` here reaches the
+    // inspector's buffer and nobody's terminal. A diagnostic nobody can see is
+    // not a diagnostic.
+    console.info(
+      `[dsh-opencode-patch] ${undescribed.length} declared model(s) are not ` +
+        `described by the catalog (newer than it, or deprecated): ` +
+        `${undescribed.join(", ")} — they are served from the deployment's ` +
+        "configuration, without catalog metadata"
+    );
+  }
+  /** Protocols some route in this composition serves, as `plane:protocol`. */
+  const served = new Set<string>();
+  const reportGaps = (): void => {
+    const gaps = unroutedDeclaredModels(declaredByPlane, served);
+    if (gaps.length === 0) {
+      return;
+    }
+    console.warn(
+      `[dsh-opencode-patch] ${gaps.length} declared model(s) speak a protocol no ` +
+        `route serves: ${gaps.join(", ")} — declare provider routes for them ` +
+        "(see modelRoutes), or set internalRoutes: true"
+    );
+  };
+  // A route the deployment declared is served by that declaration.
+  for (const [plane, entry] of Object.entries(ROUTE_FOR_PLANE_PROTOCOL)) {
+    for (const [protocol, route] of Object.entries(entry.routes)) {
+      if (declared.has(route)) {
+        served.add(`${plane}:${protocol}`);
+      }
+    }
+  }
+
+  // A curated deployment can turn the mount off: every mounted route is a
+  // provider whose model list is the protocol's catalog, which is how models
+  // nobody selected reach a picker. Such a deployment declares its own provider
+  // entries (and `modelRoutes` for the ids that need them) instead.
+  if (config?.internalRoutes === false) {
+    ctx.logger?.info?.(
+      "[dsh-opencode-patch] internal routes are off (internalRoutes: false); a declared provider must serve each protocol"
+    );
+    reportGaps();
+    return undefined;
+  }
   const wanted = Object.entries(ROUTE_FOR_PLANE_PROTOCOL).flatMap(
     ([plane, entry]) =>
       Object.entries(entry.routes)
@@ -903,16 +1019,18 @@ export const registerResponsesProvider = async (
         }))
   );
   if (wanted.length === 0) {
-    ctx.logger?.info?.(
+    console.info(
       "[dsh-opencode-patch] every internal route is already declared; leaving them alone"
     );
+    reportGaps();
     return undefined;
   }
   const host = loadPiAi(ctx);
   if (host === undefined) {
-    ctx.logger?.info?.(
+    console.info(
       "[dsh-opencode-patch] no loaded llm-pi-ai in this composition; internal routes stay unregistered"
     );
+    reportGaps();
     return undefined;
   }
   const providers: Record<string, unknown> = {};
@@ -925,15 +1043,32 @@ export const registerResponsesProvider = async (
     // route whose protocol that plane does not carry has no entry in the table
     // at all. The guard this replaces existed because every route used the Zen
     // catalog, which made every Go route empty.
-    const models = sdksForProtocol(protocol).flatMap((sdk) =>
-      modelsForSdk(sdk, source.catalog)
+    const declaredIds = declaredByPlane.get(plane);
+    const models = narrowToDeclared(
+      sdksForProtocol(protocol).flatMap((sdk) =>
+        modelsForSdk(sdk, source.catalog)
+      ),
+      declaredIds
     );
+    // A protocol no declared model speaks is not mounted at all: an empty route
+    // is dropped from the picker anyway, and mounting it only to hide it is how
+    // the exposure happened.
+    if (models.length === 0) {
+      // Console, like the boot and diagnostic lines: this is the decision a
+      // reader needs to verify that nothing the deployment did not declare was
+      // mounted, and the logger only buffers.
+      console.info(
+        `[dsh-opencode-patch] ${route} not mounted: no declared model speaks ${protocol}`
+      );
+      continue;
+    }
     providers[route] = providerProfile(
       protocol,
       models,
       source.apiKeyEnv,
       baseURL
     );
+    served.add(`${plane}:${protocol}`);
     mounted.push(
       `${route} (${plane} · ${protocol}) with ${models.length} model(s)`
     );
@@ -967,28 +1102,12 @@ export const registerResponsesProvider = async (
       );
       return bridgeDispose;
     }
-    ctx.logger?.info?.("[dsh-opencode-patch] mounted %s", mounted.join("; "));
-    // Publish each plane's active key through the reference the pool owns, so
-    // the routes the WRAPPER serves read a rotating credential: their
-    // resolution is the wrapper's, and this is the only path that reaches it.
-    // Best-effort by design — a pool that cannot publish has said why in its
-    // result, and a refused write must not undo a mount that succeeded.
-    await Promise.all(
-      (["opencode", "opencode-go"] as const).flatMap((plane) => {
-        const pool = poolFor(plane);
-        if (pool === undefined) {
-          return [];
-        }
-        return [
-          publishPoolKey(pool, credentials).then((published) => {
-            if (!published.ok) {
-              ctx.logger?.info?.(
-                `[dsh-opencode-patch] credential pool for ${plane}: ${published.reason}`
-              );
-            }
-          }),
-        ];
-      })
+    // The line that answers "what actually mounted", which the boot line's
+    // provider LIST does not: that one is the claimed set, not the mounted set.
+    console.info(
+      `[dsh-opencode-patch] mounted ${
+        mounted.length === 0 ? "no internal route" : mounted.join("; ")
+      }`
     );
 
     return () => {
@@ -1013,27 +1132,3 @@ export const registerResponsesProvider = async (
     return bridgeDispose;
   }
 };
-
-/**
- * The bridge's token-only view of the shared login credential reader.
- *
- * @param ctx - the host context.
- * @param readOpencodeStore - the user's opt-in to the installation's account.
- * @param read - optionally the lifecycle's shared reader, including its sessions.
- * @returns a reader the bridge calls when a route named no reference.
- */
-export const loginTokenReader =
-  (
-    ctx: unknown,
-    readOpencodeStore = false,
-    read: LoginCredentialReader = createLoginCredentialReader(
-      ctx,
-      readOpencodeStore
-    )
-  ): ((plane: string) => Promise<string | undefined>) =>
-  async (plane) => {
-    const credential = await read(plane);
-    // Clear an old org too: it must never survive a change of credential owner.
-    setOrg(plane, credential?.orgId);
-    return credential?.accessToken;
-  };

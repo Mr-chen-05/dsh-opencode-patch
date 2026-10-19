@@ -61,6 +61,7 @@ export {
   resolveConfig,
   type EndpointFamily,
   type KeySourcePolicy,
+  type ModelOverrideConfig,
   type PluginConfig,
   type ResolvedPluginConfig,
 } from "./config.ts";
@@ -75,8 +76,10 @@ export {
 // ── session identity & turn state ───────────────────────────────────────────
 export {
   fallbackSessionId,
+  isOpenCodeMessageId,
   isOpenCodeSessionId,
   headerValueFor,
+  newOpenCodeMessageId,
   openCodeSessionIdFor,
   OPENCODE_UA,
   PARENT_SESSION_ALT_HEADER,
@@ -147,9 +150,9 @@ export {
   DSH_SUPPORTED_MODALITIES,
   MODELS_DEV_TIMEOUT_MS,
   MODELS_DEV_URL,
+  MODELS_OPENCODE_URL,
   OPENCODE_GO_CATALOG,
   OPENCODE_ZEN_CATALOG,
-  RETIRED_ZEN_MODEL_IDS,
   enrichModelsResponse,
   catalogPlaneForRoute,
   findModelSpec,
@@ -157,9 +160,9 @@ export {
   getLiveCatalog,
   getLiveGoCatalog,
   getLiveZenCatalog,
+  isDeprecatedModelOn,
   isGoModelsListingUrl,
   isModelsListingUrl,
-  isRetiredModel,
   parseModelsDevCatalog,
   refreshCatalog,
   sanitizeModalities,
@@ -175,6 +178,7 @@ export {
   isRouteRegistered,
   mergeDiscoveredModels,
   resolveDiscoveryProvider,
+  resolveEffectiveContextWindow,
   type DiscoveryCandidate,
 } from "./models-discovery.ts";
 export {
@@ -189,6 +193,8 @@ export {
   PROTOCOL_FOR_SDK,
   RESPONSES_ROUTE,
   RESPONSES_SDK,
+  GO_RESPONSES_ROUTE,
+  GO_ANTHROPIC_ROUTE,
   ROUTE_FOR_PLANE_PROTOCOL,
   ROUTE_FOR_PROTOCOL,
   UNSERVED_SDKS,
@@ -200,5 +206,8 @@ export {
   inheritedCredentialRef,
   loadPiAi,
   modelsForSdk,
+  narrowToDeclared,
+  undescribedDeclaredModels,
+  unroutedDeclaredModels,
   registerResponsesProvider,
 } from "./responses-provider.ts";

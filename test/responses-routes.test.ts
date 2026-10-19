@@ -12,6 +12,7 @@ import {
   ANTHROPIC_SDK,
   GOOGLE_INTERNAL_ROUTE,
   GOOGLE_SDK,
+  GO_RESPONSES_ROUTE,
   MISTRAL_SDK,
   catalogPlaneForRoute,
   findModelSpec,
@@ -23,9 +24,11 @@ import {
   parseModelsDevCatalog,
   RESPONSES_ROUTE,
   RESPONSES_SDK,
+  ROUTE_FOR_PLANE_PROTOCOL,
 } from "../src/index.ts";
+import { isServableModel } from "../src/models-discovery.ts";
 
-const MUSE = "muse-spark-1.3-contributor-free";
+const MUSE = "muse-spark-1.2";
 
 describe("responses-routes: the SDK mapping", () => {
   it("redirects a model that names the OpenAI SDK", () => {
@@ -59,6 +62,18 @@ describe("responses-routes: the SDK mapping", () => {
     expect(internalRouteFor("opencode", "claude-opus-4-7", RESPONSES_SDK)).toBe(
       RESPONSES_ROUTE
     );
+    // muse-* and gpt-* models automatically route to Responses API even when no SDK is passed
+    expect(internalRouteFor("opencode", "gpt-5.4")).toBe(RESPONSES_ROUTE);
+    expect(internalRouteFor("opencode", "muse-spark-1.2")).toBe(
+      RESPONSES_ROUTE
+    );
+    // A Go-only model (e.g. muse-spark-1.3-contributor) routes to the Go Responses route
+    expect(internalRouteFor("opencode", "muse-spark-1.3-contributor")).toBe(
+      GO_RESPONSES_ROUTE
+    );
+    expect(internalRouteFor("opencode-go", "muse-spark-1.3-contributor")).toBe(
+      GO_RESPONSES_ROUTE
+    );
   });
 
   it("redirects a model that names the Anthropic SDK too", () => {
@@ -87,7 +102,9 @@ describe("responses-routes: the SDK mapping", () => {
   it("leaves a model naming no SDK on its own route", () => {
     // 53 models carry no override and speak the provider default. Omitting the
     // SDK is how the catalog expresses that — absent, never a placeholder.
-    expect(internalRouteFor("opencode", "space-bunny-free")).toBeUndefined();
+    expect(
+      internalRouteFor("opencode", "minimax-m3.1-flash-free")
+    ).toBeUndefined();
   });
 
   it("redirects a Google model to the route the plugin mounts itself", () => {
@@ -255,5 +272,44 @@ describe("responses-routes: the SDK is read from the plane the request is on", (
     const absent: unknown = undefined;
     expect(catalogPlaneForRoute("my-relay")).toBe("zen");
     expect(catalogPlaneForRoute(absent)).toBe("zen");
+  });
+});
+
+describe("responses-routes: every model the picker offers is dispatchable", () => {
+  it("resolves each servable catalog model to a route the plugin mounts", () => {
+    // The picker now publishes the whole catalog on the parent route (see
+    // `models-discovery` and the join), which is the first time the Responses,
+    // Messages and Google models have been visible there. Visibility without a
+    // route would be worse than absence: the user picks a model and gets
+    // "no adapter for provider".
+    //
+    // So: every model `isServableModel` admits must either stay on its own route
+    // (`undefined`) or name a route this plugin actually mounts. The mount set is
+    // the plane table plus the two plane roots — `opencode-google` is mounted by
+    // the Google bridge rather than the wrapper, and is in the table for exactly
+    // that reason.
+    const mounted = new Set<string>(["opencode", "opencode-go"]);
+    for (const plane of Object.values(ROUTE_FOR_PLANE_PROTOCOL)) {
+      for (const route of Object.values(plane.routes)) {
+        mounted.add(route);
+      }
+    }
+
+    const unroutable: string[] = [];
+    for (const [route, catalog] of [
+      ["opencode", OPENCODE_ZEN_CATALOG],
+      ["opencode-go", OPENCODE_GO_CATALOG],
+    ] as const) {
+      for (const model of catalog) {
+        if (!isServableModel(model.id, route)) {
+          continue;
+        }
+        const target = internalRouteFor(route, model.id, model.provider_npm);
+        if (target !== undefined && !mounted.has(target)) {
+          unroutable.push(`${route}/${model.id} -> ${target}`);
+        }
+      }
+    }
+    expect(unroutable).toEqual([]);
   });
 });

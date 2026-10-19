@@ -15,7 +15,9 @@ import {
   SESSION_HEADER,
   hasSessionHeader,
   headerValueFor,
+  isOpenCodeMessageId,
   isOpenCodeSessionId,
+  newOpenCodeMessageId,
   openCodeSessionIdFor,
   type ActiveTurnState,
   withStore,
@@ -217,10 +219,20 @@ describe("withStore", () => {
  */
 describe("session id · parity with the vendor's own reader", () => {
   /** The vendor's `timestamp()`: slice twelve characters, hex, divide by 0x1000. */
+  /**
+   * The vendor's own decode, with the inversion applied.
+   *
+   * Sessions are minted with `direction: "descending"`, so the twelve hex digits
+   * are `~((ms << 12) + counter)` masked to 48 bits — never the value itself.
+   * Skipping the inversion is the mistake that let this suite certify an
+   * encoding the gateway rejects: measured 500 for our ascending ids against 200
+   * for a freshly minted descending one, same body, same key, same session.
+   */
   const vendorTimestamp = (id: string): number => {
     const prefix = id.split("_")[0] ?? "";
     const hex = id.slice(prefix.length + 1, prefix.length + 13);
-    return Number(BigInt(`0x${hex}`) / 0x1000n);
+    const mask = 2n ** 48n - 1n;
+    return Number((mask - BigInt(`0x${hex}`)) / 0x1000n);
   };
 
   it("embeds the creation time exactly where their reader looks for it", () => {
@@ -302,7 +314,11 @@ describe("session id · the session's own creation time", () => {
     const createdAt = 1_700_000_000_000;
     const id = headerValueFor("s1", createdAt) ?? "";
     const hex = id.slice(4, 16);
-    expect(Number(BigInt(`0x${hex}`) / 0x1000n)).toBe(createdAt % 2 ** 36);
+    const mask = 2n ** 48n - 1n;
+    // Inverted: sessions are descending, so the stored value is `~time`.
+    expect(Number((mask - BigInt(`0x${hex}`)) / 0x1000n)).toBe(
+      createdAt % 2 ** 36
+    );
   });
 });
 
@@ -311,6 +327,28 @@ describe("session: a session id the gateway will accept", () => {
     // Measured: the client's own ids are ses_ + 12 hex + 14 base62.
     expect(isOpenCodeSessionId(openCodeSessionIdFor("abc"))).toBe(true);
     expect(isOpenCodeSessionId("ses_ed62aae61ffeA6UwzEFN9YNKk8")).toBe(true);
+  });
+
+  it("lands in the admitted band by construction, not by clamping", () => {
+    // The gateway admits low twelve bits in `0xFC0..0xFFE` and refuses anything
+    // else with `403 FreeTierError` — measured by replaying the vendor client's
+    // captured body and changing only this header (ascending `0xFFE` and `0xFC0`
+    // → 200; ascending `0x001` → 403).
+    //
+    // The id that rule is about is the vendor's own shape: descending, counter
+    // 1. Inverting `(ms << 12) + 1` puts the low twelve bits at `0xFFE` with no
+    // clamp anywhere, so this asserts the construction rather than a band we
+    // impose on it. PR #35/#37 introduced the band by clamping the counter; that
+    // clamp was correct and is now unnecessary.
+    const low12 = (id: string): number =>
+      Number.parseInt(id.slice(4, 16), 16) % 0x1000;
+    for (const id of [
+      openCodeSessionIdFor("band-a"),
+      openCodeSessionIdFor("band-b", 1792000000000),
+      openCodeSessionIdFor("band-c", 1792000000001),
+    ]) {
+      expect(low12(id)).toBe(0xffe);
+    }
   });
 
   it("rejects a pinned header that merely starts with ses_", () => {
@@ -332,5 +370,72 @@ describe("session: a session id the gateway will accept", () => {
       expect(isOpenCodeSessionId(bad), bad).toBe(false);
     }
     expect(isOpenCodeSessionId(42)).toBe(false);
+  });
+});
+
+describe("newOpenCodeMessageId: the value x-opencode-request carries", () => {
+  const MESSAGE_RE = /^msg_[0-9a-f]{12}[0-9A-Za-z]{14}$/u;
+
+  it("mints the exact shape the client sends", () => {
+    // Measured: the client's own ids are msg_ + 12 hex + 14 base62 — the same
+    // layout as a session id under a different prefix. The gateway reads this
+    // value for per-request metrics, so it has to be that shape, and not
+    // something that merely starts with msg_.
+    const id = newOpenCodeMessageId();
+    expect(id).toMatch(MESSAGE_RE);
+    expect(id.length).toBe(30);
+    expect(isOpenCodeMessageId(id)).toBe(true);
+    expect(isOpenCodeMessageId("msg_ed62aae61ffeA6UwzEFN9YNKk8")).toBe(true);
+  });
+
+  it("embeds the mint instant where the vendor's reader looks for it", () => {
+    // `timestamp(id)` divides the twelve hex characters by 0x1000; with the
+    // counter in the low twelve bits, that recovers the milliseconds modulo the
+    // 48-bit field the vendor wraps at.
+    const now = 1_792_000_000_000;
+    const id = newOpenCodeMessageId(now);
+    const time = Number(BigInt(`0x${id.slice(4, 16)}`) / 0x1000n);
+    expect(time).toBe(now % 2 ** 36);
+  });
+
+  it("mints a distinct id per call, counter and randomness included", () => {
+    // Unlike a session id, two calls must NOT agree: two different user
+    // messages sharing one id is the failure a derived value would have.
+    const now = 1_792_000_000_000;
+    const first = newOpenCodeMessageId(now);
+    const second = newOpenCodeMessageId(now);
+    expect(first).not.toBe(second);
+
+    const low12 = (id: string): number =>
+      Number.parseInt(id.slice(4, 16), 16) % 0x1000;
+    expect(low12(second)).toBe((low12(first) + 1) % 0x1000);
+
+    const ids = new Set<string>();
+    for (let i = 0; i < 200; i += 1) {
+      ids.add(newOpenCodeMessageId());
+    }
+    expect(ids.size).toBe(200);
+  });
+
+  it("still mints one when the clock argument is not a time", () => {
+    for (const bad of [Number.NaN, -1, 1.5]) {
+      expect(newOpenCodeMessageId(bad)).toMatch(MESSAGE_RE);
+    }
+  });
+
+  it("rejects a header value that merely starts with msg_", () => {
+    // The same rule as the session validator: a prefix is not a format, and a
+    // malformed value has no fallback — it is dropped, not repaired.
+    for (const bad of [
+      "msg_dsh_default",
+      "msg_",
+      "msg_short",
+      "msg_ZZZZZZZZZZZZaaaaaaaaaaaaaa",
+      "ses_ed62aae61ffeA6UwzEFN9YNKk8",
+      "",
+    ]) {
+      expect(isOpenCodeMessageId(bad), bad).toBe(false);
+    }
+    expect(isOpenCodeMessageId(42)).toBe(false);
   });
 });

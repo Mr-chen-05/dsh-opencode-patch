@@ -17,13 +17,18 @@ export const ALL_MODELS_MARKER = "*";
  * route we do not intercept carries no OpenCode headers and has no quota to
  * show.
  *
- * `opencode-responses` is the gateway's Responses-API plane. It has to be a
- * separate route because `llm-pi-ai` carries one `api` per route and offers no
- * per-model override, and the gateway serves exactly one Zen model
- * (`muse-spark-1.3-contributor-free`) on `/responses` — everything else on
- * `/chat/completions`. The plugin declares that route in its own layer
- * (`cordis.patch.yml`), so it must claim it here too: an unclaimed route gets
- * no session header, no origin headers, and no key injection.
+ * **It must cover every route this layer mounts**, which is the invariant the
+ * list is for. `llm-pi-ai` carries one `api` per route and offers no per-model
+ * override, so each non-default protocol needs its own route: Responses and
+ * Messages for each plane, plus the Google bridge's route. An unclaimed route
+ * gets no session header, no origin headers, and no key injection.
+ *
+ * `opencode-google` was missing here while every other internal route was
+ * present. It mattered less before the picker began publishing the whole catalog
+ * on the parent route; now a Google model is reachable and dispatched to this
+ * route, so it has to be claimed like the rest. It is mounted by the Google
+ * bridge (`google-bridge.ts`) rather than the wrapper, which is why it is easy to
+ * forget: `SELF_MOUNTED_ROUTES` excludes it from the wrapper's mount loop.
  *
  * Shared here rather than in `config.ts` so the client bundle can read the same
  * default without importing schemastery.
@@ -33,6 +38,7 @@ export const DEFAULT_PROVIDERS = [
   "opencode-go",
   "opencode-responses",
   "opencode-anthropic",
+  "opencode-google",
   "opencode-go-responses",
   "opencode-go-anthropic",
 ];
@@ -149,4 +155,23 @@ export const readStringList = (value: unknown): string[] => {
         typeof item === "string" && item.trim().length > 0
     )
     .map((item: string) => item.trim());
+};
+
+/**
+ * Read a positive finite integer, or `undefined` when absent/invalid.
+ *
+ * @param value - raw value, possibly a number or string.
+ */
+export const readPositiveInteger = (value: unknown): number | undefined => {
+  const raw: unknown = unwrapNode(value);
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return Math.floor(raw);
+  }
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    const parsed = Number(raw.trim());
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return Math.floor(parsed);
+    }
+  }
+  return undefined;
 };

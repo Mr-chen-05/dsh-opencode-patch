@@ -5,9 +5,10 @@
  * or truncated list of model IDs without display names, context windows, max
  * tokens, or input modalities.
  *
- * This module maintains the canonical catalog (sourced from `models.dev/api.json`)
- * and intercepts `GET .../models` gateway responses to ensure that all 33+ models
- * are present, fully described, and available for DSH model discovery.
+ * This module maintains the canonical catalog (sourced from
+ * `models.opencode.ai/api.json`) and intercepts `GET .../models` gateway
+ * responses to ensure that all models are present, fully described, and
+ * available for DSH model discovery.
  *
  * @module dsh-opencode-patch/models-catalog
  */
@@ -15,7 +16,6 @@
 import {
   OPENCODE_GO_CATALOG,
   OPENCODE_ZEN_CATALOG,
-  RETIRED_ZEN_MODEL_IDS,
   type CatalogModelSpec,
   type ReasoningOptionSpec,
 } from "./catalog-data.ts";
@@ -29,19 +29,15 @@ import type { ModelCostRate } from "./session-cost.ts";
 export {
   OPENCODE_GO_CATALOG,
   OPENCODE_ZEN_CATALOG,
-  RETIRED_ZEN_MODEL_IDS,
   type CatalogModelSpec,
 } from "./catalog-data.ts";
 
 export type CatalogProvider = "go" | "zen";
 
-/** Whether OpenCode CLI no longer offers this model ID on this provider. */
-export const isRetiredModel = (
-  provider: CatalogProvider,
-  id: string
-): boolean => provider === "zen" && RETIRED_ZEN_MODEL_IDS.has(id);
+/** Canonical OpenCode model registry URL. */
+export const MODELS_OPENCODE_URL = "https://models.opencode.ai/api.json";
 
-/** Official OpenCode model registry URL. */
+/** Public OpenCode model registry mirror URL. */
 export const MODELS_DEV_URL = "https://models.dev/api.json";
 
 /**
@@ -75,24 +71,6 @@ export const CATALOG_REVALIDATION_TTL_MS = 60 * 60 * 1000;
  * describes the model. Matches the shim's own defaults, so a model that reaches
  * the picker before either source knows it is still fully described.
  */
-/**
- * Model ids kept in the catalog even though `models.dev` marks them deprecated.
- *
- * The registry's `deprecated` flag is a statement about the vendor's catalogue,
- * not about the gateway. They disagree in measured cases, and the disagreement is
- * invisible from here: `step-5-preview-free` has carried the flag on both planes
- * while still answering requests, which is how the session this was written in
- * was running on it. Retaining an id keeps a model that works; dropping it on the
- * flag alone removes one.
- *
- * The rule is "until it stops answering", not "until the flag clears" - a probe
- * is the only thing that can tell those apart, and `docs/credentials.md` records
- * the measurement that put the first entry here. A pin with no date is a pin
- * nobody can age out, so each carries one.
- */
-const RETAINED_MODEL_IDS: ReadonlySet<string> = new Set([
-  "step-5-preview-free",
-]);
 
 const FALLBACK_CONTEXT_WINDOW = 1_000_000;
 
@@ -116,17 +94,22 @@ const FALLBACK_MAX_OUTPUT_TOKENS = 131_072;
 export const MODELS_DEV_TIMEOUT_MS = 30_000;
 
 let activeGoCatalog = new Map<string, CatalogModelSpec>(
-  OPENCODE_GO_CATALOG.filter((m) => !isRetiredModel("go", m.id)).map((m) => [
-    m.id,
-    m,
-  ])
+  OPENCODE_GO_CATALOG.map((m) => [m.id, m])
 );
 let activeZenCatalog = new Map<string, CatalogModelSpec>(
-  OPENCODE_ZEN_CATALOG.filter((m) => !isRetiredModel("zen", m.id)).map((m) => [
-    m.id,
-    m,
-  ])
+  OPENCODE_ZEN_CATALOG.map((m) => [m.id, m])
 );
+/**
+ * Ids the most recent parse saw as `status: "deprecated"`, per plane.
+ *
+ * Kept beside the active maps because the ADAPTER's own discovery needs it:
+ * `mergeDiscoveredModels` merges adapter rows before catalog rows, and pi's
+ * installed snapshot still carries ids the live catalog has retired. Dropping
+ * them from our catalog alone is not enough — the merge puts them back.
+ */
+const deprecatedGoIds = new Set<string>();
+const deprecatedZenIds = new Set<string>();
+
 let lastRefreshedAt = 0;
 let refreshPromise:
   | Promise<{
@@ -143,13 +126,57 @@ export interface ParsedCatalogs {
    * (`packages/core/src/models-dev.ts:107`, `settings: { baseURL: item.api }`).
    */
   api: { go: string; zen: string };
+  /**
+   * The endpoint each WIRE FAMILY declares, per plane, keyed by the SDK package
+   * the catalog names for it (`""` for the provider default).
+   *
+   * The provider-level `api` above is not the whole story: the vendor serves
+   * anthropic and google at their own paths, and declares that per model. Read
+   * from the same data rather than restated in code, so a vendor move is a shim
+   * regeneration and not a source change.
+   */
+  familyApi: { go: FamilyApi; zen: FamilyApi };
   go: CatalogModelSpec[];
   zen: CatalogModelSpec[];
 }
 
+/** One plane's endpoint per SDK package (`""` = the provider's own default). */
+export type FamilyApi = Readonly<Record<string, string>>;
+
 /** The endpoint a provider entry declares, or `""` when it declares none. */
 const providerApiFor = (entry: unknown): string =>
   isRecord(entry) && typeof entry.api === "string" ? entry.api : "";
+
+/**
+ * Each wire family's endpoint, keyed by the SDK package that names it.
+ *
+ * A model's own `provider.api` wins; otherwise it inherits the provider's. The
+ * first value seen for a package is kept — the vendor declares one endpoint per
+ * family, and a second value would mean the assumption is wrong rather than that
+ * the first should be replaced.
+ *
+ * @param entry - one provider entry from the catalog.
+ * @returns the family map, empty when the entry carries no models.
+ */
+const familyApiFor = (entry: unknown): FamilyApi => {
+  const out: Record<string, string> = {};
+  if (!isRecord(entry) || !isRecord(entry.models)) {
+    return out;
+  }
+  const providerApi = providerApiFor(entry);
+  for (const rawModel of Object.values(entry.models)) {
+    if (!isRecord(rawModel)) {
+      continue;
+    }
+    const provider = isRecord(rawModel.provider) ? rawModel.provider : {};
+    const npm = typeof provider.npm === "string" ? provider.npm : "";
+    const api = typeof provider.api === "string" ? provider.api : providerApi;
+    if (api.length > 0 && out[npm] === undefined) {
+      out[npm] = api;
+    }
+  }
+  return out;
+};
 
 /**
  * The thinking options a model declares, with unknown shapes dropped.
@@ -188,7 +215,8 @@ const sanitizeReasoningOptions = (
 
 const extractSpecs = (
   modelsObj: Record<string, unknown>,
-  defaultContext = 1_000_000
+  defaultContext = 1_000_000,
+  deprecated?: Set<string>
 ): CatalogModelSpec[] => {
   const results: CatalogModelSpec[] = [];
   for (const [id, rawModel] of Object.entries(modelsObj)) {
@@ -199,18 +227,23 @@ const extractSpecs = (
     // it: merging a deprecated entry here would put a row the gateway no longer
     // serves back into the model picker on the next successful revalidation.
     //
-    // EXCEPT the retained ones. `models.dev` marks a model deprecated well
-    // before the gateway stops serving it, and the two sources disagree in
-    // measured cases: `step-5-preview-free` has been `deprecated` in the
-    // registry while still answering on both planes - the session this was
-    // written in ran on it. Dropping it on the registry's word alone removes a
-    // working model, which is the same failure as offering a broken one, and
-    // there is no way to tell the two apart from here.
-    //
-    // A retained id is kept until it stops ANSWERING, not until a registry flag
-    // says so, and each one carries the date it was pinned so a reader can see
-    // how long the disagreement has stood.
-    if (rawModel.status === "deprecated" && !RETAINED_MODEL_IDS.has(id)) {
+    // The registry's `status: "deprecated"` is the ONLY source of retirement —
+    // there is no hand-maintained list beside it. It was tried, and it failed in
+    // the direction that matters: ids the gateway had deprecated stayed offered
+    // because the registry lagged the gateway, while ids the registry flagged
+    // too eagerly were kept on a hand list and went stale there as well. The
+    // flag is also provider-scoped, which the hand list had to encode manually
+    // (`muse-spark-1.2-contributor` is retired on zen by absence, served on go).
+    // A row that is wrong anyway has a tripwire: `scripts/verify-catalog.ts
+    // --probe` POSTs one token per id and fails on any offered model the
+    // gateway no longer answers.
+    if (rawModel.status === "deprecated") {
+      // Recorded, not merely dropped. A model the registry has retired must not
+      // come back through the ADAPTER's own discovery: `mergeDiscoveredModels`
+      // merges adapter rows first, and pi's installed snapshot still lists ids
+      // the live catalog has retired. Without this set the merge re-adds every
+      // one, which is a picker led by models the vendor has retired.
+      deprecated?.add(id);
       continue;
     }
     const name =
@@ -340,7 +373,12 @@ export const findModelSpec = (modelId: string): CatalogModelSpec | undefined =>
  */
 export const parseModelsDevCatalog = (data: unknown): ParsedCatalogs => {
   if (!isRecord(data)) {
-    return { api: { go: "", zen: "" }, go: [], zen: [] };
+    return {
+      api: { go: "", zen: "" },
+      familyApi: { go: {}, zen: {} },
+      go: [],
+      zen: [],
+    };
   }
   const goObj =
     isRecord(data["opencode-go"]) && isRecord(data["opencode-go"].models)
@@ -351,15 +389,35 @@ export const parseModelsDevCatalog = (data: unknown): ParsedCatalogs => {
       ? data.opencode.models
       : {};
 
+  deprecatedGoIds.clear();
+  deprecatedZenIds.clear();
   return {
     api: {
       go: providerApiFor(data["opencode-go"]),
       zen: providerApiFor(data.opencode),
     },
-    go: extractSpecs(goObj, 1_000_000),
-    zen: extractSpecs(zenObj, 1_000_000),
+    familyApi: {
+      go: familyApiFor(data["opencode-go"]),
+      zen: familyApiFor(data.opencode),
+    },
+    go: extractSpecs(goObj, 1_000_000, deprecatedGoIds),
+    zen: extractSpecs(zenObj, 1_000_000, deprecatedZenIds),
   };
 };
+
+/**
+ * Whether the most recent catalog parse saw `id` as retired on `plane`.
+ *
+ * The complement of {@link findModelSpecOn}: a model can be absent from the
+ * catalog because it is NEW or because it is RETIRED, and the two want opposite
+ * treatment in a merge. This is what tells them apart.
+ *
+ * @param plane - `zen` or `go`.
+ * @param id - the model id to test.
+ * @returns whether the registry has retired it.
+ */
+export const isDeprecatedModelOn = (plane: "go" | "zen", id: string): boolean =>
+  (plane === "go" ? deprecatedGoIds : deprecatedZenIds).has(id);
 
 /**
  * Fetch and merge the latest live model specifications from `models.dev`.
@@ -394,7 +452,7 @@ export const refreshCatalog = (
 
   refreshPromise = (async () => {
     try {
-      const response = await fetchFn(MODELS_DEV_URL, {
+      const response = await fetchFn(MODELS_OPENCODE_URL, {
         headers: { accept: "application/json" },
         signal: AbortSignal.timeout(MODELS_DEV_TIMEOUT_MS),
       });
@@ -412,9 +470,6 @@ export const refreshCatalog = (
           const nextZen = new Map(activeZenCatalog);
           for (const model of parsed.zen) {
             nextZen.set(model.id, model);
-          }
-          for (const retiredId of RETIRED_ZEN_MODEL_IDS) {
-            nextZen.delete(retiredId);
           }
           activeZenCatalog = nextZen;
         }
@@ -560,7 +615,15 @@ export const enrichModelsResponse = async (
   const catalogById = new Map(catalog.map((m) => [m.id, m]));
   const merged = new Map<string, Record<string, unknown>>();
 
-  // 1. Seed with known catalog models
+  // **This is the CATALOG surface, so it is the one place that seeds.**
+  // `discoverModels` in `dsh-llm-pi-ai` returns its installed catalog for a
+  // provider it ships and only fetches an endpoint for one it does not — so a
+  // `/models` answer is "what this endpoint offers", the list a user browses, not
+  // the list a picker shows. Widening is right here and wrong anywhere that
+  // decides what a deployment may pick.
+  //
+  // The seed also covers the ordinary case of a gateway answering with a subset:
+  // the vendor's own listing is narrower than its catalog.
   for (const spec of catalog) {
     const input_modalities = sanitizeModalities(spec.input_modalities);
     merged.set(spec.id, {
@@ -576,11 +639,9 @@ export const enrichModelsResponse = async (
       owned_by: "opencode",
     });
   }
-
-  // 2. Overlay live models returned by gateway
   for (const item of existingData) {
     const id = typeof item.id === "string" ? item.id : "";
-    if (id.length === 0 || isRetiredModel(isGo ? "go" : "zen", id)) {
+    if (id.length === 0) {
       continue;
     }
     const spec = catalogById.get(id);

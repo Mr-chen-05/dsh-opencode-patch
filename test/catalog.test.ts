@@ -11,11 +11,11 @@ import { readFile } from "node:fs/promises";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { OPENCODE_FAMILY_API } from "../src/catalog-data.ts";
 import {
   OPENCODE_GO_CATALOG,
   OPENCODE_ZEN_CATALOG,
   PROTOCOL_FOR_SDK,
-  RETIRED_ZEN_MODEL_IDS,
   ROUTE_FOR_PROTOCOL,
   SESSION_HEADER,
   UNSERVED_SDKS,
@@ -25,7 +25,6 @@ import {
   internalRouteFor,
   isGoModelsListingUrl,
   isModelsListingUrl,
-  isRetiredModel,
   isServableSdk,
   modelsForSdk,
   parseModelsDevCatalog,
@@ -47,13 +46,13 @@ afterEach(() => {
 
 describe("OpenCode Model Catalog & Enrichment", () => {
   it("keeps a retained id fully described, not merely present", () => {
-    // A retained row is offered to a user, so it has to carry what a picker
-    // renders. `step-5-preview-free` survives on the registry's deprecated flag,
-    // and its metadata survives with it - context, output cap, modalities and
-    // the thinking levels - because an id kept without its fields is a row that
-    // cannot be priced or reasoned about.
+    // A free row is offered to a user, so it has to carry what a picker
+    // renders. `beam-free` is the active free model both planes serve, so it
+    // is the fixture here — and its metadata survives with it: context,
+    // output cap, modalities and the thinking levels, because an id without
+    // its fields is a row that cannot be priced or reasoned about.
     for (const catalog of [OPENCODE_ZEN_CATALOG, OPENCODE_GO_CATALOG]) {
-      const spec = catalog.find((m) => m.id === "step-5-preview-free");
+      const spec = catalog.find((m) => m.id === "beam-free");
       expect(spec).toBeDefined();
       expect(spec?.context_window).toBeGreaterThan(0);
       expect(spec?.max_output_tokens).toBeGreaterThan(0);
@@ -64,24 +63,35 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     }
   });
 
-  it("retains a deprecated id the gateway still serves, on both planes", () => {
-    // The registry's deprecated flag is a statement about the vendor's
-    // catalogue, not the gateway, and the two disagree in measured cases:
-    // step-5-preview-free carried the flag on both planes while still answering,
-    // which is how the session this was written in was running on it. Dropping
-    // it on the flag alone removes a working model - the same failure as
-    // offering a broken one, and indistinguishable from here.
+  it("derives retirement entirely from the registry, with no hand list", () => {
+    // The parser drops every `status: "deprecated"` row and keeps everything
+    // else; there is no hand-maintained set beside it. These three were the
+    // last content of one, and each is deprecated in the registry itself.
+    // `claude-sonnet-4` is deliberately absent: the registry does NOT flag it
+    // while the gateway answers `400 Model is unavailable` — the probe in
+    // `scripts/verify-catalog.ts` is the tripwire for that class, not a list.
+    const deprecated = [
+      "muse-spark-1.2-contributor-free",
+      "cat-jam-free",
+      "exo-free",
+    ];
     for (const catalog of [OPENCODE_ZEN_CATALOG, OPENCODE_GO_CATALOG]) {
-      expect(catalog.some((m) => m.id === "step-5-preview-free")).toBe(true);
+      const ids = new Set(catalog.map((m) => m.id));
+      for (const id of deprecated) {
+        expect(ids.has(id), `${id} resurrected in a plane's shim`).toBe(false);
+      }
     }
-    // And a genuinely retired id still stays out.
-    for (const retired of RETIRED_ZEN_MODEL_IDS) {
-      expect(OPENCODE_ZEN_CATALOG.some((m) => m.id === retired)).toBe(false);
-    }
+    // Retirement is provider-scoped by the registry's own data, not by a rule
+    // of ours: the paid `muse-spark-1.2-contributor` is absent from zen and
+    // served on go.
+    const zen = new Set(OPENCODE_ZEN_CATALOG.map((m) => m.id));
+    const go = new Set(OPENCODE_GO_CATALOG.map((m) => m.id));
+    expect(zen.has("muse-spark-1.2-contributor")).toBe(false);
+    expect(go.has("muse-spark-1.2-contributor")).toBe(true);
   });
 
   it("ships only active, priced models in the bundled Go shim", () => {
-    expect(OPENCODE_GO_CATALOG.length).toBe(30);
+    expect(OPENCODE_GO_CATALOG.length).toBe(29);
     for (const model of OPENCODE_GO_CATALOG) {
       expect(model.id.length).toBeGreaterThan(0);
       expect(model.name.length).toBeGreaterThan(0);
@@ -111,28 +121,6 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const ids = new Set(OPENCODE_GO_CATALOG.map((m) => m.id));
     for (const id of deprecated) {
       expect(ids.has(id)).toBe(false);
-    }
-  });
-
-  it("retires Muse Spark 1.2 only where OpenCode CLI omits it", () => {
-    expect([...RETIRED_ZEN_MODEL_IDS].toSorted()).toEqual(
-      [
-        "muse-spark-1.2",
-        "muse-spark-1.2-contributor",
-        "muse-spark-1.2-contributor-free",
-      ].toSorted()
-    );
-    expect(isRetiredModel("go", "muse-spark-1.2-contributor")).toBe(false);
-    expect(isRetiredModel("zen", "muse-spark-1.2")).toBe(true);
-    expect(isRetiredModel("zen", "muse-spark-1.2-contributor")).toBe(true);
-    expect(isRetiredModel("zen", "muse-spark-1.2-contributor-free")).toBe(true);
-
-    const liveGoIds = new Set(getLiveGoCatalog().map((m) => m.id));
-    const liveZenIds = new Set(getLiveZenCatalog().map((m) => m.id));
-    // The CLI still lists this paid Go entry, so the patch must preserve it.
-    expect(liveGoIds.has("muse-spark-1.2-contributor")).toBe(true);
-    for (const id of RETIRED_ZEN_MODEL_IDS) {
-      expect(liveZenIds.has(id)).toBe(false);
     }
   });
 
@@ -194,18 +182,17 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // replacing the whole set — so these counts are the cold-start picker, and a
     // silent drop here is a model nobody can pick. Regenerate with
     // `scripts/regenerate-catalog-shim.ts` rather than editing by hand.
-    expect(OPENCODE_ZEN_CATALOG.length).toBe(86);
+    expect(OPENCODE_ZEN_CATALOG.length).toBe(84);
     const freeModels = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free === true);
-    // Only the free tiers the gateway still serves. The count is the `is_free`
-    // flag the shim carries, NOT the `-free` suffix: `big-pickle` is flagged and
-    // is not suffixed, so a suffix rule would have missed it — which is a
-    // smaller version of why the suffix-based exclusion was withdrawn.
-    expect(freeModels.length).toBe(13);
+    // Only the free tiers the registry still lists as active. The count is the
+    // `is_free` flag the shim carries, NOT the `-free` suffix: `big-pickle` is
+    // flagged and is not suffixed, so a suffix rule would have missed it.
+    expect(freeModels.length).toBe(10);
 
     const ids = new Set(OPENCODE_ZEN_CATALOG.map((m) => m.id));
-    expect(ids.has("muse-spark-1.3-contributor-free")).toBe(true);
-    expect(ids.has("space-bunny-free")).toBe(true);
     expect(ids.has("beam-free")).toBe(true);
+    expect(ids.has("minimax-m3.1-flash-free")).toBe(true);
+    expect(ids.has("mimo-v2.6-flash-free")).toBe(true);
     expect(ids.has("claude-sonnet-4-5")).toBe(true);
     expect(ids.has("gpt-5.4")).toBe(true);
     expect(ids.has("gemini-3.8-flash")).toBe(true);
@@ -213,6 +200,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(ids.has("qwen3.6-plus-free")).toBe(false);
     expect(ids.has("minimax-m3-free")).toBe(false);
     expect(ids.has("kimi-k2.5-free")).toBe(false);
+    expect(ids.has("muse-spark-1.2-contributor-free")).toBe(false);
   });
 
   /**
@@ -268,7 +256,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(anthropic.length).toBe(21);
     expect(responses.filter((id) => anthropic.includes(id))).toEqual([]);
     // The flagship of each plane is on the shim, so a cold start can serve it.
-    expect(responses).toContain("muse-spark-1.3-contributor-free");
+    expect(responses).toContain("muse-spark-1.2");
     expect(anthropic).toContain("claude-sonnet-4-5");
   });
 
@@ -320,7 +308,11 @@ describe("OpenCode Model Catalog & Enrichment", () => {
       object: string;
     };
     expect(json.object).toBe("list");
-    // Every bundled Go model plus the one custom row the gateway added.
+    // **The catalog surface seeds, and that is correct here.** `discoverModels`
+    // returns its installed catalog for a provider pi ships and only fetches an
+    // endpoint for one it does not, so this listing is what the endpoint offers —
+    // the surface a user browses, not the list a picker shows. The picker's own
+    // path (`mergeDiscoveredModels`) still never widens.
     expect(json.data.length).toBe(OPENCODE_GO_CATALOG.length + 1);
 
     const deepseek = json.data.find((m) => m.id === "deepseek-v4.1-flash");
@@ -332,7 +324,9 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(custom).toBeDefined();
     expect(custom?.id).toBe("custom-gateway-model");
 
-    // Also verify Zen models enrichment
+    // An empty answer is answered with the catalog that endpoint stands for: the
+    // vendor's own listing is narrower than its catalog, and this is the surface
+    // that says what exists.
     const zenResponse = await enrichModelsResponse(
       "https://opencode.ai/zen/v1/models",
       Response.json({ data: [], object: "list" })
@@ -340,18 +334,16 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const zenJson = (await zenResponse.json()) as {
       data: Array<{ id: string }>;
     };
-    expect(zenJson.data.length).toBe(OPENCODE_ZEN_CATALOG.length);
-    expect(
-      zenJson.data.some((m) => m.id === "muse-spark-1.3-contributor-free")
-    ).toBe(true);
+    expect(zenJson.data.length).toBe(getLiveZenCatalog().length);
+    expect(zenJson.data.some((m) => m.id === "beam-free")).toBe(true);
   });
 
-  it("preserves Space Bunny while removing retired Muse 1.2 rows", async () => {
+  it("keeps the Muse 1.2 rows the zen plane actually serves", async () => {
     const goResponse = await enrichModelsResponse(
       "https://opencode.ai/zen/go/v1/models",
       Response.json({
         data: [
-          { id: "space-bunny-free", object: "model" },
+          { id: "minimax-m3.1-flash-free", object: "model" },
           { id: "muse-spark-1.2-contributor", object: "model" },
         ],
         object: "list",
@@ -360,7 +352,9 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const goJson = (await goResponse.json()) as {
       data: Array<{ id: string }>;
     };
-    expect(goJson.data.some((m) => m.id === "space-bunny-free")).toBe(true);
+    expect(goJson.data.some((m) => m.id === "minimax-m3.1-flash-free")).toBe(
+      true
+    );
     expect(goJson.data.some((m) => m.id === "muse-spark-1.2-contributor")).toBe(
       true
     );
@@ -369,9 +363,9 @@ describe("OpenCode Model Catalog & Enrichment", () => {
       "https://opencode.ai/zen/v1/models",
       Response.json({
         data: [
-          { id: "space-bunny-free", object: "model" },
+          { id: "minimax-m3.1-flash-free", object: "model" },
           { id: "muse-spark-1.2", object: "model" },
-          { id: "muse-spark-1.2-contributor-free", object: "model" },
+          { id: "mimo-v2.6-flash-free", object: "model" },
         ],
         object: "list",
       })
@@ -379,11 +373,15 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const zenJson = (await zenResponse.json()) as {
       data: Array<{ id: string }>;
     };
-    expect(zenJson.data.some((m) => m.id === "space-bunny-free")).toBe(true);
-    expect(zenJson.data.some((m) => m.id === "muse-spark-1.2")).toBe(false);
-    expect(
-      zenJson.data.some((m) => m.id === "muse-spark-1.2-contributor-free")
-    ).toBe(false);
+    expect(zenJson.data.some((m) => m.id === "minimax-m3.1-flash-free")).toBe(
+      true
+    );
+    // Active catalog rows the gateway lists are kept: enrichment strips only
+    // what the REGISTRY retired, and none of these carries that flag.
+    expect(zenJson.data.some((m) => m.id === "muse-spark-1.2")).toBe(true);
+    expect(zenJson.data.some((m) => m.id === "mimo-v2.6-flash-free")).toBe(
+      true
+    );
   });
 
   it("patchFetch transparently enriches GET .../models calls", async () => {
@@ -391,7 +389,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const mockFetch = vi.fn().mockImplementation(async (url: string) => {
       if (url.includes("/models")) {
         return Response.json({
-          data: [{ id: "deepseek-v4-flash", object: "model" }],
+          data: [{ id: "deepseek-v4.1-flash", object: "model" }],
           object: "list",
         });
       }
@@ -403,13 +401,13 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(res.status).toBe(200);
 
     const json = (await res.json()) as {
-      data: Array<{ id: string; name?: string }>;
+      data: Array<{ id: string; name?: string; context_window?: number }>;
     };
+    // The catalog, with the gateway's one row enriched inside it.
     expect(json.data.length).toBeGreaterThanOrEqual(OPENCODE_GO_CATALOG.length);
-
-    const qwen = json.data.find((m) => m.id === "qwen3.8-flash");
-    expect(qwen).toBeDefined();
-    expect(qwen?.name).toBe("Qwen3.8 Flash");
+    const row = json.data.find((m) => m.id === "deepseek-v4.1-flash");
+    expect(row?.name).toBe("DeepSeek V4.1 Flash");
+    expect(row?.context_window).toBe(1_000_000);
   });
 
   it("leaves the raw gateway listing alone when enrichModels is off", async () => {
@@ -451,9 +449,30 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(headerOf(capture.init, SESSION_HEADER)).toMatch(SESSION_RE);
   });
 
+  it("declares a distinct endpoint per wire family, per plane", () => {
+    // The mount reads its base from this map, so the INVARIANT it depends on is
+    // that the families are not one address: anthropic and google are served at
+    // their own paths. Asserting the shape rather than the literals keeps a
+    // vendor move a regeneration instead of a test edit.
+    for (const plane of ["zen", "go"] as const) {
+      const map = OPENCODE_FAMILY_API[plane];
+      expect(map[""], plane).toBeTruthy();
+      expect(map["@ai-sdk/anthropic"], plane).toBeTruthy();
+      expect(map["@ai-sdk/google"], plane).toBeTruthy();
+      expect(map["@ai-sdk/anthropic"], plane).not.toBe(map[""]);
+      expect(map["@ai-sdk/google"], plane).not.toBe(map[""]);
+    }
+  });
+
   it("parseModelsDevCatalog handles malformed data gracefully", () => {
-    // `api` is carried alongside the arrays and is empty when nothing declares it.
-    const empty = { api: { go: "", zen: "" }, go: [], zen: [] };
+    // `api` and `familyApi` are carried alongside the arrays and are empty when
+    // nothing declares them — not `undefined`, so callers never guard two shapes.
+    const empty = {
+      api: { go: "", zen: "" },
+      familyApi: { go: {}, zen: {} },
+      go: [],
+      zen: [],
+    };
     expect(parseModelsDevCatalog(null)).toEqual(empty);
     expect(parseModelsDevCatalog({})).toEqual(empty);
     expect(parseModelsDevCatalog({ "opencode-go": {} })).toEqual(empty);
@@ -590,6 +609,9 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const initialGo = getLiveGoCatalog();
     expect(initialGo.length).toBe(OPENCODE_GO_CATALOG.length);
     const initialZen = getLiveZenCatalog();
+    // Equal to the generated data: the shim was regenerated, so the retired ids
+    // (`claude-sonnet-4`, and the three dead rows) are no longer IN it. Retirement
+    // still filters at load; it just has nothing left to remove from this set.
     expect(initialZen.length).toBe(OPENCODE_ZEN_CATALOG.length);
 
     const mockFetch = vi.fn().mockResolvedValue(
@@ -614,9 +636,6 @@ describe("OpenCode Model Catalog & Enrichment", () => {
             "muse-spark-1.2": {
               name: "Muse Spark 1.2",
             },
-            "muse-spark-1.2-contributor-free": {
-              name: "Muse Spark 1.2 Free",
-            },
           },
         },
       })
@@ -627,6 +646,10 @@ describe("OpenCode Model Catalog & Enrichment", () => {
       true
     );
     expect(updated.go.length).toBe(OPENCODE_GO_CATALOG.length + 1);
+    // ONE zen row is new to the merged map: the mock's `future-zen-model`. Its
+    // `muse-spark-1.2` row is already in the regenerated shim, so it is not an
+    // addition. The parser's deprecation filter is the only filter, and the
+    // mock carries none, so nothing else can change the count.
     expect(updated.zen.length).toBe(OPENCODE_ZEN_CATALOG.length + 1);
 
     const futureModel = updated.go.find((m) => m.id === "future-test-model");
@@ -636,10 +659,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(updated.go.some((m) => m.id === "muse-spark-1.2-contributor")).toBe(
       true
     );
-    expect(updated.zen.some((m) => m.id === "muse-spark-1.2")).toBe(false);
-    expect(
-      updated.zen.some((m) => m.id === "muse-spark-1.2-contributor-free")
-    ).toBe(false);
+    expect(updated.zen.some((m) => m.id === "muse-spark-1.2")).toBe(true);
   });
 
   it("refreshCatalog degrades gracefully on network errors without throwing", async () => {
@@ -749,24 +769,14 @@ describe("findModelSpec", () => {
     expect(spec.cost).toEqual({ cache_read: 0, input: 0, output: 0 });
   });
 
-  it("still resolves an id retired on Zen but listed on Go", () => {
-    // Retirement is PROVIDER-SCOPED: the OpenCode CLI keeps serving the paid Go
-    // 1.2 contributor entry, so the Go catalog retains it while Zen drops it.
-    // A provider-blind lookup therefore finds it — and must keep doing so, or
-    // Go sessions would lose pricing for a model the gateway still serves.
-    expect(isRetiredModel("zen", "muse-spark-1.2-contributor")).toBe(true);
-    expect(isRetiredModel("go", "muse-spark-1.2-contributor")).toBe(false);
-
+  it("resolves a model present only on Go through the plane-blind lookup", () => {
+    // Provider scoping comes from the REGISTRY's data, not from a rule here:
+    // the paid 1.2 contributor entry is absent from the zen plane and served
+    // on go, and a plane-blind lookup finds it through go — which Go sessions
+    // need for pricing a model the gateway still serves.
     const spec = findModelSpec("muse-spark-1.2-contributor");
     assert.ok(spec, "expected the Go shim to keep muse-spark-1.2-contributor");
     expect(spec.id).toBe("muse-spark-1.2-contributor");
-  });
-
-  it("never resolves a Zen-retired id that no provider still lists", () => {
-    for (const id of ["muse-spark-1.2", "muse-spark-1.2-contributor-free"]) {
-      expect(RETIRED_ZEN_MODEL_IDS.has(id)).toBe(true);
-      expect(findModelSpec(id)).toBeUndefined();
-    }
   });
 
   it("returns undefined for unknown or empty ids", () => {
@@ -1076,5 +1086,47 @@ describe("routing · the plane half of the decision", () => {
       internalRouteFor("opencode-go", "grok-4.7", "@ai-sdk/google")
     ).toBeUndefined();
     expect(internalRouteFor("opencode-go", "grok-4.7")).toBeUndefined();
+  });
+});
+
+/**
+ * The default format, which is the only thing the original route has to decide.
+ *
+ * A model that speaks the route's own protocol has no SDK of its own — the route's
+ * `api` IS its protocol — so the call stays where the user configured it. That is
+ * the whole of "handling the original opencode default format": there is nothing to
+ * redirect, and nothing to hide. Everything the plugin adds lives around this case,
+ * not in it.
+ */
+describe("routing · the default format stays where it is", () => {
+  it("never redirects a model with no SDK of its own", () => {
+    // `big-pickle` carries no `provider.npm`: completions is the default, and the
+    // declared route already speaks it.
+    expect(internalRouteFor("opencode", "big-pickle")).toBeUndefined();
+    expect(internalRouteFor("opencode-go", "big-pickle")).toBeUndefined();
+  });
+
+  it("redirects an id-only family the catalog does not describe", () => {
+    // A model nobody catalogued still cannot be sent as a chat completion when its
+    // family fixes the protocol by name — the measured behaviour, not a guess.
+    expect(internalRouteFor("opencode", "claude-unlisted-9")).toBe(
+      "opencode-anthropic"
+    );
+    expect(internalRouteFor("opencode", "gemini-unlisted-9")).toBe(
+      "opencode-google"
+    );
+  });
+
+  it("leaves the route alone when the declared protocol is its own", () => {
+    // The `modelRoutes` override reaches the decision, and a declaration equal to
+    // the route's protocol means no move at all.
+    expect(
+      internalRouteFor(
+        "opencode",
+        "some-model",
+        "@ai-sdk/anthropic",
+        "openai-completions"
+      )
+    ).toBeUndefined();
   });
 });

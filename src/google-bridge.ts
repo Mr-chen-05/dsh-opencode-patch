@@ -50,7 +50,6 @@ import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import type { CatalogModelSpec } from "./catalog-data.ts";
 import type { EndpointFamily } from "./config-values.ts";
 import { readCredentialsResolver } from "./cordis-context.ts";
-import type { CredentialPool } from "./credential-pool.ts";
 import { resolveOpencodeStoreKey } from "./go-discovery.ts";
 import { type Plane, piModelFor } from "./pi-provider.ts";
 import { GOOGLE_INTERNAL_ROUTE } from "./responses-routes.ts";
@@ -302,23 +301,6 @@ export interface GoogleBridgeInputs {
   /** The credential reference inherited from the deployment's own route. */
   readonly apiKeyRef: string;
   /**
-   * The credential pool for this plane, when a deployment enabled one.
-   *
-   * Optional by construction: `createCredentialPool` answers undefined for a
-   * deployment that did not opt in, so this is undefined in every default
-   * composition and the route resolves exactly what it resolved before the pool
-   * existed.
-   */
-  readonly pool?: CredentialPool;
-  /**
-   * The stored login's token for a plane, when a route named no reference.
-   *
-   * Last in the chain on purpose: the pool, then the route's own reference, then
-   * this. Everything a user declared explicitly outranks anything the plugin found
-   * on its own, and it is what lets a signed-in deployment name no `apiKeyEnv`.
-   */
-  readonly loginToken?: (plane: string) => Promise<string | undefined>;
-  /**
    * Whether the installation's own credential store may be read.
    *
    * One switch for both halves of it, because it is one decision: may this
@@ -344,7 +326,7 @@ export interface GoogleBridgeInputs {
  * that declares every protocol route in its profile still gets the Gemini
  * models — they were the one protocol a declared route could never name.
  *
- * The resolution is the plugin's default, not the pool: the inherited
+ * The resolution is the plugin's default: the inherited
  * reference, resolved through the credentials service with the launch
  * environment as fallback. A miss fails loud, because handing pi `undefined`
  * for a named reference would let it pick up an unrelated ambient key and
@@ -385,16 +367,6 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
     route: unknown,
     resolved: { apiKeyEnv?: unknown }
   ): Promise<string | undefined> => {
-    // A pool this plugin resolves itself is true round-robin: the next call
-    // takes the next entry, with no reference write in between. A deployment
-    // without one never reaches this branch, which is the whole default.
-    // Taking an entry from the pool also PUBLISHES it through the pool's own
-    // reference, so a route the wrapper serves sees the rotation too — not only
-    // the ones asking this adapter.
-    const pooled = await inputs.pool?.next();
-    if (pooled?.kind === "key") {
-      return pooled.value;
-    }
     // A route that named a reference is answered by it, loudly if it resolves
     // nothing: `undefined` would tell the adapter to find ambient auth instead.
     const named = resolved.apiKeyEnv;
@@ -419,15 +391,9 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
     // `loginTokenReader` masked that by falling back to the other plane; a store
     // lookup keyed by integration id does not, and would have found nothing.
     const plane = String(route) === "opencode-go" ? "opencode-go" : "opencode";
-    const granted = await inputs.loginToken?.(plane);
-    if (granted !== undefined) {
-      return granted;
-    }
-    // The installation's ACCOUNT is deliberately not read here. `loginTokenReader`
-    // answers it one level up, so reading it again would be a second
-    // implementation of the same fallback: covered by its own tests and never
-    // executed, which is the shape this repository has been audited for once
-    // already. This tail is the installation's KEY store and nothing else.
+    // **API key only.** The installation's own store is the last source, behind
+    // the route's declared reference; a login (device flow, session, credential
+    // pool) is v2 work and is not read here.
     return resolveOpencodeStoreKey(plane, inputs.readOpencodeStore === true);
   };
 

@@ -24,7 +24,6 @@ import {
   OPENCODE_ZEN_CATALOG,
   openCodeSessionIdFor,
   parseGoUsage,
-  RETIRED_ZEN_MODEL_IDS,
   SESSION_HEADER,
   type GoUsage,
 } from "../../src/index.ts";
@@ -144,19 +143,23 @@ describe.skipIf(!LIVE || !ZEN_KEY)(
           ids.add(String(model.id));
         }
 
-        // The enrichment covers what the gateway LISTS, not what the picker
-        // offers. Zen's free tier is enumerated here because the gateway serves
-        // it in its own listing, and withheld there because it is measured to
-        // refuse from this plugin on every credential - `isServableModel` is the
-        // second half, and it is what keeps these out of the picker. Testing the
-        // first half through the second would make this case unfalsifiable.
+        // The enrichment covers what the gateway LISTS, plus every catalog row
+        // the listing omits — so a catalogued model is present here whether or
+        // not the gateway enumerates it.
+        //
+        // Zen's free tier used to be withheld from the PICKER as well, on a
+        // measurement that turned out to be about the client rather than the
+        // credential: the gateway answers `403 FreeTierError "…can only be used
+        // from within OpenCode"`, and presenting as that client is what this
+        // plugin does. So they are offered, and this case asserts only that the
+        // catalog reaches the listing — not what the gateway does with them.
         expect(ids.has("mimo-v2.6-flash-free")).toBe(true);
-        expect(ids.has("muse-spark-1.3-contributor-free")).toBe(true);
+        expect(ids.has("beam-free")).toBe(true);
 
-        // And nothing the provider retired is resurrected by the enrichment.
-        for (const retired of RETIRED_ZEN_MODEL_IDS) {
-          expect(ids.has(retired)).toBe(false);
-        }
+        // And a model the REGISTRY retired must not be resurrected by the
+        // enrichment, which would offer a row the gateway answers 410.
+        expect(ids.has("muse-spark-1.2-contributor-free")).toBe(false);
+        expect(ids.has("cat-jam-free")).toBe(false);
 
         // The listing covers the bundled catalog, so a failed refresh can only
         // ever be additive relative to the shim.

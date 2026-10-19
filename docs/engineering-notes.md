@@ -139,7 +139,7 @@ login: loginCalls(ctx),   // called at inject time
 readUsage: () => readGoUsage(ctx),   // called when the card asks
 ```
 
-`loginCalls` asks for `ctx.remote.opencodeLogin` **while the injector builds the props**, and the mount is an asynchronous `$mount` started in an effect. If it runs first, `loginCalls` answers `undefined`, the card's `props.login !== undefined` is false, and the row never renders — no retry, no second chance, and the warning it prints says the service is missing when it is merely late.
+(`v2` record — this branch has no sign-in row.) `loginCalls` asked for `ctx.remote.opencodeLogin` **while the injector builds the props**, and the mount was an asynchronous `$mount` started in an effect. If it runs first, `loginCalls` answers `undefined`, the card's `props.login !== undefined` is false, and the row never renders — no retry, no second chance, and the warning it prints says the service is missing when it is merely late.
 
 **Fixed, and the choice is worth recording because the two are not equivalent.** `loginCalls` now resolves the remote inside each method and answers the three calls unconditionally. Making them lazy is what fixes the race; answering unconditionally is what makes the row render at all, and it carries a cost: a host that mounts no login service shows a row that reports it rather than showing nothing. That is the better failure — "no row" and "no service" stop looking identical — and it is deliberately the opposite of the meter's choice, which hides itself when its service is absent. The card's prop is now never `undefined`, so the condition that used to guard the row is a formality rather than a decision.
 
@@ -195,6 +195,19 @@ The false claim — that a session token, or the org, or a header unlocks the fr
 
 **One place had it right before any of this work started.** `docs/opencode-1.19-api.md` already said, at the bottom of its own list: _"The free tier is not reachable by adding a header. Measured: the org id and the key together still answer 403. Any plan that assumed a header fix is wrong."_ That sentence is what the exhaustive table later confirmed, and it was there the whole time — which is the uncomfortable half of this record: the answer was written down, and six other places said the opposite, and the six won for several rounds.
 
+**Correction, 2026-10-17: the exclusion this section defends has been withdrawn, and the reasoning above is why it took so long to see.** The probes that produced it asked the wrong question. They measured _"does a free model answer for this credential"_ and concluded _"the free tier is not served"_; the gateway's own message says something narrower and much more useful:
+
+```
+space-bunny-free  403 {"type":"error","error":{"type":"FreeTierError",
+  "message":"OpenCode's free tier can only be used from within OpenCode. Download it at https://opencode.ai and keep building."}}
+```
+
+That is a statement about the CLIENT, not about the credential, and this plugin exists precisely to present itself as that client. So the models are offered again, and the honest position is the one the gateway states: they may answer, and if they do not the refusal names its own reason. The 403 is still what a keyless or non-OpenCode request gets, which is what the table in `docs/opencode-1.19-api.md` measured and is still true.
+
+**Addendum, 2026-10-18 — where the decision actually is.** The console's own source, read since, says the request is not what gets refused: for a model whose entry allows anonymous use it deletes the credential and forwards the request keyless to the vendor's inference service, and that service answers `FreeTierError` — a class that exists in neither released tree, while the console's own errors name themselves from classes that do. The last untested shapes were closed the same day: the complete client header set with the message id, keyless with the literal `public`, sent from Bun as well as curl, on both endpoint families. Every one is refused identically. So the ids are offered and the refusal is reported in the gateway's own words — the position this section reached, now grounded in the source that decides it rather than in the request's side alone.
+
+What this section should be read for now is the _pattern_, not the conclusion: six places agreed, one disagreed, and the six were not re-measured when the one was. A measurement answers the question it was asked, and "not served" was never the question.
+
 A sweep that ends clean is worth as much as one that finds something, and this one ends with the boundary drawn: every remaining mention of the free tier says it is not served from here. **It did not, in fact, end clean.** Two bullets in `docs/credentials.md` - the measurements at the end of the bare-client section - still asserted the free tier is served and named `opencode/step-5-preview-free` as the proof, because the sweep matched the withdrawal paragraph and stopped at the file that contained it. They were withdrawn later, together with the table row in `docs/deep-dive.md` that said the same thing in a cell with no keywords for a grep to find. The lesson is the one the note above it already recorded and then did not follow: a claim in this file's subject area is not swept because a nearby paragraph was.
 
 ## A measurement of mine that was wrong, in the shape this file keeps describing
@@ -207,7 +220,7 @@ The rule that would have caught it is already written above and was not applied:
 
 ## Auto review has two failure modes, and only one of them is about the model
 
-`403 free_tier_restricted` is the one this work chased: the audit call takes its route from `session.requestHeader()`, so a session selected on a Zen free-tier model fails before the patch's headers matter.
+`403 FreeTierError` (passed through unchanged, after a remap to 400 was tried and withdrawn) is the one this work chased: the audit call takes its route from `session.requestHeader()`, so a session selected on a Zen free-tier model fails before the patch's headers matter.
 
 `429 RATE_LIMIT: Upstream request failed: Endpoint is unavailable` is a second one, observed afterwards, and it is not about the model, the tier, or this plugin. The reviewer's own endpoint is rate-limited or down, and the tool call is refused before its body runs — which is what a refused tool call looks like from the outside, and why "auto-review failed" is not by itself evidence about the plugin.
 
@@ -283,7 +296,7 @@ The trigger is a model named by hand rather than chosen from the picker: the pic
 
 ## Seventeen sweeps, and the fourth time a sweep asked the wrong question
 
-Every script under `scripts/`, checked against whether a workflow runs it: `build`, `catalog:shim`, `limits:shim` and `cli:version` are all called, and the two that are not are meant not to be — `release:gate` is the four CI steps as one convenience for a person, and `token:refresh` rewrites a local credential store that CI does not have and should not.
+Every script under `scripts/`, checked against whether a workflow runs it: `build`, `catalog:shim`, `limits:shim` and `cli:version` are all called, and the one that is not is meant not to be — `release:gate` is the four CI steps as one convenience for a person. `token:refresh` (a console-session refresher) left with the login stack: it rewrote a local credential store through the device flow, which is `v2` work.
 
 The first version of this check grepped the workflows for each script's **filename**, and reported three of them unwired. Workflows call npm script names, not files. That is the fourth time this session a sweep resolved a name in a context that could not show it — after the count sweep that missed Go, the identifier sweep that asked about exports, and the heading diff that stripped non-ASCII out of Chinese.
 
@@ -442,7 +455,7 @@ So the round that "fixed the tool schemas" renamed `filePath` to `path` and adde
 
 Other deltas the comparison establishes, none of them acted on yet:
 
-- `x-opencode-request` **is** sent by 1.19.3 (the user message id) and was dropped in 2.x. This plugin sends neither, because the turn store holds no message id.
+- `x-opencode-request` **is** sent by 1.19.3 (the user message id) and was dropped in 2.x. This plugin omitted it for a round — the turn store held no message id — and now sends one minted per turn in the same shape; the section below records how and why.
 - `x-session-affinity` and `X-Session-Id` are **not** sent for `opencode*` providers in 1.19.3 — they are the other branch, for relays. This plugin sends them on every claimed request.
 - `User-Agent` is `opencode/<version>` in 1.19.3, and `opencode/<channel>/<version>/<client>` in 2.x. The plugin sends `opencode/1.19.3 ai-sdk/provider-utils/… runtime/bun/…`, which is neither.
 - Chat bodies use `max_tokens` in 1.19.3 and `max_completion_tokens` in 2.x.
@@ -454,7 +467,7 @@ It died without a closing message, so the four questions it was given were answe
 
 **`x-opencode-project` is not a hash — it is the git root's path.** `packages/core/src/project.ts:307-315` is `root.replace(/\.git\/?$/, "")` fed to `ID.make`, so the identifier is the working-copy root with the `.git` suffix stripped. A subproject or worktree does not get its own id: `project.ts:356-376` resolves through `repo.commonDirectory` and takes that store's cached id, so a worktree shares its main repository's — which is what "workspace project attribution" means. With no VCS at all the id is `ID.global` (`:348`, `:376`), and that is the case the plugin's current `"global"` actually matches. So for a real repository the plugin sends the wrong value, and the right one is a path rather than a digest.
 
-**`x-opencode-request` is a user-message id, and it can be supplied.** 1.19.3 sends `input.user.id` (`request.ts:194`), and the value is `input.messageID ?? MessageID.ascending()` (`session/prompt.ts:471` and `:657`) — so it is the id of the user's message, not of a turn, and the CLI accepts one from its caller rather than always minting one. The capture of the running client shows the shape as `msg_…`. That matters for this plugin: there is no message id in the turn store today, which is why the header is absent, and a host that carries one could supply it rather than the plugin inventing a value.
+**`x-opencode-request` is a user-message id, and it can be supplied.** 1.19.3 sends `input.user.id` (`request.ts:194`), and the value is `input.messageID ?? MessageID.ascending()` (`session/prompt.ts:471` and `:657`) — so it is the id of the user's message, not of a turn, and the CLI accepts one from its caller rather than always minting one. The capture of the running client shows the shape as `msg_…`. That matters for this plugin: the turn store held no message id, which is why the header was absent for a round, and a host-supplied value would still be the faithful one — what shipped instead is a minted id in the same shape, because the one consumer the trees show is a metric and a per-turn value satisfies it without a host change. See the section below.
 
 Still open from that subagent's brief: the exact AI SDK wire body on 1.19.3's default path (`max_tokens` versus `max_completion_tokens`, `stream_options`, `store`, `prompt_cache_key`, `strict`) — the pinned AI SDK versions are not in this checkout and the earlier comparison flagged its own answer as read from a different version.
 
@@ -473,13 +486,13 @@ To make it data, four things together:
 
 Steps 1 and 2 alone change nothing, and step 3 without 1 or 2 moves a constant. They belong in one piece.
 
-## `x-opencode-request` cannot be sent from here, and it is a data problem
+## `x-opencode-request` is sent again — minted, because the message id is not reachable from here
 
 1.19.3 sends it (`request.ts:194`) and 2.x dropped it. It is the user's message id — `input.user.id`, set from `input.messageID ?? MessageID.ascending()` (`session/prompt.ts:471`, `:657`) — so the CLI is happy to be handed one rather than minting it, and the running client shows the shape as `msg_…`.
 
-The plugin's turn state carries `model`, `parentValue`, `project`, `provider` and `value` (`src/turn-store.ts`), and none of them is a message id: `value` is the session's derived id, which is a different object from the message. The stream hook's `options` carries no message either — the adapter builds the body after the hook returns — so there is nothing at this layer to send, and inventing a value would be worse than omitting the header.
+The plugin's turn state carries `model`, `parentValue`, `project`, `provider` and `value` (`src/turn-store.ts`), and none of them is a message id: `value` is the session's derived id, which is a different object from the message. The stream hook's `options` carries no message either — the adapter builds the body after the hook returns — so there is nothing at this layer to send. This section said for a round that "inventing a value would be worse than omitting the header", and the premise turned out to be the part that was wrong: the gateway reads this header as a metric (`packages/console/app/src/routes/zen/util/handler.ts:127-135`) and the console rewrites it to `x-opencode-request-id` before forwarding, so **what the header has to satisfy is its shape and its one-value-per-request lifecycle — not the CLI's own message table**, which nothing reads back.
 
-**What it needs is not a code change but a datum**: the host exposing a per-turn message id in the turn state. The gateway itself reads this header as a metric (`packages/console/app/src/routes/zen/util/handler.ts:127-135`), not as an entitlement, so nothing functional is lost while it is absent — but a plugin that wanted to match 1.19.3's request byte for byte would need it.
+So the plugin mints: `newOpenCodeMessageId` (`src/session.ts`) returns `msg_` + 12 hex + 14 base62 — the vendor's own skeleton — with the twelve hex carrying `milliseconds * 0x1000 + counter` modulo `2^48` and the suffix drawn from `randomBytes`. `stream-hook.ts` mints once per turn and stores it as `requestValue`; `fetch-patch.ts` sends it beside the client and project headers. Two properties were chosen deliberately: the value is random rather than derived from message content (a digest of the user's text travelling in a header would be a guessable fingerprint), and it is per-turn rather than per-message — the client repeats one id across a multi-step tool turn, and with no DSH message id reachable from this layer the turn is the largest unit that can honestly own one. The measurement in `docs/opencode-1.19-api.md` closed the question the other way: with the complete set sent — this header included — the free tier answered exactly as before. The header is correct to send, and it is not the gate.
 
 ## A free model ran on /zen/v1 and may not run on /inference/v1 — measured, unresolved
 
@@ -496,7 +509,7 @@ That is recorded rather than asserted, because the honest position is that the p
 
 ## Both remotes absent at once, and the two console lines that would say why
 
-The card now reports `the login remote did not answer` and `读不到配额` together. Both services are the plugin's own — `opencodeLogin` and `opencodeGoUsage` — and both are mounted by the same helper in `settings-page.tsx:140-160`, so one failure explains both.
+(`v2` record.) The card reported `the login remote did not answer` and `读不到配额` together while both services were mounted by the same helper. This branch mounts the meter's remote only, so the meter is the one surface whose absence has to be reported.
 
 It is **not** the read race: the login row resolves its remote per call, and the usage summary reads up to five times with a growing wait, so a mount that arrived late would be found by either. Both being absent means the mount did not happen or did not succeed.
 

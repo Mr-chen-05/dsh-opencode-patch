@@ -35,7 +35,7 @@
 
 **The default state.** Point DSH at OpenCode with no plugin and the models do not work at all — not on one shape, on any of them:
 
-- **The request is not recognised as coming from a coding agent.** DSH sends its own `User-Agent`, and no `x-opencode-client`, `x-opencode-project` or `x-opencode-session` at all, so the gateway sees an anonymous SDK call and the traffic falls under the abuse rules the vendor documents for clients that do not identify themselves. **The free tier is a separate matter and this is not its cause**: with every one of those headers restored, a CLI `User-Agent`, a valid session id and the `read`/`bash` tool schemas the fallback injects, a Zen `-free` model still answers `403 FreeTierError` from outside OpenCode while a paid model on the same request answers `200`. So the plugin does not offer a Zen `-free` id, and the headers it restores are for the paid routes and the vendor's stated client rules.
+- **The request is not recognised as coming from a coding agent.** DSH sends its own `User-Agent`, and no `x-opencode-client`, `x-opencode-project` or `x-opencode-session` at all, so the gateway sees an anonymous SDK call and the traffic falls under the abuse rules the vendor documents for clients that do not identify themselves. **The free tier is a separate matter and this is not its cause**: with every one of those headers restored, a CLI `User-Agent`, a valid session id and the `read`/`bash` tool schemas the fallback injects, a Zen `-free` model still answers `403 FreeTierError` from outside OpenCode while a paid model on the same request answers `200`. The ids are still offered — the refusal names itself, and hiding a row the vendor may serve is the worse failure — and the headers it restores are for the paid routes and the vendor's stated client rules.
 - **A turn without a session id is rejected or left unlinked.** Every turn has to carry a stable `ses_…`-shaped id, and DSH omits `sessionId` entirely for subagents, background evaluations and modes like **Auto Review**.
 - **Free-tier `/responses` bodies are refused without `read` and `bash` in `tools`**, and DSH deliberately does not send them.
 - **The catalog is thin.** A bare `/models` listing carries ids and little else, so the picker shows unnamed rows with no prices and no context windows.
@@ -115,7 +115,7 @@ Done — the **OpenCode Patch** card appears under _Settings → Plugins_, and t
 
 | Without the patch | With `dsh-opencode-patch` |
 | :-- | :-- |
-| Zen free models fail with `403 FreeTierError` | **Not offered.** The headers and tool fallbacks are restored for the paid routes, but they are not this error's cause — measured with all of them in place, a Zen `-free` id still answers `403` while a paid model answers `200`, so the plugin hides the free ids rather than pretending to fix them |
+| Zen free models fail with `403 FreeTierError` | **Offered, and refused in the gateway's own words.** The headers and tool fallbacks are restored for the paid routes, but they are not this error's cause — measured with all of them in place, a Zen `-free` id still answers `403` while a paid model answers `200`, and the refusal comes from the service behind the console rather than from anything a request carries. So the ids stay in the picker and the refusal surfaces as `400 free_tier_restricted` instead of a hidden row |
 | Only one API shape can be served per route — the rest answer `500` once the basics work | **Per-model routing** — each model dispatched to the endpoint its own SDK names, read from the catalog |
 | Session IDs rejected with `400 MissingSessionID` | **Deterministic `ses_…` session hashing** and affinity across turns |
 | Subagents lose conversation context | **Parent session tracking** (`x-opencode-parent-session-id`, `x-parent-session-id`) |
@@ -157,19 +157,19 @@ Zen's provider-level SDK is `@ai-sdk/openai-compatible`. models.dev names a **di
 
 | models.dev `provider.npm` | models | protocol | served from |
 | :-- | --: | :-- | :-- |
-| _(absent)_ | 29 | OpenAI Chat Completions | the route you configured |
+| _(absent)_ | 27 | OpenAI Chat Completions | the route you configured |
 | `@ai-sdk/openai` | 30 | OpenAI Responses | `opencode-responses` |
 | `@ai-sdk/anthropic` | 18 | Anthropic Messages | `opencode-anthropic` |
 | `@ai-sdk/google` | 8 | Google Generative AI | `opencode-google` |
 | `@ai-sdk/mistral` | 1 | _(a dialect this plugin does not serve)_ | **not offered** |
 
-Counts are the **86** active `opencode` models in `models.dev` as of 2026-10-15 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 86 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
+Counts are the **84** active `opencode` models in `models.opencode.ai` as of 2026-10-19 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 84 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
 
 The patch **keeps those two routes out of both the model picker and _Settings → Models_**. Three properties hold today, and one does not yet:
 
 - **You keep choosing.** The picker shows exactly the models you listed, and each one is matched to the right protocol automatically. OpenCode serves models on three shapes — OpenAI Chat Completions (the default), OpenAI Responses, and Anthropic Messages — and a model that needs one of the other two is dispatched to the route that speaks it. No second route to declare by hand.
 - **You are never offered a model that cannot work.** Every one of the four families is reachable, so no model is dropped for want of a protocol: the `@ai-sdk/google` models are served through the patch's own adapter, and the three DSH already speaks are dispatched to the route that speaks them. That holds for models you list by hand as well — one the catalog does not describe is routed by the family its id names (`gemini-*` to the Generative AI path, `claude-*` to Messages), and if the route you put it on cannot serve that protocol it is not offered there at all, rather than answering `400 ModelProtocolUnsupported` when you pick it.
-- **One credential, from wherever you already have one.** A routed model authenticates with the key you configured, resolved through the credentials service and never re-asked for — and if a route names no key at all, a stored login's token answers instead, so signing in is enough. Your own configuration always wins: the order is the pool, then the route's own reference, then the login, and nothing is consulted before the thing you declared.
+- **One credential, from wherever you already have one.** A routed model authenticates with the key you configured, resolved through the credentials service and never re-asked for — and if a route names no key at all, the installation's own OpenCode store answers, when the deployment opts into reading it. Your own configuration always wins: the order is the route's own reference, then the store, and nothing is consulted before the thing you declared.
 
 **The route, if you would rather declare it yourself:** `opencode-responses` — and `opencode-anthropic`, once you use an Anthropic-plane model — can live in your profile's `llm-pi-ai` `providers` block, listing the models it serves. Declaring it is a choice, not a requirement:
 
@@ -215,7 +215,7 @@ The model list is assembled from four sources, each answering a different questi
 | The gateway's `/models` | what **this account** actually has |
 | Discovery decoration | what `discoverModels` should answer |
 
-Merging is **additive**: adapter rows are kept, canonical rows are appended when a model is missing, and a row is dropped only when the provider-scoped retirement list names it — a fact, not a guess. Display names and prices come from models.dev, because a gateway listing carries ids and little else.
+Merging is **additive**: adapter rows are kept, canonical rows are appended when a model is missing, and a row is dropped only when the registry marks it `status: "deprecated"` — a fact, not a guess. Display names and prices come from models.dev, because a gateway listing carries ids and little else.
 
 Two things follow that you will notice in use. **Cold start is never empty** — the bundled shim answers before the first refresh, so the picker has models immediately. And **a model models.dev has no row for still appears**, with `—` where its rate would be: never a guess, and never the previous model's name.
 
@@ -273,16 +273,9 @@ Go usage                                           Healthy
 Monthly allowance  mimo-v2.6-pro · Go $60 · Plus $120         ⓘ
 ```
 
-Above both sits the **sign-in row** — the plugin's own OpenCode account, when you want one:
+**This build carries the API key path only.** There is no sign-in row and no device flow: a credential comes from the deployment's configuration, from a key captured on a live request, or — when `readOpencodeStore` is on — from the OpenCode installation's own store. The Console login (device flow, session store, credential pool) lives on the `v2` line and is deliberately not in `main`, so nothing here depends on a service the host may not mount.
 
-```
-OpenCode account                                          Not signed in
-                                                            [ Sign in to OpenCode ]
-```
-
-Click it and the card shows a short code, a link to open, and that it is waiting. Approve in the browser and the row becomes the account's email. It is a device flow, so there is nothing to paste and no token ever reaches the page — the credential is written and read on the host, and the card only renders what it is told.
-
-**If you do not see this row after updating, the host process has not restarted.** The host bundle is read once at process start, so a browser reload keeps running the previous `lib/index.mjs`; stop and restart `dsh web`. The row is the quickest way to tell, because it is new in the same build as everything else.
+**If the card looks like the previous build after updating, the host process has not restarted.** The host bundle is read once at process start, so a browser reload keeps running the previous `lib/index.mjs`; stop and restart `dsh web`. The row is the quickest way to tell, because it is new in the same build as everything else.
 
 "Left" is a percentage, never a dollar figure: `/usage` publishes a percent per window and no balance at all, and the plan tier is not discoverable — so a dollar remainder would be a guess. The ⓘ states that. A quota that cannot be read says so and prints no numbers, rather than a row of zeroes that reads as a measurement.
 
@@ -376,8 +369,7 @@ These exist in the schema but render no control — each is a literal, a marker,
 | `sessionIdEnv` | `OPENCODE_SESSION_ID` | Names an env var only a caller-supplied session id uses |
 | `freeModelMarker` | `free` | Model-id substring; `*` forces the fallback, `''` disables it |
 | `usageBaseURL` | `https://opencode.ai/zen/go/v1` | Endpoint override; auto-discovered from the composition |
-| `credentialPool` | `{ enabled: false, zen: [], go: [] }` | Several credentials per plane, rotated. Off unless declared, and the entries are credential references rather than values |
-| `credentialOrg` | — | The org id an account credential belongs to, for a token that came from somewhere other than a login through this plugin |
+| `credentialOrg` | — | The org id an account credential belongs to, when the deployment supplies one out of band |
 | `debug` / `debugFile` | `false` / — | Diagnostic JSONL logging, not a behaviour anyone tunes in the UI |
 
 ```yaml
@@ -414,39 +406,6 @@ These exist in the schema but render no control — each is a literal, a marker,
 > **Host reload rule:** restart `dsh web` after any host change (`lib/index.mjs`); a browser refresh is enough for client UI changes (`lib/client.js`).
 
 ---
-
-## 🔑 Rotating Several Credentials
-
-A deployment with more than one key for a plane — past a rate limit, or splitting spend across accounts — can have the plugin rotate them. **Nothing about this happens unless you declare it**, and the declaration is two steps, because the pool owns a reference of its own rather than writing behind the key you configured.
-
-```yaml
-- insert:
-    - id: dsh-opencode-patch
-      name: "dsh-opencode-patch"
-      config:
-        credentialPool:
-          enabled: true
-          zen: [OPENCODE_API_KEY, OPENCODE_API_KEY_BACKUP]
-          go: [OPENCODE_GO_API_KEY]
-```
-
-Then point the route at the reference the pool publishes:
-
-```yaml
-# the llm row that declares the route
-opencode:
-  apiKeyEnv: OPENCODE_POOL_KEY # instead of OPENCODE_API_KEY
-opencode-go:
-  apiKeyEnv: OPENCODE_GO_POOL_KEY
-```
-
-Three things are worth knowing about how it behaves:
-
-- **It never writes behind your key.** The pool publishes through `OPENCODE_POOL_KEY` / `OPENCODE_GO_POOL_KEY`, names nothing else writes. Writing `OPENCODE_API_KEY` itself would either replace the credential you declared or be refused outright — the credential seam rejects a write that a read-only source shadows, precisely so a rotation cannot silently fail to take effect.
-- **A rotation is visible to every route, including the ones the wrapper serves**, because it writes on every rotation rather than once at startup, and the wrapper resolves the reference per operation.
-- **An exhausted pool falls through.** Entries that do not resolve are skipped, an entry the gateway refuses is marked failed, and when nothing is left the plugin resolves what the route declared instead of failing the request.
-
-The pool holds API keys. An account login is a different credential — a session token with an org beside it — and the plugin **has a surface for it**: the sign-in row above the controls runs the Console's device flow, keeps the grant with its owner, and serves it from there. What it reaches is measured rather than assumed: the account token answers `200` for a paid model on `/inference/openai/v1` with its org, and a free-tier model still answers `403 FreeTierError` — so a login is a working credential for real traffic, and the free tier is the part that is not granted rather than the part that is broken. See [docs/credentials.md](./docs/credentials.md).
 
 ## 🛠 Troubleshooting
 

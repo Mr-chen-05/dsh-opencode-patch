@@ -10,7 +10,6 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { name } from "../src/identity.ts";
 import {
   DUMMY_BASH_TOOL,
   DUMMY_READ_TOOL,
@@ -25,11 +24,8 @@ import {
   resolveConfig,
   type ActiveTurnState,
 } from "../src/index.ts";
-import { createLoginCredentialReader } from "../src/login-credential.ts";
-import { createTokenStore } from "../src/token-store.ts";
 import {
   createCaptureFetch,
-  createCredentialsSeam,
   createOpencodeStore,
   headerOf,
   parseJsonBody,
@@ -46,50 +42,16 @@ afterEach(() => {
 });
 
 describe("patchFetch", () => {
-  it("reports a refused credential so a pool can rotate, and only for those", async () => {
-    // Rotation is driven from here because this interceptor is the only place
-    // that sees the answers of routes the WRAPPER serves and of the Go plane -
-    // neither of which passes through a route of ours. So the statuses that mean
-    // "this credential is spent" have to arrive here.
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const seen: { plane: string; status: number }[] = [];
-
-    for (const [status, plane] of [
-      [401, "opencode"],
-      [429, "opencode-go"],
-    ] as const) {
-      seen.length = 0;
-      const failing = vi.fn(async () =>
-        Response.json({ error: { message: "no" } }, { status })
-      );
-      const patched = patchFetch(
-        failing as unknown as typeof fetch,
-        als,
-        resolveConfig(),
-        {
-          onCredentialFailure: (seenPlane, seenStatus) => {
-            seen.push({ plane: seenPlane, status: seenStatus });
-          },
-        }
-      );
-      const url =
-        plane === "opencode"
-          ? "https://opencode.ai/zen/v1/chat/completions"
-          : "https://opencode.ai/zen/go/v1/chat/completions";
-      await patched(url, {
-        body: JSON.stringify({ messages: [] }),
-        headers: {},
-        method: "POST",
-      });
-      expect(seen, `status ${status}`).toEqual([{ plane, status }]);
-    }
-  });
-
   it("names the sources it consulted when no credential resolves", async () => {
     // The guard for the tier bug. A mis-classified tier made a captured key
     // invisible, the adapter's placeholder went out, and the only symptom was a
     // 401 the user read as an invalid key on a credential that was fine. So the
     // silence is replaced by a line that states what each source answered.
+    //
+    // The request goes to the Go plane, because the Zen plane offers free models
+    // the gateway admits with no key at all, and reporting a missing key there
+    // sends the reader to set one they do not need — see
+    // `docs/upstream-findings.md` §1.5 and the companion test below.
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const warnings: unknown[][] = [];
     const original = console.warn;
@@ -108,7 +70,7 @@ describe("patchFetch", () => {
       );
       // A gateway request with no credential anywhere: no key on the request, no
       // captured key, no env var, no login, and the installation store off.
-      await patched("https://opencode.ai/inference/v1/chat/completions", {
+      await patched("https://opencode.ai/zen/go/v1/chat/completions", {
         body: JSON.stringify({ messages: [] }),
         headers: {},
         method: "POST",
@@ -123,12 +85,56 @@ describe("patchFetch", () => {
     expect(line, "the absence must be reported, not passed over").toBeDefined();
     // It states what it consulted and what each answered, so a missing env var
     // reads differently from a missing login.
-    expect(line).toContain("opencode");
-    expect(line).toContain("OPENCODE_API_KEY: unset");
+    expect(line).toContain("opencode-go");
+    expect(line).toContain("OPENCODE_GO_API_KEY: unset");
     expect(line).toContain(
       "a key captured from a live request (policy auto): none"
     );
     expect(line).toContain("not enabled");
+  });
+
+  it("does NOT report a missing key on a plane that offers free models", async () => {
+    // The gateway admits a free model with no credential at all, or with the
+    // literal `public` (per-model `allowAnonymous`;
+    // `docs/upstream-findings.md` §1.5). So "no credential resolved" is not a
+    // fault on the Zen plane, which offers them, and the warning would name a
+    // key the user does not need. The Go plane has no free tier, so the same
+    // keyless request there does report — the pair pins the distinction.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const warnings: unknown[][] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+    try {
+      const ok = vi.fn(async () =>
+        Response.json({ ok: true }, { status: 200 })
+      );
+      const patched = patchFetch(
+        ok as unknown as typeof fetch,
+        als,
+        resolveConfig(),
+        {}
+      );
+      await patched("https://opencode.ai/zen/v1/chat/completions", {
+        body: JSON.stringify({
+          messages: [],
+          model: "minimax-m3.1-flash-free",
+        }),
+        headers: {},
+        method: "POST",
+      });
+    } finally {
+      console.warn = original;
+    }
+
+    const lines = warnings
+      .map((args) => args.map(String).join(" "))
+      .filter((text) => text.includes("no credential resolved"));
+    expect(
+      lines,
+      "a keyless free turn is a success, not a missing credential"
+    ).toHaveLength(0);
   });
 
   it("does not name the sources when a credential does resolve", async () => {
@@ -160,60 +166,6 @@ describe("patchFetch", () => {
       .map((args) => args.map(String).join(" "))
       .find((text) => text.includes("no credential resolved"));
     expect(line).toBeUndefined();
-  });
-
-  it("does not report a status that is not about the credential", async () => {
-    // 403 is the gateway's answer for a model the account has not enabled, and
-    // rotating a working credential over that would move a deployment off a
-    // good key for a model problem. 200 is obviously not one either.
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const seen: { plane: string; status: number }[] = [];
-    for (const status of [200, 403, 404, 500]) {
-      seen.length = 0;
-      const answering = vi.fn(async () =>
-        Response.json({ error: { message: "no" } }, { status })
-      );
-      const patched = patchFetch(
-        answering as unknown as typeof fetch,
-        als,
-        resolveConfig(),
-        {
-          onCredentialFailure: (plane, seenStatus) => {
-            seen.push({ plane, status: seenStatus });
-          },
-        }
-      );
-      await patched("https://opencode.ai/zen/v1/chat/completions", {
-        body: JSON.stringify({ messages: [] }),
-        headers: {},
-        method: "POST",
-      });
-      expect(seen, `status ${status}`).toEqual([]);
-    }
-  });
-
-  it("never reports a request that is not gateway traffic, even on a 401", async () => {
-    // Stronger than checking the plane is empty: a URL that is not ours is not
-    // examined at all, so there is nothing to mis-attribute. Rotation is a side
-    // effect and the safest one is the one that does not happen.
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const seen: { plane: string; status: number }[] = [];
-    const failing = vi.fn(async () => new Response("{}", { status: 401 }));
-    const patched = patchFetch(
-      failing as unknown as typeof fetch,
-      als,
-      resolveConfig(),
-      {
-        onCredentialFailure: (plane, status) => {
-          seen.push({ plane, status });
-        },
-      }
-    );
-    await patched("https://api.deepseek.com/v1/chat/completions", {
-      body: "{}",
-      method: "POST",
-    });
-    expect(seen).toEqual([]);
   });
 
   it("reports each claimed request to the debug hook, presence not values", async () => {
@@ -304,10 +256,10 @@ describe("patchFetch", () => {
   });
 
   it("carries the credential's org, and nothing when it has none", async () => {
-    // A session token is half a credential: the gateway gates the free tier on
-    // the org that arrived with it, so a request carrying one without the other
-    // is answered as though it carried a plain key. And a key deployment has no
-    // org, which must not become an empty header.
+    // A session token needs the org it belongs to — measured, a paid model
+    // answers `200` with the org and `403` without — while the free tier is
+    // refused with or without one. And a key deployment has no org, which must
+    // not become an empty header.
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const sent: Record<string, string> = {};
     const capture = vi.fn(
@@ -368,6 +320,38 @@ describe("patchFetch", () => {
     expect(headerOf(capture.init, "x-opencode-client")).toBeNull();
     expect(headerOf(capture.init, "x-opencode-project")).toBeNull();
     expect(headerOf(capture.init, SESSION_HEADER)).toBeNull();
+  });
+
+  it("passes a 403 through untouched, message and status", async () => {
+    // A 403 from this gateway is a refusal it understood, not a rejected
+    // credential (that is a 401) — but the status is the gateway's to choose and
+    // this interceptor does not rewrite it. An earlier revision remapped it to
+    // 400 so DSH's classifier would stop labelling it AUTH; the trade was wrong.
+    // The classifier's label is its own reading; the message underneath is the
+    // gateway's and is accurate, and that is what was asked for.
+    const body = JSON.stringify({
+      error: {
+        message: "OpenCode's free tier can only be used from within OpenCode",
+        type: "FreeTierError",
+      },
+    });
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const patched = patchFetch(
+      (async () =>
+        new Response(body, { status: 403 })) as unknown as typeof fetch,
+      als,
+      resolveConfig()
+    );
+    const response = await patched(
+      "https://opencode.ai/zen/v1/chat/completions",
+      { body: "{}", method: "POST" }
+    );
+    expect(response.status).toBe(403);
+    const parsed = (await response.json()) as {
+      error: { message: string; type: string };
+    };
+    expect(parsed.error.type).toBe("FreeTierError");
+    expect(parsed.error.message).toContain("from within OpenCode");
   });
 
   it("injects origin headers and dynamic session ID for zen requests", async () => {
@@ -469,12 +453,20 @@ describe("patchFetch", () => {
       return capture.init?.body;
     };
 
-    // Custom marker: only models carrying it fall back.
+    // Custom marker: only models carrying it fall back — plus any model the
+    // catalog calls free, which bypasses the marker entirely.
     const customHit = await runWith("acct-preview-9", {
       freeModelMarker: "preview",
     });
     expect(toolNamesOf(parseJsonBody(customHit))).toEqual(["read", "bash"]);
-    const customMiss = await runWith("muse-spark-1.3-contributor-free", {
+    const customCatalogFree = await runWith("beam-free", {
+      freeModelMarker: "preview",
+    });
+    expect(toolNamesOf(parseJsonBody(customCatalogFree))).toEqual([
+      "read",
+      "bash",
+    ]);
+    const customMiss = await runWith("gpt-5-paid", {
       freeModelMarker: "preview",
     });
     expect(toolNamesOf(parseJsonBody(customMiss))).toBeUndefined();
@@ -484,7 +476,7 @@ describe("patchFetch", () => {
     expect(toolNamesOf(parseJsonBody(allModels))).toEqual(["read", "bash"]);
 
     // A blank marker falls back to the default instead of disabling injection.
-    const blank = await runWith("muse-spark-1.3-contributor-free", {
+    const blank = await runWith("beam-free", {
       freeModelMarker: "",
     });
     expect(toolNamesOf(parseJsonBody(blank))).toEqual(["read", "bash"]);
@@ -493,7 +485,7 @@ describe("patchFetch", () => {
   it("uses the configured session id env outside a turn", async () => {
     const als = new AsyncLocalStorage<ActiveTurnState>();
     const { capture, mockFetch } = createCaptureFetch();
-    process.env.MY_SESSION_ID = "ses_0123456789abZZZZZZZZZZZZZZ";
+    process.env.MY_SESSION_ID = "ses_eb1e9e706ffeZZZZZZZZZZZZZZ";
     try {
       const patched = patchFetch(
         mockFetch,
@@ -504,7 +496,7 @@ describe("patchFetch", () => {
         method: "POST",
       });
       expect(headerOf(capture.init, SESSION_HEADER)).toBe(
-        "ses_0123456789abZZZZZZZZZZZZZZ"
+        "ses_eb1e9e706ffeZZZZZZZZZZZZZZ"
       );
     } finally {
       delete process.env.MY_SESSION_ID;
@@ -591,7 +583,7 @@ describe("patchFetch", () => {
     expect(replaced).not.toBe("ses_dsh_default");
     expect(replaced).toMatch(/^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/u);
 
-    process.env.OPENCODE_SESSION_ID = "ses_0123456789abZZZZZZZZZZZZZZ";
+    process.env.OPENCODE_SESSION_ID = "ses_eb1e9e706ffeZZZZZZZZZZZZZZ";
     const { capture: envCap, mockFetch: envFetch } = createCaptureFetch();
     await patchFetch(
       envFetch,
@@ -601,7 +593,7 @@ describe("patchFetch", () => {
       headers: { [SESSION_HEADER]: "bogus" },
     });
     expect(headerOf(envCap.init, SESSION_HEADER)).toBe(
-      "ses_0123456789abZZZZZZZZZZZZZZ"
+      "ses_eb1e9e706ffeZZZZZZZZZZZZZZ"
     );
   });
 
@@ -727,7 +719,7 @@ describe("patchFetch", () => {
       await patched("https://opencode.ai/zen/v1/responses", {
         body: JSON.stringify({
           input: [{ content: "hi", role: "user" }],
-          model: "muse-spark-1.3-contributor-free",
+          model: "muse-spark-1.2-contributor-free",
         }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
@@ -767,9 +759,12 @@ describe("patchFetch", () => {
 
     const chat = await run(
       "https://opencode.ai/zen/v1/chat/completions",
-      JSON.stringify({ input: "hi", model: "muse-spark-1.3-contributor-free" })
+      JSON.stringify({ input: "hi", model: "muse-spark-1.2-contributor-free" })
     );
-    expect(toolNamesOf(parseJsonBody(chat))).toBeUndefined();
+    // The gateway checks read+bash on completions too, so a free completions
+    // body gains both; a non-JSON route stays untouched (covered below by the
+    // models-listing case in tool-fallback tests).
+    expect(toolNamesOf(parseJsonBody(chat))).toEqual(["read", "bash"]);
 
     const invalid = await run(
       "https://opencode.ai/zen/v1/responses",
@@ -790,7 +785,7 @@ describe("patchFetch", () => {
       await patched("https://opencode.ai/zen/v1/responses", {
         body: JSON.stringify({
           input: [{ content: "hi", role: "user" }],
-          model: "muse-spark-1.3-contributor-free",
+          model: "muse-spark-1.2-contributor-free",
         }),
         headers: { "Content-Type": "application/json" },
         method: "POST",
@@ -809,7 +804,7 @@ describe("patchFetch", () => {
       await patched("https://opencode.ai/zen/v1/responses", {
         body: JSON.stringify({
           input: "run command",
-          model: "muse-spark-1.3-contributor-free",
+          model: "muse-spark-1.2-contributor-free",
           tools: [{ name: "bash", type: "function" }],
         }),
         headers: { "Content-Type": "application/json" },
@@ -825,7 +820,7 @@ describe("patchFetch", () => {
     const payload = Buffer.from(
       JSON.stringify({
         input: "test buffer",
-        model: "muse-spark-1.3-contributor-free",
+        model: "muse-spark-1.2-contributor-free",
       }),
       "utf-8"
     );
@@ -848,7 +843,7 @@ describe("patchFetch", () => {
       )("https://opencode.ai/zen/v1/responses", {
         body: JSON.stringify({
           input: "hi",
-          model: "muse-spark-1.3-contributor-free",
+          model: "muse-spark-1.2-contributor-free",
           tools: [
             { name: "read", type: "function" },
             { name: "bash", type: "function" },
@@ -861,9 +856,154 @@ describe("patchFetch", () => {
     expect(toolNamesOf(parseJsonBody(fullCap.init?.body))).toHaveLength(2);
   });
 
+  it("names the tools a request carries for the debug entry, in either nesting", async () => {
+    // The debug entry answers "which tools did the interceptor see?", because
+    // the gateway's refusal on a free-tier body is about exactly that. DSH
+    // sends both nestings - `{ name }` at the top level and `{ function:
+    // { name } }` - and a body the parser cannot read must be absence, not a
+    // throw and not a guess.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const entries: Record<string, unknown>[] = [];
+    const answering = vi.fn(async () => Response.json({ ok: true }));
+    const patched = patchFetch(
+      answering as unknown as typeof fetch,
+      als,
+      resolveConfig(),
+      {
+        debug: (entry) => {
+          entries.push(entry);
+        },
+      }
+    );
+    const named = async (body: RequestInit["body"]) => {
+      await patched("https://opencode.ai/zen/v1/responses", {
+        body,
+        method: "POST",
+      });
+      return entries.at(-1)?.toolNames;
+    };
+
+    // Both nestings, in one list, in order.
+    expect(
+      await named(
+        JSON.stringify({
+          input: "hi",
+          model: "gpt-5-paid",
+          tools: [{ name: "read" }, { function: { name: "bash" } }],
+        })
+      )
+    ).toBe("read,bash");
+
+    // Unusable entries are skipped by shape, never invented.
+    expect(
+      await named(
+        JSON.stringify({
+          input: "hi",
+          model: "gpt-5-paid",
+          tools: [
+            "junk",
+            7,
+            null,
+            { name: 5 },
+            { function: null },
+            { function: { name: 6 } },
+          ],
+        })
+      )
+    ).toBe("");
+
+    // Bodies that are not JSON objects (or not strings at all) are absence too.
+    expect(await named("42")).toBe("");
+    expect(await named("null")).toBe("");
+    expect(await named("{not-json")).toBe("");
+    expect(await named(Buffer.from("{}", "utf-8"))).toBe("");
+    expect(await named("")).toBe("");
+  });
+
+  it("sends a Request whose body is already spent, unread and unrebuilt", async () => {
+    // A caller can hand over a Request it has already read; clone() throws on
+    // a disturbed stream, and the interceptor must fall back to sending the
+    // request as it stands - not with a guessed body, and not a dropped one.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const seen: unknown[] = [];
+    const entries: Record<string, unknown>[] = [];
+    const mockFetch = async (input: RequestInfo | URL): Promise<Response> => {
+      seen.push(input);
+      return new Response("{}", { status: 200 });
+    };
+    const patched = patchFetch(mockFetch, als, resolveConfig(), {
+      debug: (entry) => {
+        entries.push(entry);
+      },
+    });
+    const request = new Request("https://opencode.ai/zen/v1/responses", {
+      body: JSON.stringify({ model: "muse-spark-1.2-contributor-free" }),
+      method: "POST",
+    });
+    await request.text();
+
+    await patched(request);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0], "the same object went out, untouched").toBe(request);
+    expect(entries.at(-1)?.bodySource).toBe("none");
+  });
+
+  it("injects into a Request input by rebuilding it with the same method", async () => {
+    // The body source the bug was about: DSH sends inference as
+    // fetch(new Request(url, { body })). Injection has to produce a NEW
+    // Request - a Request's body cannot be swapped in place - and the patch's
+    // headers must still ride along in the init.
+    const als = new AsyncLocalStorage<ActiveTurnState>();
+    const testSession = openCodeSessionIdFor("request-rebuild");
+    const seen: unknown[] = [];
+    let sentInit: RequestInit | undefined;
+    const entries: Record<string, unknown>[] = [];
+    const mockFetch = async (
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ): Promise<Response> => {
+      seen.push(input);
+      sentInit = init;
+      return new Response("{}", { status: 200 });
+    };
+    const patched = patchFetch(mockFetch, als, resolveConfig(), {
+      debug: (entry) => {
+        entries.push(entry);
+      },
+    });
+    const request = new Request("https://opencode.ai/zen/v1/responses", {
+      body: JSON.stringify({
+        input: "hi",
+        model: "muse-spark-1.2-contributor-free",
+      }),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+
+    await als.run({ provider: "opencode", value: testSession }, async () => {
+      await patched(request);
+    });
+
+    expect(seen[0]).not.toBe(request);
+    expect(seen[0]).toBeInstanceOf(Request);
+    const wire = seen[0] as Request;
+    expect(wire.method).toBe("POST");
+    expect(wire.headers.get("content-type")).toBe("application/json");
+    expect(toolNamesOf(parseJsonBody(await wire.text()))).toEqual([
+      DUMMY_READ_TOOL.name,
+      DUMMY_BASH_TOOL.name,
+    ]);
+    expect(headerOf(sentInit, SESSION_HEADER)).toBe(testSession);
+    expect(entries.at(-1)?.bodySource).toBe("request");
+    expect(entries.at(-1)?.toolNames).toBe(
+      [DUMMY_READ_TOOL.name, DUMMY_BASH_TOOL.name].join(",")
+    );
+  });
+
   it("resolves a credential for the Zen free model that gets redirected to /responses", async () => {
     // The reported symptom: a Go-plane free model works, Zen free models do not.
-    // `muse-spark-1.3-contributor-free` is the ONE Zen free model naming
+    // `muse-spark-1.2-contributor-free` is the ONE Zen free model naming
     // `@ai-sdk/openai`, so the stream hook redirects it to `opencode-responses` -
     // a route the plugin mounts itself, which therefore carries pi's
     // `Bearer unused` placeholder and depends on THIS injection to authenticate.
@@ -882,7 +1022,7 @@ describe("patchFetch", () => {
 
     await als.run({ provider: "opencode", value: "ses_x" }, async () => {
       await patched("https://opencode.ai/inference/v1/responses", {
-        body: JSON.stringify({ model: "muse-spark-1.3-contributor-free" }),
+        body: JSON.stringify({ model: "muse-spark-1.2-contributor-free" }),
         // The sentinel the mounted route declares; a placeholder must be
         // replaced, never forwarded.
         headers: { authorization: "Bearer unused" },
@@ -958,161 +1098,6 @@ describe("patchFetch", () => {
     );
   });
 
-  it.each(["opencode", "opencode-go"])(
-    "fills a keyless %s request from a login written after patch creation",
-    async (plane) => {
-      const { ctx, credentials } = createCredentialsSeam();
-      const store = createTokenStore({
-        credentials,
-        plane: "opencode",
-        scope: name,
-      });
-      expect(store).toBeDefined();
-      const { capture, mockFetch } = createCaptureFetch();
-      const patched = patchFetch(
-        mockFetch,
-        new AsyncLocalStorage<ActiveTurnState>(),
-        resolveConfig(),
-        {
-          loginCredential: createLoginCredentialReader(ctx),
-          resolveOrg: () => "org_stale",
-        }
-      );
-      const url = `https://opencode.ai/zen/${plane === "opencode-go" ? "go/" : ""}v1/chat/completions`;
-      await patched(url, { headers: { Authorization: "Bearer unused" } });
-      expect(headerOf(capture.init, "authorization")).toBe("Bearer unused");
-      await store!.write({
-        accessToken: "st_login",
-        expiresInSeconds: 3600,
-        orgId: "org_login",
-      });
-      await patched(url, { headers: { Authorization: "Bearer unused" } });
-      expect(headerOf(capture.init, "authorization")).toBe("Bearer st_login");
-      expect(headerOf(capture.init, "x-opencode-org-id")).toBe("org_login");
-      await store!.write({
-        accessToken: "st_new_owner",
-        expiresInSeconds: 3600,
-      });
-      await patched(url, {
-        headers: { "x-opencode-org-id": "org_old_header" },
-      });
-      expect(headerOf(capture.init, "authorization")).toBe(
-        "Bearer st_new_owner"
-      );
-      expect(headerOf(capture.init, "x-opencode-org-id")).toBeNull();
-    }
-  );
-
-  it("keeps request, captured, and declared auth ahead of a login", async () => {
-    const loginCredential = vi.fn(async () => ({
-      accessToken: "st_should_not_run",
-      orgId: "org_login",
-    }));
-    const { capture, mockFetch } = createCaptureFetch();
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const patched = patchFetch(mockFetch, als, resolveConfig(), {
-      loginCredential,
-    });
-    const url = "https://opencode.ai/zen/v1/chat/completions";
-    await patched(url, { headers: { Authorization: "Bearer explicit" } });
-    expect(headerOf(capture.init, "authorization")).toBe("Bearer explicit");
-    clearCapturedApiKeys();
-    await patched(url, { headers: { "x-api-key": "anthropic_explicit" } });
-    expect(headerOf(capture.init, "authorization")).toBe(
-      "Bearer anthropic_explicit"
-    );
-    clearCapturedApiKeys();
-    process.env.OPENCODE_API_KEY = "declared";
-    await patched(url, { headers: { Authorization: "Bearer unused" } });
-    expect(headerOf(capture.init, "authorization")).toBe("Bearer declared");
-    recordCapturedApiKey("captured", "opencode", url);
-    await patched(url, { headers: {} });
-    expect(headerOf(capture.init, "authorization")).toBe("Bearer captured");
-    await patchFetch(
-      mockFetch,
-      als,
-      resolveConfig({ keySource: "configured" }),
-      { loginCredential }
-    )(url, { headers: {} });
-    expect(headerOf(capture.init, "authorization")).toBe("Bearer declared");
-    expect(loginCredential).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["/zen/v1/messages", "x-api-key"],
-    ["/zen/v1/models/gemini-3.8-flash:streamGenerateContent", "x-goog-api-key"],
-    ["/zen/go/v1/chat/completions", "authorization"],
-  ])(
-    "repairs missing and placeholder auth on %s in its wire header",
-    async (path, header) => {
-      const { capture, mockFetch } = createCaptureFetch();
-      const loginCredential = vi.fn(async () => ({
-        accessToken: "st_protocol",
-        orgId: "org_protocol",
-      }));
-      const patched = patchFetch(
-        mockFetch,
-        new AsyncLocalStorage<ActiveTurnState>(),
-        resolveConfig(),
-        { loginCredential }
-      );
-      for (const value of [undefined, "none", "  UNUSED  "]) {
-        await patched(`https://opencode.ai${path}`, {
-          headers:
-            value === undefined
-              ? {}
-              : {
-                  [header]:
-                    header === "authorization" ? `bearer ${value}` : value,
-                },
-        });
-        expect(headerOf(capture.init, header)).toBe(
-          header === "authorization" ? "Bearer st_protocol" : "st_protocol"
-        );
-        expect(headerOf(capture.init, "x-opencode-org-id")).toBe(
-          "org_protocol"
-        );
-      }
-      expect(loginCredential).toHaveBeenCalledTimes(3);
-    }
-  );
-
-  it.each(["x-api-key", "x-goog-api-key"])(
-    "preserves a real %s even beside a Bearer placeholder",
-    async (header) => {
-      const { capture, mockFetch } = createCaptureFetch();
-      const loginCredential = vi.fn(async () => ({ accessToken: "st_wrong" }));
-      const patched = patchFetch(
-        mockFetch,
-        new AsyncLocalStorage<ActiveTurnState>(),
-        resolveConfig({ keySource: "configured" }),
-        { loginCredential }
-      );
-      await patched("https://opencode.ai/zen/v1/messages", {
-        headers: {
-          authorization: "Bearer unused",
-          [header]: "explicit_wire_key",
-        },
-      });
-      expect(headerOf(capture.init, header)).toBe("explicit_wire_key");
-      expect(getCapturedApiKey(undefined, "zen")).toBe("explicit_wire_key");
-      expect(loginCredential).not.toHaveBeenCalled();
-    }
-  );
-
-  it("does not infer a gateway plane from query text on a claimed foreign request", async () => {
-    const loginCredential = vi.fn(async () => ({ accessToken: "st_secret" }));
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const { mockFetch, capture } = createCaptureFetch();
-    await als.run({ provider: "opencode", value: "ses_fixture" }, () =>
-      patchFetch(mockFetch, als, resolveConfig(), { loginCredential })(
-        "https://example.com/api?next=/zen/go/v1/responses"
-      )
-    );
-    expect(loginCredential).not.toHaveBeenCalled();
-    expect(headerOf(capture.init, "authorization")).toBeNull();
-  });
-
   it("selects a declared key from the URL's plane rather than a conflicting turn provider", async () => {
     process.env.OPENCODE_API_KEY = "zen_declared";
     process.env.OPENCODE_GO_API_KEY = "go_declared";
@@ -1126,114 +1111,6 @@ describe("patchFetch", () => {
       )("https://opencode.ai/zen/v1/messages")
     );
     expect(headerOf(capture.init, "x-api-key")).toBe("zen_declared");
-  });
-
-  it("does not send a request when login refresh fails", async () => {
-    const mockFetch = vi.fn(async () => new Response("unexpected"));
-    const loginCredential = async () => {
-      throw new Error("MISSING_CREDENTIAL: refresh refused");
-    };
-    await expect(
-      patchFetch(
-        mockFetch,
-        new AsyncLocalStorage<ActiveTurnState>(),
-        resolveConfig(),
-        { loginCredential }
-      )("https://opencode.ai/zen/v1/responses")
-    ).rejects.toThrow(/MISSING_CREDENTIAL/);
-    expect(mockFetch).not.toHaveBeenCalled();
-  });
-
-  it("does not resolve a login for unclaimed URLs or an unknown gateway plane", async () => {
-    const loginCredential = vi.fn(async () => ({ accessToken: "st_secret" }));
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const { capture, mockFetch } = createCaptureFetch();
-    const patched = patchFetch(mockFetch, als, resolveConfig(), {
-      loginCredential,
-    });
-    await patched("https://example.com/api", { headers: {} });
-    await als.run({ provider: "opencode", value: "ses_fixture" }, () =>
-      patched("https://example.com/api", { headers: {} })
-    );
-    expect(loginCredential).not.toHaveBeenCalled();
-    expect(headerOf(capture.init, "authorization")).toBeNull();
-  });
-
-  it("uses the opt-in account before the installation key, with its own org", async () => {
-    const fixture = createOpencodeStore(
-      [{ integrationId: "opencode-go", value: "sk_fixture" }],
-      { accessToken: "st_installation", orgId: "org_installation" }
-    );
-    process.env.XDG_DATA_HOME = fixture.root;
-    const { capture, mockFetch } = createCaptureFetch();
-    const als = new AsyncLocalStorage<ActiveTurnState>();
-    const url = "https://opencode.ai/zen/go/v1/chat/completions";
-    try {
-      await patchFetch(
-        mockFetch,
-        als,
-        resolveConfig({ readOpencodeStore: true }),
-        {
-          loginCredential: createLoginCredentialReader({}, true),
-          resolveOrg: () => "org_wrong",
-        }
-      )(url, { headers: {} });
-      expect(headerOf(capture.init, "authorization")).toBe(
-        "Bearer st_installation"
-      );
-      expect(headerOf(capture.init, "x-opencode-org-id")).toBe(
-        "org_installation"
-      );
-      await patchFetch(
-        mockFetch,
-        als,
-        resolveConfig({
-          credentialOrg: "org_override",
-          readOpencodeStore: true,
-        }),
-        { loginCredential: createLoginCredentialReader({}, true) }
-      )(url, { headers: {} });
-      expect(headerOf(capture.init, "x-opencode-org-id")).toBe("org_override");
-      await patchFetch(mockFetch, als, resolveConfig(), {
-        loginCredential: createLoginCredentialReader({}),
-      })(url, { headers: {} });
-      expect(headerOf(capture.init, "authorization")).toBeNull();
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  it("pairs concurrent request tokens with their own org, not the shared cache", async () => {
-    const sent: Headers[] = [];
-    const mockFetch: typeof fetch = (_input, init) => {
-      sent.push(new Headers(init?.headers));
-      return Promise.resolve(new Response("ok"));
-    };
-    const patched = patchFetch(
-      mockFetch,
-      new AsyncLocalStorage<ActiveTurnState>(),
-      resolveConfig(),
-      {
-        loginCredential: async (plane) => ({
-          accessToken: `st_${plane}`,
-          orgId: `org_${plane}`,
-        }),
-        resolveOrg: () => "org_other_request",
-      }
-    );
-    await Promise.all([
-      patched("https://opencode.ai/zen/v1/responses"),
-      patched("https://opencode.ai/zen/go/v1/chat/completions"),
-    ]);
-    expect(
-      sent.map((headers) => [
-        headers.get("authorization"),
-        headers.get("x-opencode-org-id"),
-      ])
-    ).toEqual([
-      ["Bearer st_opencode", "org_opencode"],
-      ["Bearer st_opencode-go", "org_opencode-go"],
-    ]);
   });
 
   it("fills the Authorization header from the installation's store, last", async () => {

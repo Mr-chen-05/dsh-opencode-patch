@@ -278,6 +278,7 @@ describe("settings-page: apply & slots", () => {
       "opencode-go",
       "opencode-responses",
       "opencode-anthropic",
+      "opencode-google",
       "opencode-go-responses",
       "opencode-go-anthropic",
     ]);
@@ -330,6 +331,8 @@ describe("settings-page: apply & slots", () => {
       },
     };
 
+    (globalThis as Record<string, unknown>).__rootCtx = ctx;
+    (globalThis as Record<string, unknown>).__rootCtx = ctx;
     expect(() => apply(ctx as never)).not.toThrow();
     // Every effect the entry registered handed back a disposer, and each one
     // runs without throwing on a context that has nothing to dispose.
@@ -456,6 +459,166 @@ describe("settings-page: apply & slots", () => {
     expect(dockInjector?.("session")).toMatchObject({
       reason: expect.stringContaining("no usage service"),
     });
+  });
+
+  it("registers the meter once per slot registry, so a second activation cannot throw", () => {
+    // The host may run a plugin's client entry more than once in a page's life.
+    // The slot registry THROWS on a duplicate id
+    //   list slot "conversation.input.right" already has an entry with id
+    //   "dsh-opencode-patch-usage"
+    // and that throw happened inside a render — a meter that vanishes rather
+    // than one that says why. The guard used to be a per-`apply` boolean, which
+    // reset on the second run and let the duplicate through.
+    // Attempts, not successes: the guard and the try/catch are different
+    // defences, and only the guard stops the second call from happening at all.
+    const attempts: string[] = [];
+    const registered: string[] = [];
+    const slots = {
+      inject: (_name: string, fn: () => void) => fn(),
+      register: (entry: Record<string, unknown>) => {
+        const id = String(entry.id);
+        attempts.push(id);
+        if (registered.includes(id)) {
+          throw new TypeError(
+            `list slot "conversation.input.right" already has an entry with id ${id}`
+          );
+        }
+        registered.push(id);
+      },
+    };
+    const ctx: Record<string, unknown> = {
+      effect: (fn: () => unknown) => fn(),
+      inject: (_deps: string[], callback: (scope: unknown) => unknown) =>
+        callback(ctx),
+      modelDirectories: { directoryFor: () => ({ store: {} }) },
+      remote: {
+        opencodeGoUsage: { read: async () => ({ ok: true, value: {} }) },
+      },
+      slots,
+    };
+
+    expect(() => apply(ctx as never)).not.toThrow();
+    // The second activation is the case that used to throw.
+    expect(() => apply(ctx as never)).not.toThrow();
+    expect(registered).toEqual(["dsh-opencode-patch-usage"]);
+    // And it was never even ATTEMPTED twice: a try/catch alone would hide the
+    // duplicate, and hiding it is not the same as not making it.
+    expect(attempts).toEqual(["dsh-opencode-patch-usage"]);
+  });
+
+  it("registers the meter even when the inject deps never resolve", () => {
+    // `ctx.inject` is a HARD gate: the callback runs only once ALL of the named
+    // services exist. A host that mounts no remote face never satisfies it, and
+    // the meter is then absent with nothing to tell that from a host that serves
+    // no usage service. The documented second path is a bounded fallback that
+    // registers anyway so the read can report its own reason; the comment still
+    // described it while the code had lost it.
+    vi.useFakeTimers();
+    try {
+      const registered: string[] = [];
+      const ctx = {
+        effect: (fn: () => unknown) => {
+          fn();
+        },
+        // Never calls back: the gate stays closed.
+        inject: () => {
+          /* the gate stays closed */
+        },
+        modelDirectories: { directoryFor: () => ({ store: {} }) },
+        remote: {},
+        slots: {
+          inject: (_name: string, fn: () => void) => {
+            fn();
+          },
+          register: (entry: Record<string, unknown>) => {
+            registered.push(String(entry.id));
+          },
+        },
+      };
+
+      apply(ctx as never);
+      expect(registered).toHaveLength(0);
+
+      vi.advanceTimersByTime(10_000);
+      expect(registered).toEqual(["dsh-opencode-patch-usage"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("registers once even when inject hands a CHILD scope and the mount hands the root", async () => {
+    // The exact console failure, measured in a browser after the previous guard:
+    //
+    //   list slot "conversation.input.right" already has an entry with id
+    //   "dsh-opencode-patch-usage" at priority 0 (registered by registerMeter)
+    //
+    // The scoped inject passes a CHILD scope; the mount-ready path and the
+    // ten-second fallback pass the ROOT `ctx`. A guard keyed on the argument
+    // therefore sees two different objects, both pass, and the host throws on the
+    // duplicate. Keyed on the root context it sees one.
+    // Attempts, not successes: the try/catch swallows the duplicate, so only the
+    // attempt count shows whether the guard held.
+    const attempts: string[] = [];
+    const registrations: string[] = [];
+    const slots = {
+      inject: (_name: string, fn: () => void) => {
+        fn();
+      },
+      register: (entry: Record<string, unknown>) => {
+        const id = String(entry.id);
+        attempts.push(id);
+        if (registrations.includes(id)) {
+          throw new TypeError(
+            `list slot "conversation.input.right" already has an entry with id ${id}`
+          );
+        }
+        registrations.push(id);
+      },
+    };
+    // A child scope with its OWN `slots` facade over the same underlying
+    // registry. That is the shape that broke the previous guard: the facade object
+    // differs, so a guard keyed on the argument sees two registries where the host
+    // has one — and both pass, and the host throws on the duplicate.
+    const childSlots = {
+      inject: (_name: string, fn: () => void) => {
+        fn();
+      },
+      register: (entry: Record<string, unknown>) => {
+        slots.register(entry);
+      },
+    };
+    const childScope = {
+      modelDirectories: { directoryFor: () => ({ store: {} }) },
+      remote: {
+        opencodeGoUsage: { read: async () => ({ ok: true, value: {} }) },
+      },
+      slots: childSlots,
+    };
+    const ctx: Record<string, unknown> = {
+      effect: (fn: () => unknown) => fn(),
+      inject: (_deps: string[], callback: (scope: unknown) => unknown) =>
+        callback(childScope),
+      modelDirectories: { directoryFor: () => ({ store: {} }) },
+      remote: {
+        $mount: async () => () => {
+          /* disposer */
+        },
+        opencodeGoUsage: { read: async () => ({ ok: true, value: {} }) },
+      },
+      slots,
+    };
+
+    (globalThis as Record<string, unknown>).__rootCtx = ctx;
+    expect(() => apply(ctx as never)).not.toThrow();
+    // Let the mount's `ready` promise settle — it awaits `$mount` inside an async
+    // IIFE, so microtasks alone are not enough. A macrotask flushes the chain,
+    // which is the second caller.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+    expect(registrations).toEqual(["dsh-opencode-patch-usage"]);
+    // And it was never ATTEMPTED twice — which is what the host logs as an Error.
+    expect(attempts).toEqual(["dsh-opencode-patch-usage"]);
   });
 
   it("degrades to no meter when the model-directory service throws", () => {
@@ -1135,14 +1298,13 @@ describe("settings-page: every remote gets a mount", () => {
       setTimeout(resolve, 0);
     });
 
-    // The remotes mount under ONE package contribution so Typert does not reject
-    // a duplicate package registration, while descriptors for both services are carried.
+    // The meter's remote is the only one this build mounts. The sign-in row and
+    // its `opencodeLogin` namespace are v2 work: main carries the API key path
+    // only, so nothing here should depend on a login service existing.
     const services = mounted.flatMap((contribution) =>
       contribution.descriptors.map((d) => d.service)
     );
-    expect(services).toEqual(
-      expect.arrayContaining(["opencodeGoUsage", "opencodeLogin"])
-    );
+    expect(services).toEqual(["opencodeGoUsage"]);
     expect(mounted).toHaveLength(1);
     expect(mounted[0]?.package).toBe("dsh-opencode-patch");
   });

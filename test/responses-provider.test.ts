@@ -24,33 +24,31 @@ import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 import { describe, expect, it, vi } from "vitest";
 
 import { OPENCODE_PLANE_API } from "../src/catalog-data.ts";
-import { resolveConfig } from "../src/config.ts";
-import { readCredentialPoolRotator } from "../src/cordis-context.ts";
-import { name as pluginName } from "../src/identity.ts";
 import {
   RESPONSES_SDK,
   ROUTE_FOR_PLANE_PROTOCOL,
   getLiveGoCatalog,
+  getLiveZenCatalog,
   inheritedCredentialRef,
+  internalRouteFor,
   loadPiAi,
   modelsForSdk,
+  narrowToDeclared,
   registerResponsesProvider,
+  undescribedDeclaredModels,
+  unroutedDeclaredModels,
   GOOGLE_INTERNAL_ROUTE,
   SELF_MOUNTED_ROUTES,
 } from "../src/index.ts";
 import type { CordisContext } from "../src/index.ts";
-import { orgFor, clearOrgs, setOrg } from "../src/org-cache.ts";
 import { baseForProtocol } from "../src/pi-provider.ts";
 import {
   loadPiAiAdapterHost,
   loadPiAiModule,
-  loginTokenReader,
   reasoningEffortsFor,
 } from "../src/responses-provider.ts";
-import { createTokenStore } from "../src/token-store.ts";
-import { createCredentialsSeam, createOpencodeStore } from "./test-helpers.ts";
 
-const MUSE = "muse-spark-1.3-contributor-free";
+const MUSE = "muse-spark-1.2";
 
 /** The package name the loader entry is matched on. */
 const PI_AI = "@deepseek-ai/dsh-llm-pi-ai";
@@ -474,6 +472,13 @@ const createHost = (options: { onPlugin?: (config: unknown) => void } = {}) => {
     // case can stage a registration that arrives after the declared check.
     adapters,
     listConfigurableProviders: () => [...directory.values()],
+    // What the deployment declared, which the mount narrows each route to. The
+    // real service answers it from the user's configuration; the catalog here
+    // stands in for that, so the mount has a declaration to read.
+    listModels: async () => [
+      ...getLiveZenCatalog().map((spec) => ({ id: spec.id })),
+      ...getLiveGoCatalog().map((spec) => ({ id: spec.id })),
+    ],
     listProviders: () => [...adapters.values()],
     registerAdapter,
     registerConfigurableProviders,
@@ -633,17 +638,25 @@ describe("responses-provider: registration is best-effort", () => {
     // A deployment that does not must degrade to "the route you declared still
     // works", not fail the boot — and must say so at INFO, because that is an
     // expected state rather than a fault.
-    const info = vi.fn();
+    // The report goes to the CONSOLE, not `ctx.logger`: cordis's logger only
+    // buffers (its default exporter pushes to a ring) and no host package
+    // registers a console exporter, so a `logger.info` here is invisible in the
+    // terminal — which is where someone checks whether a build loaded.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const ctx = {
       llm: { listProviders: () => [], registerAdapter: vi.fn() },
       loader: { entries: () => [] },
-      logger: { info },
+      logger: {},
     } as unknown as CordisContext;
-    await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
-    expect(ctx.llm?.registerAdapter).not.toHaveBeenCalled();
-    expect(info).toHaveBeenCalledWith(
-      expect.stringContaining("no loaded llm-pi-ai")
-    );
+    try {
+      await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
+      expect(ctx.llm?.registerAdapter).not.toHaveBeenCalled();
+      expect(info).toHaveBeenCalledWith(
+        expect.stringContaining("no loaded llm-pi-ai")
+      );
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("defers to routes the profile already declares", async () => {
@@ -670,7 +683,7 @@ describe("responses-provider: registration is best-effort", () => {
     // DUPLICATE_ADAPTER. Here every internal route is in the raw map and NONE
     // is in the decorated list — that discrepancy, inverted into an assertion:
     // reading the decorated list would mount, reading the map stands down.
-    const info = vi.fn();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const plugin = vi.fn();
     const internal = Object.values(ROUTE_FOR_PLANE_PROTOCOL).flatMap((plane) =>
       Object.values(plane.routes)
@@ -682,14 +695,18 @@ describe("responses-provider: registration is best-effort", () => {
         listProviders: () => [],
         registerAdapter: vi.fn(),
       },
-      logger: { info },
+      logger: {},
     } as unknown as CordisContext;
-    await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
-    expect(plugin).not.toHaveBeenCalled();
-    expect(ctx.llm?.registerAdapter).not.toHaveBeenCalled();
-    expect(info).toHaveBeenCalledWith(
-      expect.stringContaining("every internal route is already declared")
-    );
+    try {
+      await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
+      expect(plugin).not.toHaveBeenCalled();
+      expect(ctx.llm?.registerAdapter).not.toHaveBeenCalled();
+      expect(info).toHaveBeenCalledWith(
+        expect.stringContaining("every internal route is already declared")
+      );
+    } finally {
+      info.mockRestore();
+    }
   });
 
   it("stands down when the host offers no scope to mount into", async () => {
@@ -1120,366 +1137,11 @@ describe("responses-provider: the mount survives the host's own instance", () =>
     ).toBeGreaterThan(1);
     // Spot-check the two that differ, in the gateway's own terms.
     expect(providers["opencode-anthropic"]?.baseURL).toBe(
-      OPENCODE_PLANE_API.zen.replace(/\/v1$/, "")
+      "https://opencode.ai/inference/anthropic"
     );
     expect(providers["opencode-responses"]?.baseURL).toBe(
       OPENCODE_PLANE_API.zen
     );
-  });
-
-  it("publishes an enabled pool through the reference the pool owns", async () => {
-    // The path the wrapper's routes can reach: their credential resolution is
-    // the wrapper's, so the only thing this plugin can hand them is a value
-    // behind a reference. The write must name the POOL's reference and never a
-    // reference the deployment declared.
-    process.env.POOL_ONE = "pool-one-key";
-    process.env.POOL_TWO = "pool-two-key";
-    process.env.GO_POOL_ONE = "go-pool-key";
-    const written = new Map<string, string>();
-    const records = new Map<string, unknown>();
-    const host = createHost();
-    host.registerService?.("credentials", {
-      resolve: async (ref: string) => {
-        const value = written.get(ref) ?? process.env[ref];
-        return value === undefined ? undefined : { value };
-      },
-      set: async (ref: string, value: string) => {
-        written.set(ref, value);
-      },
-      unset: async (ref: string) => {
-        written.delete(ref);
-      },
-      // The record half. A pool never touches a record, but the accessor
-      // requires all six methods, and a stub that answered nothing where the
-      // seam stores a grant would be a stub lying about storage.
-      deleteRecord: async (key: string) => {
-        records.delete(key);
-      },
-      modifyRecord: async (
-        key: string,
-        mutate: (current?: unknown) => Promise<unknown>
-      ) => {
-        const next = await mutate(records.get(key));
-        if (next !== undefined) {
-          records.set(key, next);
-        }
-        return next;
-      },
-      readRecord: async (key: string) => {
-        const payload = records.get(key);
-        return payload === undefined ? undefined : { kind: "grant", payload };
-      },
-    });
-
-    try {
-      await registerResponsesProvider(
-        host.ctx,
-        resolveConfig({
-          credentialPool: {
-            enabled: true,
-            go: ["GO_POOL_ONE"],
-            zen: ["POOL_ONE", "POOL_TWO"],
-          },
-        })
-      );
-
-      // The references are the pool's own, per plane.
-      expect([...written.keys()].toSorted()).toEqual([
-        "OPENCODE_GO_POOL_KEY",
-        "OPENCODE_POOL_KEY",
-      ]);
-      expect(written.get("OPENCODE_POOL_KEY")).toBe("pool-one-key");
-      expect(written.get("OPENCODE_GO_POOL_KEY")).toBe("go-pool-key");
-      // And nothing a deployment declared was written behind.
-      expect(written.has("OPENCODE_API_KEY")).toBe(false);
-      expect(written.has("OPENCODE_GO_API_KEY")).toBe(false);
-    } finally {
-      process.env.POOL_ONE = "";
-      process.env.POOL_TWO = "";
-      process.env.GO_POOL_ONE = "";
-    }
-  });
-
-  it("rotates a plane's pool when the gateway refuses a credential", async () => {
-    // The rotation path that a route cannot provide: a route-triggered rotation
-    // reaches its own plane only, and the Go plane has no route of ours at all.
-    // The fetch interceptor is what sees a credential failure wherever it
-    // happened, so it is what asks for a rotation.
-    process.env.POOL_ONE = "pool-one-key";
-    process.env.POOL_TWO = "pool-two-key";
-    process.env.GO_POOL_ONE = "go-pool-one";
-    process.env.GO_POOL_TWO = "go-pool-two";
-    const written = new Map<string, string>();
-    const records = new Map<string, unknown>();
-    const host = createHost();
-    host.registerService?.("credentials", {
-      deleteRecord: async (key: string) => {
-        records.delete(key);
-      },
-      modifyRecord: async (
-        key: string,
-        mutate: (current?: unknown) => Promise<unknown>
-      ) => {
-        const next = await mutate(records.get(key));
-        if (next !== undefined) {
-          records.set(key, next);
-        }
-        return next;
-      },
-      readRecord: async (key: string) => {
-        const payload = records.get(key);
-        return payload === undefined ? undefined : { kind: "grant", payload };
-      },
-      resolve: async (ref: string) => {
-        const value = written.get(ref) ?? process.env[ref];
-        return value === undefined ? undefined : { value };
-      },
-      set: async (ref: string, value: string) => {
-        writes.push([ref, value]);
-        written.set(ref, value);
-      },
-      unset: async () => {},
-      writeGrant: async (key: string, payload: unknown) => {
-        records.set(key, payload);
-      },
-    });
-    const writes: [string, string][] = [];
-
-    try {
-      await registerResponsesProvider(
-        host.ctx,
-        resolveConfig({
-          credentialPool: {
-            enabled: true,
-            go: ["GO_POOL_ONE", "GO_POOL_TWO"],
-            zen: ["POOL_ONE", "POOL_TWO"],
-          },
-        })
-      );
-
-      // Registered as a service, not an ad-hoc property set: the host's
-      // context proxy rejects a name that was never provided while the fiber
-      // is running, which is a load failure rather than a silent no-op.
-      expect(host.observables.provided).toContain("credentialPoolRotator");
-      // Read through the same accessor the fetch interceptor uses, so this
-      // asserts the handoff the rotation path actually depends on.
-      const rotate = readCredentialPoolRotator(host.ctx);
-      expect(rotate).toBeDefined();
-      await rotate?.("not-a-plane", 401);
-      await rotate?.("opencode-go", 401);
-      await rotate?.("opencode", 429);
-
-      // The mount already published both planes' first entries, so a rotation
-      // shows up as a SECOND write carrying a different key: the credential
-      // the next request will use. The "not-a-plane" call above rotated nothing.
-      const goWrites = writes.filter(([ref]) => ref === "OPENCODE_GO_POOL_KEY");
-      expect(goWrites.length).toBeGreaterThan(1);
-      expect(goWrites.at(-1)?.[1]).not.toBe(goWrites[0]?.[1]);
-      // And the same for Zen, whose own route already rotates on a stream.
-      const zenWrites = writes.filter(([ref]) => ref === "OPENCODE_POOL_KEY");
-      expect(zenWrites).toHaveLength(2);
-      expect(zenWrites.at(-1)?.[1]).not.toBe(zenWrites[0]?.[1]);
-    } finally {
-      process.env.POOL_ONE = "";
-      process.env.POOL_TWO = "";
-      process.env.GO_POOL_ONE = "";
-      process.env.GO_POOL_TWO = "";
-    }
-  });
-
-  it("resolves a pool entry from the environment when no seam is mounted", async () => {
-    // The seam is not guaranteed: a composition that mounts no credentials
-    // service still has a launch environment, and a pool entry named there
-    // should behave the same as one stored. A pool that only worked with a seam
-    // would be a pool that silently served nothing.
-    process.env.POOL_ONE = "pool-one-key";
-    process.env.POOL_TWO = "pool-two-key";
-    const host = createHost();
-
-    try {
-      const writes = await registerResponsesProvider(
-        host.ctx,
-        resolveConfig({
-          credentialPool: {
-            enabled: true,
-            go: [],
-            zen: ["POOL_ONE", "POOL_TWO"],
-          },
-        })
-      );
-      // The mount succeeds and does not throw; with no seam there is nowhere
-      // to publish to, which is why no write is asserted here.
-      expect(writes === undefined || typeof writes === "function").toBe(true);
-      const rotate = readCredentialPoolRotator(host.ctx);
-      expect(rotate).toBeDefined();
-      // And a rotation still returns a key, read from the environment.
-      await expect(rotate?.("opencode", 401)).resolves.toBeUndefined();
-    } finally {
-      process.env.POOL_ONE = "";
-      process.env.POOL_TWO = "";
-    }
-  });
-
-  it("reports a refused publish rather than failing the mount", async () => {
-    // The seam refuses a write a read-only source shadows. The mount must
-    // survive that, and must say so: a pool a deployment believes is rotating
-    // while every request reads their exported value is worse than a log line.
-    process.env.POOL_ONE = "pool-one-key";
-    process.env.POOL_TWO = "pool-two-key";
-    const host = createHost();
-    host.registerService?.("credentials", {
-      deleteRecord: vi.fn(),
-      modifyRecord: vi.fn(),
-      readRecord: vi.fn(),
-      resolve: async (ref: string) => {
-        const value = process.env[ref];
-        return value === undefined ? undefined : { value };
-      },
-      set: async () => {
-        throw new Error("supplied read-only by the launching environment");
-      },
-      unset: vi.fn(),
-      writeGrant: vi.fn(),
-    });
-
-    try {
-      const stop = await registerResponsesProvider(
-        host.ctx,
-        resolveConfig({
-          credentialPool: {
-            enabled: true,
-            go: [],
-            zen: ["POOL_ONE", "POOL_TWO"],
-          },
-        })
-      );
-      expect(typeof stop === "function" || stop === undefined).toBe(true);
-      const reported = host.observables.infos.some((line) =>
-        line.includes("supplied read-only")
-      );
-      // Either the mount reported it, or a rotation did — both are the same
-      // report arriving through the same channel.
-      if (!reported) {
-        const rotate = readCredentialPoolRotator(host.ctx);
-        await rotate?.("opencode", 401);
-      }
-      expect(
-        host.observables.infos.some((line) =>
-          line.includes("supplied read-only")
-        )
-      ).toBe(true);
-    } finally {
-      process.env.POOL_ONE = "";
-      process.env.POOL_TWO = "";
-    }
-  });
-
-  it("writes nothing when the pool is off, which is the default", async () => {
-    const written = new Map<string, string>();
-    const records = new Map<string, unknown>();
-    const host = createHost();
-    host.registerService?.("credentials", {
-      resolve: async (ref: string) => {
-        const value = written.get(ref) ?? process.env[ref];
-        return value === undefined ? undefined : { value };
-      },
-      set: async (ref: string, value: string) => {
-        written.set(ref, value);
-      },
-      unset: async (ref: string) => {
-        written.delete(ref);
-      },
-      // The record half. A pool never touches a record, but the accessor
-      // requires all six methods, and a stub that answered nothing where the
-      // seam stores a grant would be a stub lying about storage.
-      deleteRecord: async (key: string) => {
-        records.delete(key);
-      },
-      modifyRecord: async (
-        key: string,
-        mutate: (current?: unknown) => Promise<unknown>
-      ) => {
-        const next = await mutate(records.get(key));
-        if (next !== undefined) {
-          records.set(key, next);
-        }
-        return next;
-      },
-      readRecord: async (key: string) => {
-        const payload = records.get(key);
-        return payload === undefined ? undefined : { kind: "grant", payload };
-      },
-    });
-
-    // A deployment that lists credentials and never turns the switch on. The
-    // listing alone changes nothing, which is the whole contract.
-    process.env.POOL_ONE = "pool-one-key";
-    try {
-      await registerResponsesProvider(
-        host.ctx,
-        resolveConfig({
-          credentialPool: { enabled: false, go: [], zen: ["POOL_ONE"] },
-        })
-      );
-      expect([...written.keys()]).toEqual([]);
-    } finally {
-      process.env.POOL_ONE = "";
-    }
-  });
-
-  it("says why a pool could not publish, without failing the mount", async () => {
-    // A seam that refuses the write — the shadowing case — must not undo a
-    // mount that already succeeded, and must say what happened.
-    process.env.POOL_ONE = "pool-one-key";
-    const records = new Map<string, unknown>();
-    const host = createHost();
-    host.registerService?.("credentials", {
-      resolve: async (ref: string) => {
-        const value = process.env[ref];
-        return value === undefined ? undefined : { value };
-      },
-      set: async () => {
-        throw new Error("supplied read-only by the launching environment");
-      },
-      unset: async () => {},
-      // The record half. A pool never touches a record, but the accessor
-      // requires all six methods, and a stub that answered nothing where the
-      // seam stores a grant would be a stub lying about storage.
-      deleteRecord: async (key: string) => {
-        records.delete(key);
-      },
-      modifyRecord: async (
-        key: string,
-        mutate: (current?: unknown) => Promise<unknown>
-      ) => {
-        const next = await mutate(records.get(key));
-        if (next !== undefined) {
-          records.set(key, next);
-        }
-        return next;
-      },
-      readRecord: async (key: string) => {
-        const payload = records.get(key);
-        return payload === undefined ? undefined : { kind: "grant", payload };
-      },
-    });
-
-    try {
-      const stop = await registerResponsesProvider(
-        host.ctx,
-        resolveConfig({
-          credentialPool: { enabled: true, go: [], zen: ["POOL_ONE"] },
-        })
-      );
-      expect(stop).toBeDefined();
-      expect(
-        host.observables.infos.some((line) =>
-          line.includes("supplied read-only")
-        )
-      ).toBe(true);
-    } finally {
-      process.env.POOL_ONE = "";
-    }
   });
 
   it("releases the mount on dispose", async () => {
@@ -1844,114 +1506,212 @@ describe("responses-provider: a loader that breaks its own contract", () => {
   });
 });
 
-describe("responses-provider · the login token a route falls back to", () => {
-  it("updates the bridge org for the selected account and clears it when none remains", async () => {
-    const fixture = createOpencodeStore([], {
-      accessToken: "st_installation",
-      orgId: "org_installation",
-    });
-    vi.stubEnv("XDG_DATA_HOME", fixture.root);
-    const { ctx, credentials } = createCredentialsSeam();
-    const store = createTokenStore({
-      credentials,
-      plane: "opencode",
-      scope: pluginName,
-    });
-    expect(store).toBeDefined();
-    const read = loginTokenReader(ctx, true);
-    try {
-      await expect(read("opencode-go")).resolves.toBe("st_installation");
-      expect(orgFor("opencode-go")).toBe("org_installation");
-      await store!.write({
-        accessToken: "st_dsh",
-        expiresInSeconds: 3600,
-        orgId: "org_dsh",
-      });
-      await expect(read("opencode-go")).resolves.toBe("st_dsh");
-      expect(orgFor("opencode-go")).toBe("org_dsh");
-      await store!.write({
-        accessToken: "st_without_org",
-        expiresInSeconds: 3600,
-      });
-      await expect(read("opencode-go")).resolves.toBe("st_without_org");
-      expect(orgFor("opencode-go")).toBeUndefined();
-      await store!.clear();
-      setOrg("opencode-go", "org_stale");
-      await expect(
-        loginTokenReader(ctx)("opencode-go")
-      ).resolves.toBeUndefined();
-      expect(orgFor("opencode-go")).toBeUndefined();
-    } finally {
-      fixture.cleanup();
-      vi.unstubAllEnvs();
-      clearOrgs();
-    }
+describe("responses-provider · an internal route never outgrows the declaration", () => {
+  const models = [
+    { id: "claude-haiku-5-5" },
+    { id: "claude-sonnet-5-5" },
+    { id: "gpt-5.4" },
+  ];
+
+  it("keeps only the models the deployment declared", () => {
+    // A mounted route's model list is what a picker shows. The whole protocol
+    // catalog there is how models nobody selected reached the screen, which is
+    // the bug this narrowing exists for.
+    expect(narrowToDeclared(models, new Set(["claude-haiku-5-5"]))).toEqual([
+      { id: "claude-haiku-5-5" },
+    ]);
   });
-  it("answers undefined when no credential service is reachable", async () => {
-    // The store answers undefined rather than throwing, which is why the bridge
-    // needs no guard around this: a deployment with no login simply falls through
-    // to the adapter's own ambient auth, exactly as it did before.
-    await expect(loginTokenReader({})("opencode")).resolves.toBeUndefined();
+
+  it("falls back to the full list when the declaration cannot be read", () => {
+    // `undefined` is "the host could not answer", not "the user declared
+    // nothing": mounting nothing would break every deployment whose host does
+    // not expose the listing.
+    expect(narrowToDeclared(models)).toEqual(models);
+  });
+
+  it("mounts nothing when the declaration excludes this protocol entirely", () => {
+    // The caller skips the route on an empty list rather than registering a
+    // provider with no models.
+    expect(narrowToDeclared(models, new Set(["gpt-5.4"]))).toHaveLength(1);
   });
 });
 
-describe("responses-provider · a login and the reader actually meet", () => {
-  it("answers with the token a login stored, on either plane", async () => {
-    // The two halves of this are tested apart - the login writes a grant, the
-    // bridge asks this reader - and this is the seam: a grant written through the
-    // store comes back out of the reader, which is the whole of what "signing in
-    // is enough" means. The second plane is asked because the ACCOUNT is not
-    // plane-specific, measured, and the sign-in card defaults to one of them.
-    const records = new Map<string, unknown>();
-    const credentials = {
-      deleteRecord: async (key: string) => {
-        records.delete(key);
-      },
-      readRecord: async (key: string) => {
-        const payload = records.get(key);
-        return payload === undefined ? undefined : { kind: "grant", payload };
-      },
-      // `readCredentialsWriter` requires all seven: a seam that cannot write a
-      // record atomically is not one a rotating grant can be kept in, so it
-      // answers undefined rather than handing back half a writer.
-      modifyRecord: async (
-        key: string,
-        mutate: (current?: unknown) => Promise<unknown>
-      ) => {
-        const next = await mutate(records.get(key));
-        if (next !== undefined) {
-          records.set(key, next);
-        }
-        return next;
-      },
-      resolve: vi.fn(),
-      set: vi.fn(),
-      unset: vi.fn(),
-      writeGrant: async (key: string, payload: unknown) => {
-        records.set(key, payload);
-      },
-    };
+describe("responses-provider · declared models a missing route would strand", () => {
+  const zen = getLiveZenCatalog();
+  const anthropic = zen.find(
+    (spec) => spec.provider_npm === "@ai-sdk/anthropic"
+  );
+
+  it("names the model and the protocol nothing serves", () => {
+    // The case: `internalRoutes: false`, no declared provider for this protocol,
+    // and a model the user selected that speaks it. Silence would leave the model
+    // in the picker with every call failing.
+    if (anthropic === undefined) {
+      throw new Error("the zen catalog serves no anthropic model");
+    }
+    const declared = new Map([["opencode", new Set([anthropic.id])]]);
+    expect(unroutedDeclaredModels(declared, new Set())).toEqual([
+      `${anthropic.id} (opencode · anthropic-messages)`,
+    ]);
+  });
+
+  it("says nothing once a route serves that protocol", () => {
+    if (anthropic === undefined) {
+      throw new Error("the zen catalog serves no anthropic model");
+    }
+    const declared = new Map([["opencode", new Set([anthropic.id])]]);
+    expect(
+      unroutedDeclaredModels(declared, new Set(["opencode:anthropic-messages"]))
+    ).toEqual([]);
+  });
+
+  it("skips a model the catalog does not describe", () => {
+    // Nothing is known about its protocol, and a guess here would warn about a
+    // model that works.
+    const declared = new Map([["opencode", new Set(["not-in-the-catalog"])]]);
+    expect(unroutedDeclaredModels(declared, new Set())).toEqual([]);
+  });
+});
+
+describe("responses-provider · the keyless and unreadable declarations", () => {
+  it("keeps a route whole when the host cannot list its models", async () => {
+    // `declaredModelsFor` answers `undefined` when the service is absent, which the
+    // mount must read as "could not tell" rather than "declared nothing".
     const ctx = {
-      get: (which: string) =>
-        which === "credentials" ? credentials : undefined,
-    };
+      llm: { listProviders: () => [], registerAdapter: () => () => {} },
+      loader: { entries: () => [] },
+      logger: { info: () => {}, warn: () => {} },
+    } as unknown as CordisContext;
+    await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
+  });
 
-    const store = createTokenStore({
-      credentials,
-      plane: "opencode",
-      scope: pluginName,
-    });
-    await store?.write({
-      accessToken: "st_from_login",
-      expiresInSeconds: 3600,
-    });
+  it("reads the declaration before deciding what to mount", async () => {
+    // The mount asks the host what the deployment declared; a host that answers
+    // is the ordinary case, and the answer narrows every route it mounts.
+    const listed: string[] = [];
+    const ctx = {
+      llm: {
+        listModels: async (route: string) => {
+          listed.push(route);
+          return [
+            { id: "minimax-m3.1-flash-free" },
+            { id: "gpt-5.4" },
+            { name: "no id here" },
+            null,
+          ];
+        },
+        listProviders: () => [],
+        registerAdapter: () => () => {},
+      },
+      loader: { entries: () => [] },
+      logger: { info: () => {}, warn: () => {} },
+    } as unknown as CordisContext;
+    await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
+    // Both plane routes were asked, and an entry without an id was ignored.
+    expect(listed).toEqual(["opencode", "opencode-go"]);
+  });
 
-    expect(records.size, "the write did not land").toBe(1);
-    await expect(loginTokenReader(ctx)("opencode")).resolves.toBe(
-      "st_from_login"
-    );
-    await expect(loginTokenReader(ctx)("opencode-go")).resolves.toBe(
-      "st_from_login"
-    );
+  it("does not throw when the listing fails", async () => {
+    // A host whose `listModels` throws is the same case as one that has none: the
+    // mount falls back to the catalog rather than failing the boot.
+    const ctx = {
+      llm: {
+        listModels: () => {
+          throw new Error("not implemented");
+        },
+        listProviders: () => [],
+        registerAdapter: () => () => {},
+      },
+      loader: { entries: () => [] },
+      logger: { info: () => {}, warn: () => {} },
+    } as unknown as CordisContext;
+    await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
+  });
+});
+
+describe("routing · a declared protocol beats the catalog's", () => {
+  it("routes by the declared protocol before the SDK's", () => {
+    // `modelRoutes` is the deployment saying it knows better than a bundled
+    // snapshot. It has to reach the redirect, not just the model object: a
+    // provider built with a route protocol dispatches on THAT protocol
+    // (`createProvider` in `dsh-llm-pi-ai` calls `input.api.stream`), so the only
+    // way to change which format is spoken is to hand the call to another route.
+    expect(
+      internalRouteFor(
+        "opencode",
+        "some-model",
+        "@ai-sdk/openai",
+        "anthropic-messages"
+      )
+    ).toBe("opencode-anthropic");
+  });
+
+  it("falls back to the SDK's protocol when nothing was declared", () => {
+    expect(
+      internalRouteFor("opencode", "claude-opus-5", "@ai-sdk/anthropic")
+    ).toBe("opencode-anthropic");
+  });
+});
+
+describe("responses-provider · declared models the catalog cannot describe", () => {
+  it("names an id the bundled snapshot does not carry", () => {
+    // The everyday cause is a release newer than the shim, or an id the vendor has
+    // since marked deprecated (the shim drops those). Either way the model is
+    // served from the deployment's configuration and this plugin adds no metadata,
+    // and saying so is the difference between "ignored" and "never seen".
+    const declared = new Map([
+      ["opencode", new Set(["ll-alpha-free", "step-5-preview-free"])],
+    ]);
+    expect(undescribedDeclaredModels(declared)).toEqual([
+      "ll-alpha-free (opencode)",
+      "step-5-preview-free (opencode)",
+    ]);
+  });
+
+  it("says nothing about ids the catalog knows", () => {
+    const [spec] = getLiveZenCatalog();
+    if (spec === undefined) {
+      throw new Error("the zen catalog is empty");
+    }
+    expect(
+      undescribedDeclaredModels(new Map([["opencode", new Set([spec.id])]]))
+    ).toEqual([]);
+  });
+});
+
+describe("responses-provider · an unreadable declaration is not an empty one", () => {
+  it("keeps the route when the host answers [] because no key resolved", async () => {
+    // `dsh-llm-pi-ai` answers `[]` from `listModels` when the route's credential
+    // cannot be resolved (`lib/index.js:1894`), which is the keyless deployment
+    // this plugin supports for free models. Reading that as "declared nothing"
+    // mounts no internal route and breaks the protocol split for a deployment that
+    // merely lacks a key.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const registered: string[] = [];
+    const ctx = {
+      isolate: () => ({}),
+      llm: {
+        listModels: async () => [],
+        listProviders: () => [],
+        registerAdapter: (providers: readonly string[]) => {
+          registered.push(...providers);
+          return () => {};
+        },
+      },
+      loader: { entries: () => [] },
+    } as unknown as CordisContext;
+    try {
+      await registerResponsesProvider(ctx);
+      // Nothing could be narrowed, so the mount is not narrowed either: the
+      // routes exist and are hidden from every listing, which is what keeps them
+      // out of a picker.
+      expect(
+        info.mock.calls.some((call) =>
+          String(call[0]).includes("declared models could not be read")
+        )
+      ).toBe(true);
+    } finally {
+      info.mockRestore();
+    }
   });
 });

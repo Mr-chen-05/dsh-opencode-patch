@@ -46,8 +46,16 @@ export const ZEN_KEY = "sk-mock-zen";
 /** The Go key every test stubs. */
 export const GO_KEY = "sk-mock-go";
 
-/** A session id in the format the gateway accepts (`ses_` + 12 hex + 14 base62). */
-export const MOCK_SESSION = "ses_0123456789abCDEFGHIJKLMNOP";
+/**
+ * A session id the gateway ACCEPTS: `ses_` + 12 hex + 14 base62, with the low
+ * twelve bits in the band `0xFC0..0xFFE`.
+ *
+ * The 12 hex digits are `~((ms << 12) + counter)` for a descending id, so a real
+ * one always lands in that band; `0xFFE` is what `counter = 1` produces. A
+ * syntactically valid id outside the band is refused with `403 FreeTierError` —
+ * measured — which is exactly what this fixture used to be.
+ */
+export const MOCK_SESSION = "ses_eb1e9e706ffeCDEFGHIJKLMNOP";
 
 /** The key a plane's requests should carry, per the stubs above. */
 export const keyFor = (plane: TestPlane): string =>
@@ -78,6 +86,37 @@ export const FAMILY_ROOTS: Readonly<
     opencode: "/zen/v1",
     "opencode-go": "/zen/go/v1",
   },
+};
+
+/**
+ * The root one (family, plane, protocol) lands on.
+ *
+ * **The inference family is not one root per plane.** Its anthropic and google
+ * protocols live at their own paths, declared per model by the vendor's
+ * `GET /console/api/config`; deriving them from the openai root is what sent
+ * those models to the wrong endpoint. The legacy family genuinely is one root.
+ *
+ * @param family - the endpoint family under test.
+ * @param plane - the gateway plane.
+ * @param protocol - the wire protocol.
+ * @returns the path root the request should carry.
+ */
+export const rootForProtocol = (
+  family: TestFamily,
+  plane: TestPlane,
+  protocol: string
+): string => {
+  if (family === "legacy") {
+    return FAMILY_ROOTS.legacy[plane];
+  }
+  const go = plane === "opencode-go";
+  if (protocol === "anthropic-messages") {
+    return go ? "/inference/go/anthropic/v1" : "/inference/anthropic/v1";
+  }
+  if (protocol === "google-generative-ai") {
+    return go ? "/inference/go/google/v1beta" : "/inference/google/v1beta";
+  }
+  return FAMILY_ROOTS.auto[plane];
 };
 
 /** The path suffix each protocol's SDK appends to its base. */

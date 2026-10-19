@@ -53,13 +53,6 @@ export const CONFIG_ONLY_FIELDS: readonly {
       "elsewhere and has no UI to belong to",
   },
   {
-    field: "credentialPool",
-    reason:
-      "several credentials and their rotation; a card for it comes with the " +
-      "logins that fill it, and until then the row is the honest place for a " +
-      "list of credential references nobody should type into a settings form",
-  },
-  {
     field: "debug",
     reason: "diagnostic JSONL logging, not a behaviour a user tunes in the UI",
   },
@@ -95,6 +88,28 @@ export const CONFIG_ONLY_FIELDS: readonly {
     reason:
       "ids withheld from every listing; the counterpart to the retention rule, " +
       "and a list of ids nobody should type into a settings form",
+  },
+  {
+    field: "maxContextWindow",
+    reason:
+      "context ceiling in tokens; an override for deployments tuning context limits",
+  },
+  {
+    field: "modelOverrides",
+    reason:
+      "per-model overrides for contextWindow, maxTokens, and metadata in YAML config",
+  },
+  {
+    field: "modelRoutes",
+    reason:
+      "per-model wire routing (api and baseURL); it overrides what the catalog " +
+      "computed, which is a deployment concern rather than a card control",
+  },
+  {
+    field: "internalRoutes",
+    reason:
+      "whether to mount the per-protocol routes; off is for a deployment that " +
+      "declares its own provider entries for those protocols",
   },
   {
     field: "usageBaseURL",
