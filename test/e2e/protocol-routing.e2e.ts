@@ -55,7 +55,9 @@ import { describe, expect, it } from "vitest";
 import {
   GOOGLE_INTERNAL_ROUTE,
   GOOGLE_SDK,
+  OPENCODE_GO_CATALOG,
   OPENCODE_PATCH_USER_AGENT,
+  OPENCODE_ZEN_CATALOG,
   PROTOCOL_FOR_SDK,
   findModelSpec,
   findModelSpecOn,
@@ -323,12 +325,49 @@ const redirectsOff = (model: string): boolean =>
   ) !== undefined;
 
 describe.skipIf(!LIVE)("live protocol routing", () => {
+  /**
+   * Pick a model from a candidate list by ASKING the gateway.
+   *
+   * Every id in this file was once a hard-coded constant, and each one has been
+   * deprecated upstream in turn — the case then failed on a vendor move that had
+   * nothing to do with routing. So the live cases choose their subjects at
+   * runtime: walk the candidates (a slice of the CATALOG, so the list itself
+   * follows the registry), return the first that produces an OBSERVABLE answer,
+   * and `undefined` when none does. A case that gets `undefined` skips — the
+   * honest reading of "the gateway left nothing to assert" — and the assertions
+   * below are about whichever model answered, so a deprecation moves the test
+   * instead of breaking it.
+   */
+  const pickModel = async (
+    candidates: readonly string[],
+    protocol: string,
+    key?: string,
+    base: string = ZEN_BASE
+  ): Promise<string | undefined> => {
+    for (const model of candidates) {
+      const answer = await probe(protocol, model, key, base);
+      if (!accessDisabled(answer) && answer.status !== 0) {
+        return model;
+      }
+    }
+    return undefined;
+  };
+
   it(
     "routes a free-tier model to the one endpoint that recognises it",
     async (context) => {
       // The vendor catalog no longer lists a free model on /responses, so the
       // free-tier routing case now asserts the COMPLETIONS side of the split.
-      const model = "beam-free";
+      // The subject is picked live from the free slice, in catalog order, so
+      // whichever free model is alive today is the one tested.
+      const candidates = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free).map(
+        (m) => m.id
+      );
+      const model = await pickModel(candidates, "openai-completions");
+      if (model === undefined) {
+        context.skip();
+        return;
+      }
       const expected = servedProtocolFor(model);
       expect(expected, `${model} no longer redirects`).toBe(
         "openai-completions"
@@ -390,8 +429,17 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
     async (context) => {
       // The plugin's original reason for existing. This model needs no credential
       // at all, so a 200 here proves the header restoration is ADDITIVE rather
-      // than a gate — the call succeeds with the whole set injected.
-      const model = "minimax-m3.1-flash-free";
+      // than a gate — the call succeeds with the whole set injected. The subject
+      // is picked live from the free slice; the first candidate that answers
+      // with a completion is the one asserted on.
+      const candidates = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free).map(
+        (m) => m.id
+      );
+      const model = await pickModel(candidates, "openai-completions");
+      if (model === undefined) {
+        context.skip();
+        return;
+      }
       const expected = servedProtocolFor(model);
       expect(expected, `${model} no longer redirects`).toBe(
         "openai-completions"
@@ -421,16 +469,23 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
   it(
     "serves a reachable paid model ONLY from the endpoint its SDK names",
     async (context) => {
-      // The assertion a keyless probe cannot make. `grok-4.7` names
-      // `@ai-sdk/openai`, so it belongs on `/responses` — and the gateway agrees
-      // in both directions, which is what makes this a routing test rather than
-      // a reachability test.
+      // The assertion a keyless probe cannot make: with a credential the
+      // discriminator is exact — 200 on the named endpoint,
+      // `400 ModelProtocolUnsupported` on the others. The subject is picked
+      // live from the Responses-family slice of the catalog.
       if (ZEN_KEY === undefined || ZEN_KEY.length === 0) {
         context.skip();
         return;
       }
 
-      const model = "grok-4.7";
+      const candidates = OPENCODE_ZEN_CATALOG.filter(
+        (m) => m.provider_npm === "@ai-sdk/openai" && !m.is_free
+      ).map((m) => m.id);
+      const model = await pickModel(candidates, "openai-responses", ZEN_KEY);
+      if (model === undefined) {
+        context.skip();
+        return;
+      }
       const expected = servedProtocolFor(model);
       expect(expected, `${model} no longer redirects`).toBe("openai-responses");
 
@@ -473,18 +528,30 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
   it(
     "serves a Zen model the Go plane would have mis-routed from completions",
     async (context) => {
-      // The regression this file was written to catch, pinned live. models.dev's
-      // `opencode-go` names `@ai-sdk/anthropic` for these while its `opencode`
-      // names the completions default, so a Go-first lookup sent a ZEN request to
-      // `/messages`. Measured: the gateway serves them on `/chat/completions` and
-      // answers `400 ModelProtocolUnsupported` on `/messages`.
+      // The regression this file was written to catch, pinned live. The GO
+      // plane names `@ai-sdk/anthropic` for models the ZEN plane serves on the
+      // completions default, so a Go-first lookup sent a ZEN request to
+      // `/messages`. The sample is chosen at runtime from the models where
+      // that disagreement still exists TODAY, so a vendor harmonising one id
+      // does not orphan the case.
       if (ZEN_KEY === undefined || ZEN_KEY.length === 0) {
         context.skip();
         return;
       }
 
+      const goById = new Map(
+        OPENCODE_GO_CATALOG.map((m) => [m.id, m] as const)
+      );
+      const candidates = OPENCODE_ZEN_CATALOG.filter(
+        (m) =>
+          !m.is_free &&
+          m.provider_npm === undefined &&
+          goById.get(m.id)?.provider_npm === "@ai-sdk/anthropic"
+      ).map((m) => m.id);
+
       let checked = 0;
-      for (const model of ["qwen3.8-max", "minimax-m3"]) {
+      let subject: string | undefined;
+      for (const model of candidates) {
         // The two planes really do disagree — otherwise this case proves nothing.
         expect(findModelSpec(model)?.provider_npm, `${model} Go plane`).toBe(
           "@ai-sdk/anthropic"
@@ -509,8 +576,12 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
           `${model} on completions: ${onCompletions.summary}`
         ).toBe(200);
         checked += 1;
+        subject = model;
+        break;
+      }
 
-        const onMessages = await probe("anthropic-messages", model, ZEN_KEY);
+      if (subject !== undefined) {
+        const onMessages = await probe("anthropic-messages", subject, ZEN_KEY);
         if (accessDisabled(onMessages)) {
           // Its sibling above guards this, and so does the google case below; this
           // one did not. Status 0 is the gateway not answering, and asserting 400 on
@@ -521,7 +592,7 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
         }
         expect(
           onMessages.status,
-          `${model} on messages: ${onMessages.summary} — if this is 200, the Go ` +
+          `${subject} on messages: ${onMessages.summary} — if this is 200, the Go ` +
             "plane's SDK is right for Zen too and the routing fix is wrong"
         ).toBe(400);
         expect(onMessages.summary).toContain("ModelProtocolUnsupported");
@@ -566,7 +637,20 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
       // rides x-goog-api-key. Measured: 200 with real SSE here, and 400
       // ModelProtocolUnsupported on the completions endpoint — the negative
       // control is what makes the positive result mean the path matters.
-      const model = "gemini-3.8-flash";
+      // The subject is picked live from the google-family slice, since the
+      // vendor rotates these ids too.
+      const candidates = OPENCODE_ZEN_CATALOG.filter(
+        (m) => m.provider_npm === GOOGLE_SDK && !m.is_free
+      ).map((m) => m.id);
+      const model = await pickModel(
+        candidates,
+        "google-generative-ai",
+        ZEN_KEY
+      );
+      if (model === undefined) {
+        context.skip();
+        return;
+      }
       expect(servedProtocolFor(model)).toBe("google-generative-ai");
       // And the routing agrees: this is the one protocol whose dispatch lands
       // on the route the plugin mounts itself.
@@ -607,16 +691,29 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
 
   it("probes a Go model on the GO base, where its own shapes are served", async (context) => {
     // The gap this closes: every case above talks to the Zen base, so the Go
-    // plane's 13 non-completions models were covered by unit tests only - and
+    // plane's non-completions models were covered by unit tests only - and
     // the unit tests read the very mapping they verify. This sends a real
     // request to the Go base with the Go credential, which is the only thing
-    // that can prove the plane is routed where it is served.
-    const model = "grok-4.7";
-    expect(servedProtocolForOn("go", model)).toBe("openai-responses");
+    // that can prove the plane is routed where it is served. The subject is
+    // picked live from the Go catalog's Responses-family slice.
+    const candidates = OPENCODE_GO_CATALOG.filter(
+      (m) => m.provider_npm === "@ai-sdk/openai"
+    ).map((m) => m.id);
     if (GO_KEY === undefined || GO_KEY.length === 0) {
       context.skip();
       return;
     }
+    const model = await pickModel(
+      candidates,
+      "openai-responses",
+      GO_KEY,
+      GO_BASE
+    );
+    if (model === undefined) {
+      context.skip();
+      return;
+    }
+    expect(servedProtocolForOn("go", model)).toBe("openai-responses");
     const parsed = await probe("openai-responses", model, GO_KEY, GO_BASE);
     if (accessDisabled(parsed)) {
       // The claim below is "any answer the gateway produced after reading the model
@@ -639,13 +736,26 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
     // One case per shape, not per plane: the Go plane serves two of them, and a
     // route that is only ever probed on Responses would let a broken Messages
     // route look covered. The auth convention differs between the two, which is
-    // exactly what a per-shape probe checks.
-    const model = "minimax-m3";
-    expect(servedProtocolForOn("go", model)).toBe("anthropic-messages");
+    // exactly what a per-shape probe checks. The subject is picked live from
+    // the Go catalog's Anthropic-family slice.
+    const candidates = OPENCODE_GO_CATALOG.filter(
+      (m) => m.provider_npm === "@ai-sdk/anthropic"
+    ).map((m) => m.id);
     if (GO_KEY === undefined || GO_KEY.length === 0) {
       context.skip();
       return;
     }
+    const model = await pickModel(
+      candidates,
+      "anthropic-messages",
+      GO_KEY,
+      GO_BASE
+    );
+    if (model === undefined) {
+      context.skip();
+      return;
+    }
+    expect(servedProtocolForOn("go", model)).toBe("anthropic-messages");
     const parsed = await probe("anthropic-messages", model, GO_KEY, GO_BASE);
     if (accessDisabled(parsed)) {
       // Same as its sibling: a non-answer satisfies `not.toBe(404)` without proving
@@ -658,45 +768,94 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
   });
 
   it("keeps every sampled model servable, so the cases above are not vacuous", () => {
-    for (const model of ["grok-4.7", "qwen3.8-max", "beam-free"]) {
-      const spec = findModelSpecOn("zen", model);
-      expect(spec, `${model} left the Zen catalog`).toBeDefined();
+    // The keyed cases pick from these slices at runtime, so the vacuousness
+    // check is about the SLICES, not about fixed ids: each must be non-empty
+    // and every member servable, or a case above would skip forever.
+    const slices: readonly [string, string[]][] = [
+      [
+        "zen free",
+        OPENCODE_ZEN_CATALOG.filter((m) => m.is_free).map((m) => m.id),
+      ],
+      [
+        "zen responses",
+        OPENCODE_ZEN_CATALOG.filter(
+          (m) => m.provider_npm === "@ai-sdk/openai" && !m.is_free
+        ).map((m) => m.id),
+      ],
+      [
+        "go responses",
+        OPENCODE_GO_CATALOG.filter(
+          (m) => m.provider_npm === "@ai-sdk/openai"
+        ).map((m) => m.id),
+      ],
+      [
+        "go anthropic",
+        OPENCODE_GO_CATALOG.filter(
+          (m) => m.provider_npm === "@ai-sdk/anthropic"
+        ).map((m) => m.id),
+      ],
+    ];
+    for (const [label, ids] of slices) {
       expect(
-        isServableSdk(spec?.provider_npm),
-        `${model} became unservable, so its case silently skips`
-      ).toBe(true);
+        ids.length,
+        `the ${label} slice is empty — its live case can only skip`
+      ).toBeGreaterThan(0);
+      for (const id of ids) {
+        const spec = findModelSpecOn(
+          id.includes("-go") || !findModelSpecOn("zen", id) ? "go" : "zen",
+          id
+        );
+        expect(spec, `${id} left the catalog`).toBeDefined();
+        expect(
+          isServableSdk(spec?.provider_npm),
+          `${id} became unservable, so its case silently skips`
+        ).toBe(true);
+      }
     }
   });
 
   it(
-    "keeps the free-tier model in the catalog, so its case is not vacuous",
+    "keeps the free tier reachable, so the unmetered case is not vacuous",
     async (context) => {
       // The free-tier case skips when the account has no usable free tier, which
       // is a legitimate outcome — but it must not become the permanent one. This
       // says which state it was in, so a reader of the run knows whether the case
-      // was VERIFIED or merely not applicable. A model removed from the catalog is
-      // a different failure and fails here rather than skipping quietly.
+      // was VERIFIED or merely not applicable. The slice itself is the subject:
+      // it is non-empty (checked above), so SOME free model is offered, and the
+      // case walks candidates until one answers — the vacuousness to rule out is
+      // "every free model the registry lists is dead at the gateway", which the
+      // probe script also watches.
       if (ZEN_KEY === undefined || ZEN_KEY.length === 0) {
         context.skip();
         return;
       }
-      const model = "minimax-m3.1-flash-free";
-      const spec = findModelSpecOn("zen", model);
-      expect(spec, `${model} left the Zen catalog`).toBeDefined();
-      expect(
-        isServableSdk(spec?.provider_npm),
-        `${model} became unservable, so its case silently skips`
-      ).toBe(true);
-
-      const response = await probe(servedProtocolFor(model) ?? "", model);
-      if (freeTierClosed(response)) {
-        // Reported rather than skipped: the account is what closed it.
+      const candidates = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free).map(
+        (m) => m.id
+      );
+      let answered: { model: string; status: number } | undefined;
+      for (const model of candidates) {
+        const response = await probe(
+          servedProtocolFor(model) ?? "openai-completions",
+          model
+        );
+        if (freeTierClosed(response)) {
+          continue;
+        }
+        answered = { model, status: response.status };
+        break;
+      }
+      if (answered === undefined) {
+        // Reported rather than skipped: the account (or the vendor) closed the
+        // whole free tier, and that is worth a line in the run's output.
         console.log(
-          `[e2e] ${model}: the free tier needs a session token this plugin does not hold (${response.status}) — see docs/opencode-1.19-api.md; the header-restoration case did not run`
+          `[e2e] every free candidate answered FreeTierError — the free tier needs a session token this plugin does not hold; see docs/opencode-1.19-api.md. The header-restoration case did not run.`
         );
         return;
       }
-      expect(response.status, `${model}: ${response.summary}`).toBe(200);
+      expect(
+        answered.status,
+        `${answered.model}: the free tier answered something other than a completion or a gate`
+      ).toBe(200);
     },
     FANOUT_BUDGET_MS
   );
