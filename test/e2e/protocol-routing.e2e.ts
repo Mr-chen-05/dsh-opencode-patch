@@ -18,7 +18,7 @@
  * | model class | its own endpoint | a wrong endpoint |
  * | --- | --- | --- |
  * | free-tier gated (`muse-spark-…-free`) | `403 FreeTierError` | `500 Internal server error` |
- * | unmetered (`space-bunny-free`) | `200`, a real completion | `401 ModelError: not supported for format …` |
+ * | unmetered (`minimax-m3.1-flash-free`) | `200`, a real completion | `401 ModelError: not supported for format …` |
  * | **paid** (`claude-*`, `gpt-*`) | `401 AuthError` | `401 AuthError` — **identical** |
  *
  * That last row is why the paid cases are keyed and skip without a secret: for a
@@ -244,7 +244,7 @@ const otherProtocols = (expected: string) =>
  *
  * Measured, one request each, on `step-5-preview-free` — which was the canonical
  * free-tier id when those runs were made and has since been retired, so the
- * cases below now sample `space-bunny-free`: the deployment's `oc_…` key answers
+ * cases below now sample `minimax-m3.1-flash-free`: the deployment's `oc_…` key answers
  * `403 FreeTierError` on both `…/zen/v1` and the new `…/inference/openai/v1`,
  * with and without `x-opencode-org-id`; the literal `public` answers the same;
  * and the real client — whose captured request carries an `st_…` session token —
@@ -326,9 +326,13 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
   it(
     "routes a free-tier model to the one endpoint that recognises it",
     async (context) => {
-      const model = "muse-spark-1.2-contributor-free";
+      // The vendor catalog no longer lists a free model on /responses, so the
+      // free-tier routing case now asserts the COMPLETIONS side of the split.
+      const model = "beam-free";
       const expected = servedProtocolFor(model);
-      expect(expected, `${model} no longer redirects`).toBe("openai-responses");
+      expect(expected, `${model} no longer redirects`).toBe(
+        "openai-completions"
+      );
 
       const right = await probe(expected ?? "", model);
       if (accessDisabled(right)) {
@@ -387,7 +391,7 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
       // The plugin's original reason for existing. This model needs no credential
       // at all, so a 200 here proves the header restoration is ADDITIVE rather
       // than a gate — the call succeeds with the whole set injected.
-      const model = "space-bunny-free";
+      const model = "minimax-m3.1-flash-free";
       const expected = servedProtocolFor(model);
       expect(expected, `${model} no longer redirects`).toBe(
         "openai-completions"
@@ -654,11 +658,7 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
   });
 
   it("keeps every sampled model servable, so the cases above are not vacuous", () => {
-    for (const model of [
-      "grok-4.7",
-      "qwen3.8-max",
-      "muse-spark-1.2-contributor-free",
-    ]) {
+    for (const model of ["grok-4.7", "qwen3.8-max", "beam-free"]) {
       const spec = findModelSpecOn("zen", model);
       expect(spec, `${model} left the Zen catalog`).toBeDefined();
       expect(
@@ -680,7 +680,7 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
         context.skip();
         return;
       }
-      const model = "space-bunny-free";
+      const model = "minimax-m3.1-flash-free";
       const spec = findModelSpecOn("zen", model);
       expect(spec, `${model} left the Zen catalog`).toBeDefined();
       expect(

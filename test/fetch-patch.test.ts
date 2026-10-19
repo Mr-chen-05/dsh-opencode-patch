@@ -119,7 +119,7 @@ describe("patchFetch", () => {
       await patched("https://opencode.ai/zen/v1/chat/completions", {
         body: JSON.stringify({
           messages: [],
-          model: "space-bunny-free",
+          model: "minimax-m3.1-flash-free",
         }),
         headers: {},
         method: "POST",
