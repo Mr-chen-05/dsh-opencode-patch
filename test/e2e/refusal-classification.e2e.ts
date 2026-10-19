@@ -41,32 +41,12 @@ import {
 const ENABLED = process.env.OPENCODE_E2E === "1";
 
 /**
- * `classifyPiAiError`'s decision for a message, copied from the installed
- * `@deepseek-ai/dsh-llm-pi-ai` bundle up to the branch a refusal body reaches.
- *
- * Order is the whole point: AUTH is tested FIRST, against the message text,
- * before any status or later branch is consulted — a body that names 401/403 is
- * read as an invalid key whatever it carries. The shipped function continues
- * into SERVER/TIMEOUT/TRANSPORT and `PI_AI_ERROR` below the branch a `(400)`
- * body takes; no message this file feeds the copy can reach those, so the copy
- * stops at the deciding branch, and the first case pins it to the source.
+ * The first case reads the INSTALLED `@deepseek-ai/dsh-llm-pi-ai` bundle and
+ * pins the branch order the contract below relies on: AUTH is tested FIRST,
+ * against the message text, before any status or later branch is consulted —
+ * so a pass-through 403 is labelled AUTH by design, with the gateway's own
+ * words under it.
  */
-const classify = (message: string): string => {
-  if (/\b(?:401|403)\b/u.test(message)) {
-    return "AUTH";
-  }
-  if (/\b429\b|rate.?limit/iu.test(message)) {
-    return "RATE_LIMIT";
-  }
-  if (/\b413\b/u.test(message)) {
-    return "INVALID_REQUEST";
-  }
-  if (/\b400\b|invalid.?request/iu.test(message)) {
-    return "INVALID_REQUEST";
-  }
-  return "OTHER";
-};
-
 /** The gateway's own bodies, as measured. */
 const BODY = {
   auth: JSON.stringify({
@@ -223,22 +203,22 @@ describe.skipIf(!ENABLED)("refusal classification over a real socket", () => {
   };
 
   /**
-   * What every rewritten refusal must be: a 400, a named refusal type, and
-   * text the classifier reads as a request problem. The classification is the
-   * contract — `AUTH` is the first branch, so `INVALID_REQUEST` implies the
-   * body carries no 401/403 token — and the `(400)` is the token that branch
-   * reads in its place.
+   * What every 403 must be: UNTOUCHED. `fix: pass 403 through untouched`
+   * (2026-10-18) removed the rewrite to 400 — the user asked for the gateway's
+   * own status and words back, and the classifier's AUTH reading of a 403 is
+   * the classifier's business, not a licence to alter what the gateway said.
+   * These cases were written against the rewrite and never reached CI after
+   * the policy flipped; they now assert the policy that replaced it, on the
+   * same measured bodies.
    */
-  const expectRewritten = (
+  const expectPassedThrough = (
     result: { payload: Refusal; response: Response },
     type: string,
     needle: string
   ): void => {
-    expect(result.response.status).toBe(400);
+    expect(result.response.status).toBe(403);
     expect(result.payload.error.type).toBe(type);
     expect(result.payload.error.message).toContain(needle);
-    expect(result.payload.error.message).toContain("(400)");
-    expect(classify(result.payload.error.message)).toBe("INVALID_REQUEST");
   };
 
   it("pins the oracle to the classifier the deployment runs", async () => {
@@ -261,51 +241,48 @@ describe.skipIf(!ENABLED)("refusal classification over a real socket", () => {
       invalidAt,
       "the 400 branch left the installed classifier"
     ).toBeGreaterThanOrEqual(0);
-    // Order IS the contract: AUTH runs first, so a body that names 401/403 can
-    // never reach the branch the rewrite needs it to take.
+    // Order IS the contract: AUTH runs first, so a 403 body is read as AUTH.
+    // That reading is accepted now — the pass-through means a free-tier refusal
+    // surfaces as AUTH carrying the gateway's own words, which is the honest
+    // answer to a request the gateway refused outside the credential.
     expect(authAt).toBeLessThan(invalidAt);
   });
 
-  it("restates a chunked free-tier refusal so it is not read as a bad key", async () => {
-    expectRewritten(
+  it("passes the chunked free-tier refusal through with the gateway's words", async () => {
+    // The body still crosses three reads, so this also proves that whatever
+    // assembles a streamed answer keeps the gateway's text intact.
+    expectPassedThrough(
       await refusal("/refusal/free-tier"),
-      "free_tier_restricted",
-      "FreeTierError"
+      "FreeTierError",
+      "free tier can only be used from within OpenCode"
     );
   });
 
   it("keeps the gateway's own words in an entitlement refusal", async () => {
-    expectRewritten(
+    expectPassedThrough(
       await refusal("/refusal/entitlement"),
-      "entitlement_restricted",
+      "server_error",
       "Model access is disabled"
     );
   });
 
-  it("scrubs a status token the gateway's own message carries", async () => {
+  it("keeps the status token the gateway's own message carries", async () => {
+    // Inverted from the rewrite era: the upstream NAMED 403, and the answer
+    // must still carry it — scrubbing the gateway's words was the old
+    // rewrite's doing, and the pass-through keeps them.
     const result = await refusal("/refusal/upstream-named");
-    expectRewritten(
+    expectPassedThrough(
       result,
-      "entitlement_restricted",
-      "upstream answered 4xx to the relay"
-    );
-    // The upstream named the code; the answer must not repeat it, or the
-    // classifier walks straight back into AUTH through the gateway's voice.
-    expect(result.payload.error.message).not.toContain("403");
-  });
-
-  it("restates the Cloudflare client-identity block", async () => {
-    expectRewritten(
-      await refusal("/refusal/waf"),
-      "client_identity_blocked",
-      "1010"
+      "relay_error",
+      "upstream answered 403 to the relay"
     );
   });
 
-  it("leaves a 403 it has no rewrite for exactly as it arrived", async () => {
-    const response = await call("/refusal/unrecognized");
+  it("passes the Cloudflare client-identity block through verbatim", async () => {
+    const response = await call("/refusal/waf");
     expect(response.status).toBe(403);
-    expect(await response.text()).toBe("Forbidden");
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    expect(await response.text()).toBe("error code: 1010");
   });
 
   it("leaves /usage's 403 alone, because the meter reads that status", async () => {
