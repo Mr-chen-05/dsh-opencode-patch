@@ -42,7 +42,7 @@ import { pathToFileURL } from "node:url";
 
 import { DEFAULT_USAGE_KEY_ENV, type ResolvedPluginConfig } from "./config.ts";
 import type { CordisContext } from "./cordis-context.ts";
-import { registerGoogleBridge } from "./google-bridge.ts";
+import { loadHostPi, registerGoogleBridge } from "./google-bridge.ts";
 import { isFunctionLike, isRecord } from "./guards.ts";
 import {
   type CatalogModelSpec,
@@ -881,34 +881,47 @@ export const registerResponsesProvider = async (
   // the Gemini models, which were the one protocol a declared route could
   // never name. Its withdrawal joins the disposer this function returns, and
   // every early exit below hands it back rather than leaking it.
-  const bridgeHandle = declared.has(GOOGLE_INTERNAL_ROUTE)
-    ? undefined
-    : registerGoogleBridge({
-        apiKeyRef: inheritedCredentialRef(ctx),
-        // And, last, the installation's own store - off unless the deployment
-        // opted in, which is what `config` carries here.
-        readOpencodeStore: config?.readOpencodeStore === true,
-        // The same endpoint family the internal routes below are mounted with,
-        // so a deployment cannot end up sending to two families at once.
-        endpoint: config?.endpoint,
-        ctx,
-        host: await loadPiAiAdapterHost(ctx),
-        // The bridge reads the RAW catalog, not the config-shaped profile:
-        // its pi models carry this catalog's cost, so pi's own usage
-        // accounting lands the right numbers without our meter's help.
-        // `registerAdapter` is a prototype method of the real `llm` service —
-        // handing the detached function over loses the service, and the
-        // registration then reads `this.ctx` off the box it arrived in and dies
-        // on the first boot that reaches this line at all. Bound to `llm`, the
-        // call lands exactly where the documented `ctx.llm.registerAdapter(…)`
-        // idiom puts it: on the service the plugin's context resolved.
-        llm: {
-          registerAdapter: llm.registerAdapter.bind(llm),
-        },
-        specs: planeSource("opencode", ctx).catalog.filter(
-          (spec) => spec.provider_npm === GOOGLE_SDK
-        ),
-      });
+  // The pi the HOST installed, which is the one the wrapper mounts — loaded once
+  // here rather than declared as a dependency, so a harness bump moves the wire
+  // implementation without a version skew in between (see `google-bridge.ts`).
+  const hostPi = await loadHostPi();
+  if (!declared.has(GOOGLE_INTERNAL_ROUTE) && hostPi === undefined) {
+    console.info(
+      "[dsh-opencode-patch] the Google bridge did not mount: the harness's " +
+        "@earendil-works/pi-ai could not be resolved from dsh-llm-pi-ai — " +
+        "the Gemini models will not be offered (every other route is unaffected)"
+    );
+  }
+  const bridgeHandle =
+    declared.has(GOOGLE_INTERNAL_ROUTE) || hostPi === undefined
+      ? undefined
+      : registerGoogleBridge({
+          apiKeyRef: inheritedCredentialRef(ctx),
+          // And, last, the installation's own store - off unless the deployment
+          // opted in, which is what `config` carries here.
+          readOpencodeStore: config?.readOpencodeStore === true,
+          // The same endpoint family the internal routes below are mounted with,
+          // so a deployment cannot end up sending to two families at once.
+          endpoint: config?.endpoint,
+          ctx,
+          host: await loadPiAiAdapterHost(ctx),
+          pi: hostPi,
+          // The bridge reads the RAW catalog, not the config-shaped profile:
+          // its pi models carry this catalog's cost, so pi's own usage
+          // accounting lands the right numbers without our meter's help.
+          // `registerAdapter` is a prototype method of the real `llm` service —
+          // handing the detached function over loses the service, and the
+          // registration then reads `this.ctx` off the box it arrived in and dies
+          // on the first boot that reaches this line at all. Bound to `llm`, the
+          // call lands exactly where the documented `ctx.llm.registerAdapter(…)`
+          // idiom puts it: on the service the plugin's context resolved.
+          llm: {
+            registerAdapter: llm.registerAdapter.bind(llm),
+          },
+          specs: planeSource("opencode", ctx).catalog.filter(
+            (spec) => spec.provider_npm === GOOGLE_SDK
+          ),
+        });
   if (bridgeHandle !== undefined) {
     ctx.logger?.info?.(
       "[dsh-opencode-patch] bridged the Gemini models to %s (own adapter)",

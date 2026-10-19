@@ -60,13 +60,14 @@
  */
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { CatalogModelSpec } from "./catalog-data.ts";
 import type { EndpointFamily } from "./config-values.ts";
 import { readCredentialsResolver } from "./cordis-context.ts";
 import { resolveOpencodeStoreKey } from "./go-discovery.ts";
+import { isRecord } from "./guards.ts";
 import { type Plane, piModelFor } from "./pi-provider.ts";
 import { GOOGLE_INTERNAL_ROUTE } from "./responses-routes.ts";
 
@@ -85,13 +86,27 @@ import { GOOGLE_INTERNAL_ROUTE } from "./responses-routes.ts";
  * @param id - the model id.
  * @returns the installed entry, or undefined when the catalog lacks it.
  */
+/**
+ * The slice of pi's Google provider the bridge calls: two stream entry points.
+ *
+ * Typed here rather than imported from pi's own declarations, because the
+ * package this repo compiles against is a devDependency at one version while
+ * the runtime copy is whatever the harness installed — the bridge only needs
+ * these two methods, and stating them locally is what keeps a harness bump a
+ * runtime decision instead of a type error.
+ */
+export interface PiGoogleApi {
+  stream: (model: never, context: never, options?: never) => unknown;
+  streamSimple: (model: never, context: never, options?: never) => unknown;
+}
+
 /** The wrapper whose own dependency tree names the pi the host installed. */
 const WRAPPER_PACKAGE = "@deepseek-ai/dsh-llm-pi-ai";
 
 /** The pi surface the bridge needs, read off whichever copy the host installed. */
 export interface PiRuntime {
   /** pi's Google wire implementation, as `googleProviderFor` consumes it. */
-  googleGenerativeAIApi: () => unknown;
+  googleGenerativeAIApi: () => PiGoogleApi;
   /** pi's own installed catalog, per provider id. */
   getBuiltinModels: (plane: string) => readonly { id: string }[];
   /** The version string of the copy that was loaded, for diagnostics. */
@@ -132,16 +147,21 @@ const installedPiRoot = (): string | undefined => {
   if (wrapperEntry === undefined) {
     return undefined;
   }
-  let dir = dirname(realpathSync(new URL(wrapperEntry).pathname));
+  let dir = path.dirname(realpathSync(new URL(wrapperEntry).pathname));
   // The entry is `<wrapper>/lib/index.js`; its `node_modules` walk starts at the
   // package root, which the hosting directory above it also covers, so walking
   // up from the entry's own directory reaches the same install either way.
   for (let depth = 0; depth < 8; depth += 1) {
-    const candidate = join(dir, "node_modules", "@earendil-works", "pi-ai");
-    if (existsSync(join(candidate, "package.json"))) {
+    const candidate = path.join(
+      dir,
+      "node_modules",
+      "@earendil-works",
+      "pi-ai"
+    );
+    if (existsSync(path.join(candidate, "package.json"))) {
       return candidate;
     }
-    const parent = dirname(dir);
+    const parent = path.dirname(dir);
     if (parent === dir) {
       break;
     }
@@ -168,27 +188,39 @@ export const loadHostPi = async (): Promise<PiRuntime | undefined> => {
     return undefined;
   }
   try {
-    const [googleApi, providersAll, manifest] = await Promise.all([
-      import(pathToFileURL(join(root, PI_GOOGLE_API)).href),
-      import(pathToFileURL(join(root, PI_PROVIDERS_ALL)).href),
-      readFileSync(join(root, "package.json"), "utf8"),
+    const manifest = readFileSync(path.join(root, "package.json"), "utf-8");
+    const [googleApi, providersAll] = await Promise.all([
+      import(pathToFileURL(path.join(root, PI_GOOGLE_API)).href),
+      import(pathToFileURL(path.join(root, PI_PROVIDERS_ALL)).href),
     ]);
-    const googleGenerativeAIApi: unknown = Reflect.get(
-      googleApi,
-      "googleGenerativeAIApi"
-    );
-    const getBuiltinModels: unknown = Reflect.get(providersAll, "getBuiltinModels");
+    // Read the two exports off the dynamically imported modules, and narrow
+    // before using either: a pi that has moved an export answers `undefined`
+    // here rather than throwing somewhere inside a request.
+    const googleApiModule: unknown = googleApi;
+    const providersModule: unknown = providersAll;
+    if (!isRecord(googleApiModule) || !isRecord(providersModule)) {
+      return undefined;
+    }
+    const { googleGenerativeAIApi } = googleApiModule;
+    const { getBuiltinModels } = providersModule;
     if (
       typeof googleGenerativeAIApi !== "function" ||
       typeof getBuiltinModels !== "function"
     ) {
       return undefined;
     }
-    const version = (JSON.parse(manifest) as { version?: string }).version ?? "";
+    const manifestData: unknown = JSON.parse(manifest);
+    const version =
+      isRecord(manifestData) && typeof manifestData.version === "string"
+        ? manifestData.version
+        : "";
     return {
+      // pi's own signatures, as this module consumes them. Narrowed at the
+      // boundary rather than asserted from `any`: the export check above is the
+      // runtime guard these casts stand in for.
       getBuiltinModels: getBuiltinModels as PiRuntime["getBuiltinModels"],
-      googleGenerativeAIApi:
-        googleGenerativeAIApi as PiRuntime["googleGenerativeAIApi"],
+      googleGenerativeAIApi: () =>
+        (googleGenerativeAIApi as () => unknown)() as PiGoogleApi,
       version,
     };
   } catch {
