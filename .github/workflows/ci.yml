@@ -66,13 +66,26 @@ jobs:
   # unit suite. Regenerating on a schedule turns the vendor's next change into a
   # diff to review instead of a bug to diagnose.
   #
-  # Skipped on pull_request: it reaches the public internet, and a fork's copy
-  # of the job would answer "stale" for everyone.
+  # WHAT THIS GATES, and what it deliberately does not. The failure it exists
+  # for is an OMISSION: someone changes the catalog and forgets to regenerate,
+  # so the wrong `provider_npm` ships. That is fixable before merging, so a
+  # PULL REQUEST fails on a stale shim.
+  #
+  # A push to main is a different question. `main` was reviewed with a current
+  # shim; the vendor may have rotated rows in the minutes since. The runtime
+  # already refreshes the catalog on its own (SWR, 1h TTL), so a shim a few
+  # hours behind only affects a cold start - it is not a regression the push
+  # introduced. Failing there turned upstream churn into a red main several
+  # times in one afternoon, which is how a signal gets ignored. So on main it
+  # REPORTS (a warning, and the nightly proposes the refresh) rather than
+  # failing.
+  #
+  # Fork PRs are skipped: the job reaches the public internet, and a fork's
+  # copy would answer "stale" for everyone.
   catalog:
     name: catalog freshness
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    if: github.event_name != 'pull_request'
     # Write access is needed by the nightly path alone, which proposes the
     # refresh as a pull request instead of failing. The gate steps never write.
     permissions:
@@ -86,40 +99,54 @@ jobs:
           node-version: 26
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: is src/catalog-data.ts still current?
-        if: github.event_name != 'schedule'
+      - name: is src/catalog-data.ts current? (pull requests)
+        if: github.event_name == 'pull_request'
         run: |
-          # Exits 1 on a stale shim and prints what would change.
+          # Exits 1 on a stale shim and prints what would change. A PR is where
+          # a forgotten regeneration is still fixable, so this one is a gate.
           pnpm run catalog:shim || {
             echo "::error::src/catalog-data.ts is out of date — run 'pnpm run catalog:shim -- --write' and commit the result."
             exit 1
           }
+      - name: report a stale catalog (pushes to main)
+        if: github.event_name == 'push'
+        run: |
+          # A warning, not a failure: main was reviewed with a current shim, and
+          # the vendor moving since then is not a regression this push caused.
+          # The nightly run proposes the refresh.
+          pnpm run catalog:shim \
+            || echo "::warning::src/catalog-data.ts is stale - the registry moved since this commit; the nightly refresh will propose it."
       # The Go plan's per-model dollar allowance, from OpenCode's own docs. It
       # moves when THEY move — the page says limits "may change as we learn from
       # early usage and feedback" — and a stale table shows a wrong dollar figure
       # that looks authoritative, which is worse than showing none.
-      - name: is src/go-limits-data.ts still current?
-        if: github.event_name != 'schedule'
+      - name: is src/go-limits-data.ts current? (pull requests)
+        if: github.event_name == 'pull_request'
         run: |
           pnpm run limits:shim || {
             echo "::error::src/go-limits-data.ts is out of date — run 'pnpm run limits:shim -- --write' and commit the result."
             exit 1
           }
+      - name: report a stale limits table (pushes to main)
+        if: github.event_name == 'push'
+        run: |
+          pnpm run limits:shim || echo "::warning::src/go-limits-data.ts is stale — the vendor's docs page moved since this commit.
 
       # The nightly run exists to NOTICE vendor drift, and drift is the normal
       # case - the sources move most days. Failing here meant a red run every
       # night, which trains everyone to ignore the signal. So the nightly path
-      # regenerates and proposes a pull request; the gates above stay for pushes
-      # to main, where a merge that forgot to regenerate must still fail.
+      # regenerates and proposes a pull request, and the refresh gates above
+      # run on pull requests (where a forgotten regeneration is still fixable)
+      # while a push to main only reports.
+      #
       # The User-Agent names the CLI version, and the vendor moves it every few
-      # days. On a push the tree must be current; on the nightly it only
-      # reports, because a vendor release is not a reason to go red at 04:37.
-      - name: the claimed CLI version is the published one
-        if: github.event_name != 'schedule'
+      # days - which is the same shape again: a vendor release is not a reason
+      # to go red, so this one warns everywhere except a pull request.
+      - name: the claimed CLI version is the published one (pull requests)
+        if: github.event_name == 'pull_request'
         run: pnpm run cli:version
-
-      - name: report a stale CLI version (nightly only)
-        if: github.event_name == 'schedule'
+      - name: report a stale CLI version (push and nightly)
+        if: github.event_name != 'pull_request'
         run: pnpm run cli:version || echo "::warning::the pinned opencode CLI version is not the published one"
 
       - name: propose the refresh (nightly only)
