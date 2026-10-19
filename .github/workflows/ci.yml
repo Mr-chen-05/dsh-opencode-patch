@@ -164,8 +164,13 @@ jobs:
         run: |
           pnpm run catalog:shim -- --write
           pnpm run limits:shim -- --write
+          # The generators emit compact JSON; the repository formats its
+          # sources. Without this the comparison below always sees a diff and
+          # every nightly run would open a pull request whose entire content is
+          # reformatting - the opposite of "open one when upstream moved".
+          pnpm exec vp fmt --write src/catalog-data.ts src/go-limits-data.ts
           if git diff --quiet -- src/catalog-data.ts src/go-limits-data.ts; then
-            echo "both generated files are current"
+            echo "both generated files are current - no upstream change, no pull request"
             exit 0
           fi
           git config user.name "github-actions[bot]"
