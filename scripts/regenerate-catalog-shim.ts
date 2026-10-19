@@ -20,9 +20,6 @@
  *
  * Without `--write` it only reports what would change, so it is safe to run in CI
  * or by hand to answer "is the shim stale?".
- *
- * `RETIRED_*_MODEL_IDS` is deliberately NOT regenerated: retirement is a judgement
- * about what OpenCode CLI still offers, not a fact models.dev carries.
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -33,7 +30,6 @@ import {
   OPENCODE_ZEN_CATALOG,
 } from "../src/catalog-data.ts";
 import {
-  isRetiredModel,
   type CatalogModelSpec,
   MODELS_DEV_TIMEOUT_MS,
   MODELS_OPENCODE_URL,
@@ -101,12 +97,11 @@ const literal = (spec: CatalogModelSpec): string => {
 const render = (specs: readonly CatalogModelSpec[]): string =>
   `[\n${specs.map((spec) => `${literal(spec)},`).join("\n")}\n]`;
 
-/** The models one provider contributes, retirement applied per provider. */
+/** The models one provider contributes. */
 const forProvider = (
   parsed: ReturnType<typeof parseModelsDevCatalog>,
   provider: "go" | "zen"
-): CatalogModelSpec[] =>
-  parsed[provider].filter((spec) => !isRetiredModel(provider, spec.id));
+): CatalogModelSpec[] => parsed[provider];
 
 /**
  * Replace one exported object literal, by its `export const NAME` anchor.

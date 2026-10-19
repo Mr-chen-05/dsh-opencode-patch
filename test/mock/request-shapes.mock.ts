@@ -292,17 +292,28 @@ describe("the request shape per configuration", () => {
     expect(request.headers.authorization).toBeUndefined();
   });
 
-  it("adds the core-tool schemas for a free-tier responses model", async () => {
+  it("adds the core-tool schemas for a free-tier completions model", async () => {
+    // The vendor's per-model protocol table no longer lists any free model on
+    // /responses (the last one was deprecated upstream), so the free fixture
+    // goes to /chat/completions — the endpoint the free tier is actually
+    // served on, and one the injector covers too.
     const response = await als.run(sessionTurn(), () =>
       post(
         patchedWith(resolveConfig()),
-        responsesUrl(),
-        responsesBody("muse-spark-1.2-contributor-free")
+        `${gateway.origin}/zen/v1/chat/completions`,
+        {
+          messages: [{ content: "hi", role: "user" }],
+          model: "beam-free",
+        }
       )
     );
     expect(response.status).toBe(200);
-    const body = recorded().body as { tools?: { name?: string }[] };
-    const names = (body.tools ?? []).map((tool) => tool.name);
+    const body = recorded().body as {
+      tools?: { name?: string; function?: { name?: string } }[];
+    };
+    const names = (body.tools ?? []).map(
+      (tool) => tool.function?.name ?? tool.name
+    );
     expect(names).toContain("read");
     expect(names).toContain("bash");
   });

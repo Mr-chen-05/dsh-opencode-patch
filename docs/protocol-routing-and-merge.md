@@ -8,11 +8,11 @@ OpenCode serves its models on **four different API shapes**, and which one a mod
 
 | API shape | Wire endpoint | Which models | Signal in the catalog |
 | :-- | :-- | :-- | :-- |
-| OpenAI **Chat Completions** | `POST /zen/v1/chat/completions` | **the default**: 29 of 86 | the model names **no** SDK |
-| OpenAI **Responses** | `POST /zen/v1/responses` | 31 of 86 | `@ai-sdk/openai` |
-| Anthropic **Messages** | `POST /zen/v1/messages` | 17 of 86 | `@ai-sdk/anthropic` |
-| Google **Generative AI** | `POST /zen/v1/models/<id>:streamGenerateContent` | 8 of 86 | `@ai-sdk/google` |
-| Mistral **Conversations** | `POST /zen/v1/chat/completions` | 1 of 86 | `@ai-sdk/mistral` |
+| OpenAI **Chat Completions** | `POST /zen/v1/chat/completions` | **the default**: 27 of 84 | the model names **no** SDK |
+| OpenAI **Responses** | `POST /zen/v1/responses` | 30 of 84 | `@ai-sdk/openai` |
+| Anthropic **Messages** | `POST /zen/v1/messages` | 18 of 84 | `@ai-sdk/anthropic` |
+| Google **Generative AI** | `POST /zen/v1/models/<id>:streamGenerateContent` | 8 of 84 | `@ai-sdk/google` |
+| Mistral **Conversations** | `POST /zen/v1/chat/completions` | 1 of 84 | `@ai-sdk/mistral` |
 
 Counts are the shipped catalog. They are asserted against this table by `catalog.test.ts`, because a count written into prose does not regenerate with the data it counts.
 
@@ -162,7 +162,7 @@ Four sources, in a fixed order, because they answer different questions:
 | Gateway `/models` | "what does **this account** actually have?" | per listing request |
 | `models-discovery.ts` | "what should `discoverModels` answer?" | per discovery call |
 
-**The merge is additive, and it never drops a row it cannot explain.** Adapter rows are preserved; canonical rows are appended when a model is missing; a row is omitted only when the provider-scoped retirement list names it, a fact rather than a guess. Display names and prices come from models.dev, because a gateway listing carries ids and little else.
+**The merge is additive, and it never drops a row it cannot explain.** Adapter rows are preserved; canonical rows are appended when a model is missing; a row is omitted only when the registry itself marks it `status: "deprecated"`, a fact rather than a guess. Display names and prices come from models.dev, because a gateway listing carries ids and little else.
 
 Two properties matter more than completeness:
 

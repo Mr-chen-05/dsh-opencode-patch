@@ -233,8 +233,8 @@ describe.skipIf(!ENABLED)(
       try {
         const turns = [
           { id: "glm-5.3-flash-free", route: "opencode" },
-          { id: "cat-jam-free", route: "opencode" },
-          { id: "cat-jam-free", route: "opencode-go" },
+          { id: "beam-free", route: "opencode" },
+          { id: "beam-free", route: "opencode-go" },
         ] as const;
         for (const { id, route } of turns) {
           const offered = offeredLevels(
@@ -281,7 +281,7 @@ describe.skipIf(!ENABLED)(
       try {
         const answer = modelOfOn(fixture.llm.adapters, "opencode")(
           "opencode",
-          "cat-jam-free"
+          "beam-free"
         );
         const record = answer as {
           reasoning?: unknown;
@@ -321,9 +321,9 @@ describe.skipIf(!ENABLED)(
         // rather than manufacture a new one.
         const answer = modelOfOn(fixture.llm.adapters, "opencode")(
           "opencode",
-          "cat-jam-free"
+          "beam-free"
         );
-        expect(answer).toBe(fixture.answers.get("cat-jam-free"));
+        expect(answer).toBe(fixture.answers.get("beam-free"));
       } finally {
         stop?.();
       }

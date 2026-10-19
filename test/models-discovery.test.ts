@@ -140,7 +140,7 @@ describe("mergeDiscoveredModels", () => {
           maxTokens: 2,
           name: "Adapter Model",
         },
-        { id: "muse-spark-1.2-contributor-free", name: "Muse Spark 1.2 Free" },
+        { id: "beam-free", name: "Beam Free" },
         { id: "", name: "Nameless" },
       ],
       "zen"
@@ -151,7 +151,7 @@ describe("mergeDiscoveredModels", () => {
     // — catalogued, servable, and NOT declared here — stays out.
     expect(merged.map((model) => model.id)).toEqual([
       "adapter-model",
-      "muse-spark-1.2-contributor-free",
+      "beam-free",
     ]);
     // The adapter’s own capacities win over the canonical catalog.
     expect(merged[0]).toEqual({
@@ -284,9 +284,7 @@ describe("decorateModelDiscovery", () => {
     );
     const original = vi
       .fn()
-      .mockResolvedValue([
-        { id: "muse-spark-1.2-contributor-free", name: "Muse Spark 1.2 Free" },
-      ]);
+      .mockResolvedValue([{ id: "beam-free", name: "Beam Free" }]);
     const ctx = {
       llm: { discoverModels: original },
     } as unknown as CordisContext;
@@ -312,7 +310,7 @@ describe("decorateModelDiscovery", () => {
     expect(ids).toHaveLength(1);
     // Kept, not removed: it answers on zen (measured `403 FreeTierError`), so it
     // is not retired. Removing it was hiding a working model.
-    expect(ids).toContain("muse-spark-1.2-contributor-free");
+    expect(ids).toContain("beam-free");
     stop?.();
     expect(ctx.llm?.discoverModels).toBe(original);
   });
@@ -507,9 +505,7 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
   it("offers Zen's free tier models normally", () => {
     expect(isServableModel("space-bunny-free", "opencode")).toBe(true);
     expect(isServableModel("space-bunny-free", "opencode")).toBe(true);
-    expect(isServableModel("muse-spark-1.2-contributor-free", "opencode")).toBe(
-      true
-    );
+    expect(isServableModel("beam-free", "opencode")).toBe(true);
   });
 
   it("still offers the Go plane's free models, because Go has no free tier", () => {
@@ -640,7 +636,7 @@ describe("models-discovery: the adapter behind a plane route", () => {
     // does not carry.
     const resolved = (await resolveOn(llm, "opencode-go")(
       "opencode-go",
-      "cat-jam-free"
+      "beam-free"
     )) as {
       id?: string;
       name?: string;
@@ -650,12 +646,12 @@ describe("models-discovery: the adapter behind a plane route", () => {
     };
 
     // Everything dispatch validates against, filled from our catalog.
-    expect(resolved.id).toBe("cat-jam-free");
+    expect(resolved.id).toBe("beam-free");
     expect(resolved.name).toBeTruthy();
     expect(resolved.context?.contextWindow).toBeGreaterThan(0);
     expect(resolved.defaultMaxTokens).toBeGreaterThan(0);
     // And the levels the composer offers - so a saved `high` resolves rather
-    // than being rejected. `cat-jam-free` declares five efforts, and the point is
+    // than being rejected. `beam-free` declares five efforts, and the point is
     // that they come from OUR catalog rather than from the empty adapter answer.
     expect(resolved.reasoning?.efforts.map((e) => e.id)).toEqual([
       "low",
@@ -789,7 +785,7 @@ describe("models-discovery: the adapter behind a plane route", () => {
 
     const resolved = (await resolveOn(llm as never, "opencode-go")(
       "opencode-go",
-      "cat-jam-free"
+      "beam-free"
     )) as { context?: { contextWindow?: number } };
 
     // It ran ON the instance - the counter lives on `this` - and the wrapper

@@ -32,7 +32,6 @@
 import {
   getLiveGoCatalog,
   getLiveZenCatalog,
-  isRetiredModel,
   MODELS_OPENCODE_URL,
   parseModelsDevCatalog,
 } from "../src/models-catalog.ts";
@@ -82,13 +81,11 @@ try {
     ["go", getLiveGoCatalog(), live.go],
   ] as const) {
     const shippedIds = new Set(shipped.map((m) => m.id));
-    // The generator writes the live set MINUS the retired ids, so the comparison
-    // has to apply the same filter. Comparing against the raw parse reports
-    // `claude-sonnet-4` as "missing" — it is active in the registry, gone at the
-    // gateway, and retired here, which is exactly why it is absent.
-    const freshIds = new Set(
-      fresh.filter((m) => !isRetiredModel(plane, m.id)).map((m) => m.id)
-    );
+    // The shim and the live parse come from the same parser over the same
+    // registry, so the comparison is raw against raw: a difference is
+    // staleness, full stop. What the registry should have flagged but did
+    // not is the probe's business, not this check's.
+    const freshIds = new Set(fresh.map((m) => m.id));
     const missing = [...freshIds].filter((id) => !shippedIds.has(id));
     const extra = [...shippedIds].filter((id) => !freshIds.has(id));
     if (missing.length > 0 || extra.length > 0) {
@@ -106,6 +103,13 @@ try {
 
 // ── 2. Dead rows ────────────────────────────────────────────────────────────
 console.log(`\n2. dead rows ${PROBE ? "" : "(skipped: pass --probe)"}`);
+// The probe reports the gateway's answer for each offered id; it cannot say
+// WHY an id stopped answering, and the cause is not this repository's to
+// fix — vendor retirement, upstream loss and account-scoped disablement all
+// look identical from an unauthenticated POST. Current known report:
+// `claude-sonnet-4` answers `400 "Model is unavailable."` while the registry
+// does not flag it. Read the FAIL as "go look", never as a hint to add a
+// local allowlist — a hand list is what this probe replaced.
 if (PROBE) {
   // The gateway answers distinctly enough to classify every id with one token:
   // 401/403 means the model is there and only the credential is missing, 400

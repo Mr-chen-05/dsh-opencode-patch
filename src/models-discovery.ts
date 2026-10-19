@@ -24,7 +24,6 @@ import {
   type CatalogPlane,
   findModelSpecOn,
   isDeprecatedModelOn,
-  isRetiredModel,
   sanitizeModalities,
   type CatalogProvider,
 } from "./models-catalog.ts";
@@ -145,9 +144,6 @@ export const mergeDiscoveredModels = (
   if (Array.isArray(discovered)) {
     for (const candidate of discovered) {
       if (!isDiscoveryCandidate(candidate) || seen.has(candidate.id)) {
-        continue;
-      }
-      if (isRetiredModel(provider, candidate.id)) {
         continue;
       }
       // Retired by the REGISTRY, not by our own list. The adapter's installed

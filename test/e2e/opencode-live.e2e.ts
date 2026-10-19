@@ -24,7 +24,6 @@ import {
   OPENCODE_ZEN_CATALOG,
   openCodeSessionIdFor,
   parseGoUsage,
-  RETIRED_ZEN_MODEL_IDS,
   SESSION_HEADER,
   type GoUsage,
 } from "../../src/index.ts";
@@ -155,12 +154,12 @@ describe.skipIf(!LIVE || !ZEN_KEY)(
         // plugin does. So they are offered, and this case asserts only that the
         // catalog reaches the listing — not what the gateway does with them.
         expect(ids.has("mimo-v2.6-flash-free")).toBe(true);
-        expect(ids.has("muse-spark-1.2-contributor-free")).toBe(true);
+        expect(ids.has("beam-free")).toBe(true);
 
-        // And nothing the provider retired is resurrected by the enrichment.
-        for (const retired of RETIRED_ZEN_MODEL_IDS) {
-          expect(ids.has(retired)).toBe(false);
-        }
+        // And a model the REGISTRY retired must not be resurrected by the
+        // enrichment, which would offer a row the gateway answers 410.
+        expect(ids.has("muse-spark-1.2-contributor-free")).toBe(false);
+        expect(ids.has("cat-jam-free")).toBe(false);
 
         // The listing covers the bundled catalog, so a failed refresh can only
         // ever be additive relative to the shim.

@@ -157,13 +157,13 @@ Zen's provider-level SDK is `@ai-sdk/openai-compatible`. models.dev names a **di
 
 | models.dev `provider.npm` | models | protocol | served from |
 | :-- | --: | :-- | :-- |
-| _(absent)_ | 29 | OpenAI Chat Completions | the route you configured |
-| `@ai-sdk/openai` | 31 | OpenAI Responses | `opencode-responses` |
-| `@ai-sdk/anthropic` | 17 | Anthropic Messages | `opencode-anthropic` |
+| _(absent)_ | 27 | OpenAI Chat Completions | the route you configured |
+| `@ai-sdk/openai` | 30 | OpenAI Responses | `opencode-responses` |
+| `@ai-sdk/anthropic` | 18 | Anthropic Messages | `opencode-anthropic` |
 | `@ai-sdk/google` | 8 | Google Generative AI | `opencode-google` |
 | `@ai-sdk/mistral` | 1 | _(a dialect this plugin does not serve)_ | **not offered** |
 
-Counts are the **86** active `opencode` models in `models.dev` as of 2026-10-17 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 86 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
+Counts are the **84** active `opencode` models in `models.opencode.ai` as of 2026-10-19 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 84 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
 
 The patch **keeps those two routes out of both the model picker and _Settings → Models_**. Three properties hold today, and one does not yet:
 
@@ -215,7 +215,7 @@ The model list is assembled from four sources, each answering a different questi
 | The gateway's `/models` | what **this account** actually has |
 | Discovery decoration | what `discoverModels` should answer |
 
-Merging is **additive**: adapter rows are kept, canonical rows are appended when a model is missing, and a row is dropped only when the provider-scoped retirement list names it — a fact, not a guess. Display names and prices come from models.dev, because a gateway listing carries ids and little else.
+Merging is **additive**: adapter rows are kept, canonical rows are appended when a model is missing, and a row is dropped only when the registry marks it `status: "deprecated"` — a fact, not a guess. Display names and prices come from models.dev, because a gateway listing carries ids and little else.
 
 Two things follow that you will notice in use. **Cold start is never empty** — the bundled shim answers before the first refresh, so the picker has models immediately. And **a model models.dev has no row for still appears**, with `—` where its rate would be: never a guess, and never the previous model's name.
 

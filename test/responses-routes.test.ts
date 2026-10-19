@@ -28,7 +28,7 @@ import {
 } from "../src/index.ts";
 import { isServableModel } from "../src/models-discovery.ts";
 
-const MUSE = "muse-spark-1.2-contributor-free";
+const MUSE = "muse-spark-1.2";
 
 describe("responses-routes: the SDK mapping", () => {
   it("redirects a model that names the OpenAI SDK", () => {
@@ -64,9 +64,9 @@ describe("responses-routes: the SDK mapping", () => {
     );
     // muse-* and gpt-* models automatically route to Responses API even when no SDK is passed
     expect(internalRouteFor("opencode", "gpt-5.4")).toBe(RESPONSES_ROUTE);
-    expect(
-      internalRouteFor("opencode", "muse-spark-1.2-contributor-free")
-    ).toBe(RESPONSES_ROUTE);
+    expect(internalRouteFor("opencode", "muse-spark-1.2")).toBe(
+      RESPONSES_ROUTE
+    );
     // A Go-only model (e.g. muse-spark-1.3-contributor) routes to the Go Responses route
     expect(internalRouteFor("opencode", "muse-spark-1.3-contributor")).toBe(
       GO_RESPONSES_ROUTE

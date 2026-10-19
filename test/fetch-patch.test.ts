@@ -459,7 +459,7 @@ describe("patchFetch", () => {
       freeModelMarker: "preview",
     });
     expect(toolNamesOf(parseJsonBody(customHit))).toEqual(["read", "bash"]);
-    const customCatalogFree = await runWith("muse-spark-1.2-contributor-free", {
+    const customCatalogFree = await runWith("beam-free", {
       freeModelMarker: "preview",
     });
     expect(toolNamesOf(parseJsonBody(customCatalogFree))).toEqual([
@@ -476,7 +476,7 @@ describe("patchFetch", () => {
     expect(toolNamesOf(parseJsonBody(allModels))).toEqual(["read", "bash"]);
 
     // A blank marker falls back to the default instead of disabling injection.
-    const blank = await runWith("muse-spark-1.2-contributor-free", {
+    const blank = await runWith("beam-free", {
       freeModelMarker: "",
     });
     expect(toolNamesOf(parseJsonBody(blank))).toEqual(["read", "bash"]);

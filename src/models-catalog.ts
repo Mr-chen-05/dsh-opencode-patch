@@ -5,9 +5,10 @@
  * or truncated list of model IDs without display names, context windows, max
  * tokens, or input modalities.
  *
- * This module maintains the canonical catalog (sourced from `models.dev/api.json`)
- * and intercepts `GET .../models` gateway responses to ensure that all 33+ models
- * are present, fully described, and available for DSH model discovery.
+ * This module maintains the canonical catalog (sourced from
+ * `models.opencode.ai/api.json`) and intercepts `GET .../models` gateway
+ * responses to ensure that all models are present, fully described, and
+ * available for DSH model discovery.
  *
  * @module dsh-opencode-patch/models-catalog
  */
@@ -15,7 +16,6 @@
 import {
   OPENCODE_GO_CATALOG,
   OPENCODE_ZEN_CATALOG,
-  RETIRED_ZEN_MODEL_IDS,
   type CatalogModelSpec,
   type ReasoningOptionSpec,
 } from "./catalog-data.ts";
@@ -29,17 +29,10 @@ import type { ModelCostRate } from "./session-cost.ts";
 export {
   OPENCODE_GO_CATALOG,
   OPENCODE_ZEN_CATALOG,
-  RETIRED_ZEN_MODEL_IDS,
   type CatalogModelSpec,
 } from "./catalog-data.ts";
 
 export type CatalogProvider = "go" | "zen";
-
-/** Whether OpenCode CLI no longer offers this model ID on this provider. */
-export const isRetiredModel = (
-  provider: CatalogProvider,
-  id: string
-): boolean => provider === "zen" && RETIRED_ZEN_MODEL_IDS.has(id);
 
 /** Canonical OpenCode model registry URL. */
 export const MODELS_OPENCODE_URL = "https://models.opencode.ai/api.json";
@@ -78,41 +71,6 @@ export const CATALOG_REVALIDATION_TTL_MS = 60 * 60 * 1000;
  * describes the model. Matches the shim's own defaults, so a model that reaches
  * the picker before either source knows it is still fully described.
  */
-/**
- * Model ids kept in the catalog even though `models.dev` marks them deprecated.
- *
- * The registry's `deprecated` flag is a statement about the vendor's catalogue,
- * not about the gateway. They disagree in measured cases, and the disagreement is
- * invisible from here: `step-5-preview-free` has carried the flag on both planes
- * while still answering requests, which is how the session this was written in
- * was running on it. Retaining an id keeps a model that works; dropping it on the
- * flag alone removes one.
- *
- * The rule is "until it stops answering", not "until the flag clears" - a probe
- * is the only thing that can tell those apart, and `docs/credentials.md` records
- * the measurement that put the first entry here. A pin with no date is a pin
- * nobody can age out, so each carries one.
- */
-const RETAINED_MODEL_IDS: ReadonlySet<string> = new Set([
-  // Measured 2026-10-17 by POSTing one token to `/zen/v1/chat/completions` per
-  // id and reading the answer: `400 "Model is unavailable"` means gone, and
-  // `401`/`403` means the model is there and only the credential is missing.
-  // That is the "until it stops ANSWERING" probe this comment has always asked
-  // for, and it overturned every previous entry:
-  //
-  //   exo-free                        403  -> retained
-  //   cat-jam-free                    403  -> retained
-  //   muse-spark-1.2-contributor-free 403  -> retained
-  //   step-5-preview-free             400  -> REMOVED, it no longer answers
-  //
-  // The `deprecated` flag is not a substitute for this: 36 of the 43 deprecated
-  // zen ids answered `400` and are genuinely gone, 4 answered `410 Gone`, and 3
-  // still answer — so the flag is right most of the time and wrong exactly where
-  // it costs a working model.
-  "cat-jam-free",
-  "exo-free",
-  "muse-spark-1.2-contributor-free",
-]);
 
 const FALLBACK_CONTEXT_WINDOW = 1_000_000;
 
@@ -136,16 +94,10 @@ const FALLBACK_MAX_OUTPUT_TOKENS = 131_072;
 export const MODELS_DEV_TIMEOUT_MS = 30_000;
 
 let activeGoCatalog = new Map<string, CatalogModelSpec>(
-  OPENCODE_GO_CATALOG.filter((m) => !isRetiredModel("go", m.id)).map((m) => [
-    m.id,
-    m,
-  ])
+  OPENCODE_GO_CATALOG.map((m) => [m.id, m])
 );
 let activeZenCatalog = new Map<string, CatalogModelSpec>(
-  OPENCODE_ZEN_CATALOG.filter((m) => !isRetiredModel("zen", m.id)).map((m) => [
-    m.id,
-    m,
-  ])
+  OPENCODE_ZEN_CATALOG.map((m) => [m.id, m])
 );
 /**
  * Ids the most recent parse saw as `status: "deprecated"`, per plane.
@@ -275,24 +227,22 @@ const extractSpecs = (
     // it: merging a deprecated entry here would put a row the gateway no longer
     // serves back into the model picker on the next successful revalidation.
     //
-    // EXCEPT the retained ones. `models.dev` marks a model deprecated well
-    // before the gateway stops serving it, and the two sources disagree in
-    // measured cases: `step-5-preview-free` has been `deprecated` in the
-    // registry while still answering on both planes - the session this was
-    // written in ran on it. Dropping it on the registry's word alone removes a
-    // working model, which is the same failure as offering a broken one, and
-    // there is no way to tell the two apart from here.
-    //
-    // A retained id is kept until it stops ANSWERING, not until a registry flag
-    // says so, and each one carries the date it was pinned so a reader can see
-    // how long the disagreement has stood.
-    if (rawModel.status === "deprecated" && !RETAINED_MODEL_IDS.has(id)) {
+    // The registry's `status: "deprecated"` is the ONLY source of retirement —
+    // there is no hand-maintained list beside it. It was tried, and it failed in
+    // the direction that matters: ids the gateway had deprecated stayed offered
+    // because the registry lagged the gateway, while ids the registry flagged
+    // too eagerly were kept on a hand list and went stale there as well. The
+    // flag is also provider-scoped, which the hand list had to encode manually
+    // (`muse-spark-1.2-contributor` is retired on zen by absence, served on go).
+    // A row that is wrong anyway has a tripwire: `scripts/verify-catalog.ts
+    // --probe` POSTs one token per id and fails on any offered model the
+    // gateway no longer answers.
+    if (rawModel.status === "deprecated") {
       // Recorded, not merely dropped. A model the registry has retired must not
       // come back through the ADAPTER's own discovery: `mergeDiscoveredModels`
       // merges adapter rows first, and pi's installed snapshot still lists ids
-      // the live catalog has retired (measured: 5 of them, and 6 live-active
-      // ids it lacks). Without this set the merge re-adds every one, which is a
-      // picker led by models the vendor has retired.
+      // the live catalog has retired. Without this set the merge re-adds every
+      // one, which is a picker led by models the vendor has retired.
       deprecated?.add(id);
       continue;
     }
@@ -521,9 +471,6 @@ export const refreshCatalog = (
           for (const model of parsed.zen) {
             nextZen.set(model.id, model);
           }
-          for (const retiredId of RETIRED_ZEN_MODEL_IDS) {
-            nextZen.delete(retiredId);
-          }
           activeZenCatalog = nextZen;
         }
         if (parsed.go.length > 0 || parsed.zen.length > 0) {
@@ -694,7 +641,7 @@ export const enrichModelsResponse = async (
   }
   for (const item of existingData) {
     const id = typeof item.id === "string" ? item.id : "";
-    if (id.length === 0 || isRetiredModel(isGo ? "go" : "zen", id)) {
+    if (id.length === 0) {
       continue;
     }
     const spec = catalogById.get(id);

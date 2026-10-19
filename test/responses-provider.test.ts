@@ -48,7 +48,7 @@ import {
   reasoningEffortsFor,
 } from "../src/responses-provider.ts";
 
-const MUSE = "muse-spark-1.2-contributor-free";
+const MUSE = "muse-spark-1.2";
 
 /** The package name the loader entry is matched on. */
 const PI_AI = "@deepseek-ai/dsh-llm-pi-ai";

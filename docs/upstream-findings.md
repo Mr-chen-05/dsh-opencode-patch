@@ -405,7 +405,7 @@ pnpm run catalog:verify:probe  # adds a live probe of every offered model
 
 It checks, and exits non-zero on any failure:
 
-1. **Shim freshness** — the bundled `catalog-data.ts` equals the live registry minus the retired ids (the generator's own rule; comparing against the raw parse reports `claude-sonnet-4` as missing, because it is active in the registry and retired here).
+1. **Shim freshness** — the bundled `catalog-data.ts` equals the live registry exactly (both come from the same parser over the same payload). What the registry should have flagged but did not is the probe's business, not this check's.
 2. **Dead rows** (`--probe`) — no offered model answers `400 Model is unavailable` or `410 ModelDeprecated`.
 3. **The picker's join** — every servable model reaches the parent route's list.
 4. **Routing** — every servable model resolves to a route this plugin mounts.
