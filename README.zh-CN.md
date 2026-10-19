@@ -412,16 +412,26 @@ Zen 路线上不出现任何 Go 的数字：根本不画圆环（没有可量的
 
 ## 📜 兼容性与验证
 
-**已在 DeepSeek Harness 0.2.1-alpha.5（Node 24+）上验证**
+**已在 DeepSeek Harness `0.2.1` 上验证 —— `alpha` 与 `rc` 两个通道（Node 24+）**
+
+Harness 按 `alpha` 与 `rc` 两个**通道**发布，它们是平行的发布线而非版本先后：semver 中 `0.2.1-rc.2` 排序在 `0.2.1-alpha.5` **之上**。两个通道的最新版本都是 **`0.2.1`**，本插件针对这条线——对两个通道中每一个已发布的 `0.2.1` 构建都做过验证，`@deepseek-ai/dsh-typert-protocol` 的 peer 范围正是这么写的：
+
+```
+>=0.2.1-alpha.1 <0.2.2
+```
+
+一个范围就覆盖了两个通道的整条线：下界 `alpha.1` 排序低于同线的所有 `rc`，因此无需单独枚举 rc。反之，只写 `<0.2.2` **不行**——除非同一 `major.minor.patch` 的某个比较符带有预发布号，semver 会把预发布版本排除在外，这正是"按一个通道写的范围会悄悄排除另一个通道"的原因。
 
 | 层面 | 目标 |
 | :-- | :-- |
+| **Harness 版本线** | **`0.2.1`**，`alpha` 与 `rc` 通道均可（peer：`>=0.2.1-alpha.1 <0.2.2`） |
 | **插件包** | [`dsh-opencode-patch`](https://www.npmjs.com/package/dsh-opencode-patch) |
 | **宿主 profile** | DSH Web profile（`patchReload: live`） |
 | **声明的路由** | `opencode`、`opencode-go`、`opencode-responses`、`opencode-anthropic` |
 | **网关** | `opencode.ai/zen/v1`（`/responses`、`/chat/completions`、`/messages`、`:streamGenerateContent`）、`zen/go/v1`（`/chat/completions`） |
-| **支持的模型** | `claude-sonnet-4-5`、`gpt-5.4`、`gemini-3.8-flash`、`deepseek-v4.1-flash`、`muse-spark-1.3-contributor-free`、`qwen3.8-flash` |
-| **验证关卡** | `vp check` 干净、**266** 个确定性测试全绿、完整 schema 校验、消费者安装 + 加载（[`scripts/check.ts`](./scripts/check.ts)） |
+| **模型目录** | 由 `models.opencode.ai/api.json` 生成；下线判定直接跟随目录自身的 `status: "deprecated"` 标记，不维护任何手工 id 列表 |
+| **上游 pi** | **不随包携带。** 桥接在运行时加载 harness 已安装的那份 `@earendil-works/pi-ai`，因此 harness 升级不会与本插件锁定的副本产生版本错位 |
+| **验证关卡** | `vp check` 干净、**961** 个确定性测试全绿、完整 schema 校验、消费者安装 + 加载（[`scripts/check.ts`](./scripts/check.ts)） |
 
 ---
 
