@@ -6,6 +6,14 @@ This project is an evolution of [**`nobu121/dsh-opencode-session`**](https://git
 
 ---
 
+## [1.2.2](https://github.com/viztor/dsh-opencode-patch/compare/v1.2.1...v1.2.2) (2026-10-19)
+
+
+### Fixes
+
+* **deps:** publish the harness packages on the host's alpha channel ([b7b24d3](https://github.com/viztor/dsh-opencode-patch/commit/b7b24d36629aace61ef5679f29201c9ff2362222))
+* **deps:** publish the harness packages on the host's alpha channel ([aa215d4](https://github.com/viztor/dsh-opencode-patch/commit/aa215d43c26f455c6116892382773d23a351529d))
+
 ## [1.2.1](https://github.com/viztor/dsh-opencode-patch/compare/v1.2.0...v1.2.1) (2026-10-19)
 
 
