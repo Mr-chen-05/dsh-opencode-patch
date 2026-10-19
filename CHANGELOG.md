@@ -6,6 +6,15 @@ This project is an evolution of [**`nobu121/dsh-opencode-session`**](https://git
 
 ---
 
+## [1.2.1](https://github.com/viztor/dsh-opencode-patch/compare/v1.2.0...v1.2.1) (2026-10-19)
+
+
+### Fixes
+
+* **bridge:** load the harness's pi at runtime instead of pinning our own ([d8a7cd6](https://github.com/viztor/dsh-opencode-patch/commit/d8a7cd612b53b5ea02f1f8628052f9bf976120b1))
+* **bridge:** load the harness's pi at runtime instead of pinning our own ([ad96356](https://github.com/viztor/dsh-opencode-patch/commit/ad963560ca543477096eaeb3124957194c190ade))
+* **bridge:** resolve async API key lookup ([f17bff5](https://github.com/viztor/dsh-opencode-patch/commit/f17bff536b2368ca89642acc7e2825e1e43d61f4))
+
 ## [1.2.0](https://github.com/viztor/dsh-opencode-patch/compare/v1.1.1...v1.2.0) (2026-10-19)
 
 
