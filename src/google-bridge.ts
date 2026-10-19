@@ -26,14 +26,29 @@
  * (`PiAiAdapter`, reached through the loader), and the wire protocol is pi's
  * own implementation, so nothing about the request shape is reinvented here.
  *
- * The one runtime pi import in this entire plugin lives below, and it is the
- * smallest thing that could serve the purpose: the protocol implementation
- * itself. Everything else this module hands the adapter is a plain object —
- * measured, pi reads fields and never checks identity — so a pi version change
- * can alter what the protocol emits, but not whether these objects interoperate.
- * `@earendil-works/pi-ai` is a pinned runtime dependency for exactly this
- * import, at the version the harness line installs, and `neverBundle` keeps
- * the packer from shipping a second pi beside the one the wrapper loads.
+ * The one runtime pi import in this entire plugin is resolved HERE, at runtime,
+ * and deliberately not declared as a dependency.
+ *
+ * **Why not a dependency.** The harness wrapper (`dsh-llm-pi-ai`) already
+ * depends on `@earendil-works/pi-ai` with a RANGE (`^1.1.0`), so the host
+ * installs exactly the pi its own release was tested against — 1.3.0 for
+ * `0.2.1-alpha.5`, whatever the next harness line moves it to. Declaring the
+ * same package as an exact dependency here puts a SECOND pi in the tree and
+ * turns every harness bump into a version-skew bug: the worst measured shape is
+ * a degraded Google route whose error names the model rather than the version.
+ *
+ * So the rule is the user's own: *use whatever the harness provides*. The
+ * lookup below asks the harness which pi that is, from the wrapper's own
+ * location (its `package.json` declares the range; node's lookup from there
+ * finds the installed copy), so the bridge always wires the same implementation
+ * the wrapper mounts — one instance, one version, no pin to chase.
+ *
+ * The plugin's own copy stays in `devDependencies`, for the unit tests and for
+ * this repo's own development, and is never what a deployment loads.
+ *
+ * pi's `exports` map declares `types` and `import` only — no `require` — so this
+ * resolves by walking node's own pnpm/node_modules layout rather than with
+ * `createRequire`, which would only ever see the `require` condition and miss.
  *
  * The same construction would serve `@ai-sdk/mistral`: pi implements
  * `mistral-conversations`, and a bridge on this pattern is one lazy import
@@ -44,8 +59,9 @@
  * @module dsh-opencode-patch/google-bridge
  */
 
-import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy";
-import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import type { CatalogModelSpec } from "./catalog-data.ts";
 import type { EndpointFamily } from "./config-values.ts";
@@ -69,12 +85,116 @@ import { GOOGLE_INTERNAL_ROUTE } from "./responses-routes.ts";
  * @param id - the model id.
  * @returns the installed entry, or undefined when the catalog lacks it.
  */
-const installedEntryFor = (plane: Plane, id: string): object | undefined =>
-  // The plane's whole installed catalog, searched for the id, rather than a
-  // lookup by literal-typed key: the ids looked up here come from our own
-  // catalog, which is ahead of the installed one, and half of them are not in
-  // it at all. A miss is simply no entry to inherit.
-  getBuiltinModels(plane).find((model) => model.id === id);
+/** The wrapper whose own dependency tree names the pi the host installed. */
+const WRAPPER_PACKAGE = "@deepseek-ai/dsh-llm-pi-ai";
+
+/** The pi surface the bridge needs, read off whichever copy the host installed. */
+export interface PiRuntime {
+  /** pi's Google wire implementation, as `googleProviderFor` consumes it. */
+  googleGenerativeAIApi: () => unknown;
+  /** pi's own installed catalog, per provider id. */
+  getBuiltinModels: (plane: string) => readonly { id: string }[];
+  /** The version string of the copy that was loaded, for diagnostics. */
+  version: string;
+}
+
+/** The two module paths the bridge needs, relative to a pi package root. */
+const PI_GOOGLE_API = "dist/api/google-generative-ai.lazy.js";
+const PI_PROVIDERS_ALL = "dist/providers/all.js";
+
+/**
+ * Where the installed pi lives, found by walking node's lookup from the
+ * WRAPPER's own directory.
+ *
+ * The wrapper declares pi as a dependency, so the copy node would hand IT is
+ * the copy every other consumer in that tree gets — which is the whole point.
+ * The walk is explicit because pnpm's layout is not a plain `node_modules`
+ * beside the package: the wrapper's dependencies live in the `.pnpm` hosting
+ * directory above it (or in a hoisted store beside it), and under a `link:` or
+ * `file:` install they live somewhere else again. Walking the parent chain and
+ * testing for the package is the one rule that covers all of them without
+ * encoding a package-manager layout.
+ *
+ * @returns the pi package ROOT, or `undefined` when the wrapper cannot be
+ *   located or carries no pi.
+ */
+const installedPiRoot = (): string | undefined => {
+  // `import.meta.resolve` honours the wrapper's `import`/`default` conditions,
+  // which is what an ESM-only package declares. It is resolved from THIS
+  // module's own location, so the answer is the wrapper this plugin's tree
+  // installed — the one the host loader mounts.
+  let wrapperEntry: string | undefined;
+  try {
+    wrapperEntry = import.meta.resolve(WRAPPER_PACKAGE);
+  } catch {
+    wrapperEntry = undefined;
+  }
+  if (wrapperEntry === undefined) {
+    return undefined;
+  }
+  let dir = dirname(realpathSync(new URL(wrapperEntry).pathname));
+  // The entry is `<wrapper>/lib/index.js`; its `node_modules` walk starts at the
+  // package root, which the hosting directory above it also covers, so walking
+  // up from the entry's own directory reaches the same install either way.
+  for (let depth = 0; depth < 8; depth += 1) {
+    const candidate = join(dir, "node_modules", "@earendil-works", "pi-ai");
+    if (existsSync(join(candidate, "package.json"))) {
+      return candidate;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) {
+      break;
+    }
+    dir = parent;
+  }
+  return undefined;
+};
+
+/**
+ * The pi the HOST installed, loaded once.
+ *
+ * Everything the bridge needs from pi comes through this record, so a harness
+ * that bumps pi changes the wire implementation the route speaks and nothing
+ * else about the bridge: the adapter, the profile and the models are this
+ * plugin's own objects, and pi reads fields off them rather than checking
+ * identity.
+ *
+ * @returns the runtime, or `undefined` when the host's pi is not reachable —
+ *   in which case the bridge simply does not mount, and says so on the console.
+ */
+export const loadHostPi = async (): Promise<PiRuntime | undefined> => {
+  const root = installedPiRoot();
+  if (root === undefined) {
+    return undefined;
+  }
+  try {
+    const [googleApi, providersAll, manifest] = await Promise.all([
+      import(pathToFileURL(join(root, PI_GOOGLE_API)).href),
+      import(pathToFileURL(join(root, PI_PROVIDERS_ALL)).href),
+      readFileSync(join(root, "package.json"), "utf8"),
+    ]);
+    const googleGenerativeAIApi: unknown = Reflect.get(
+      googleApi,
+      "googleGenerativeAIApi"
+    );
+    const getBuiltinModels: unknown = Reflect.get(providersAll, "getBuiltinModels");
+    if (
+      typeof googleGenerativeAIApi !== "function" ||
+      typeof getBuiltinModels !== "function"
+    ) {
+      return undefined;
+    }
+    const version = (JSON.parse(manifest) as { version?: string }).version ?? "";
+    return {
+      getBuiltinModels: getBuiltinModels as PiRuntime["getBuiltinModels"],
+      googleGenerativeAIApi:
+        googleGenerativeAIApi as PiRuntime["googleGenerativeAIApi"],
+      version,
+    };
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * The stream-idle interval a route defaults to, read from the wrapper's own
@@ -164,6 +284,33 @@ export const ambientAuthContext = (): BridgeAuthContext => ({
 });
 
 /**
+ * pi's installed catalog entry for one model on one plane, or undefined when
+ * pi does not know it.
+ *
+ * The bridge builds its models by hand rather than reusing a catalog route, so
+ * this is where the entry the installed provider already carries comes back:
+ * the compatibility switches, the `reasoning` flag, the thinking-level map and
+ * the input limits are all things pi knows and this module does not, and a model
+ * built without them would serve requests with those behaviours silently off.
+ * Spreading that entry is what the wrapper's own materialization does.
+ *
+ * @param pi - the host's pi runtime.
+ * @param plane - the gateway plane, which is also pi's provider id.
+ * @param id - the model id.
+ * @returns the installed entry, or undefined when the catalog lacks it.
+ */
+const installedEntryFor = (
+  pi: PiRuntime,
+  plane: Plane,
+  id: string
+): object | undefined =>
+  // The plane's whole installed catalog, searched for the id, rather than a
+  // lookup by literal-typed key: the ids looked up here come from our own
+  // catalog, which is ahead of the installed one, and half of them are not in
+  // it at all. A miss is simply no entry to inherit.
+  pi.getBuiltinModels(plane).find((model) => model.id === id);
+
+/**
  * The provider this route serves: pi's Google wire implementation carrying our
  * catalog's Gemini models.
  *
@@ -185,16 +332,17 @@ export const ambientAuthContext = (): BridgeAuthContext => ({
  * @returns the provider the adapter's collection will hold.
  */
 export const googleProviderFor = (
+  pi: PiRuntime,
   specs: readonly CatalogModelSpec[],
   family: EndpointFamily = "auto"
 ): Record<string, unknown> => {
-  const api = googleGenerativeAIApi();
+  const api = pi.googleGenerativeAIApi();
   const models = specs.map((spec) => ({
     ...piModelFor(
       "opencode",
       spec,
       "google-generative-ai",
-      installedEntryFor("opencode", spec.id),
+      installedEntryFor(pi, "opencode", spec.id),
       family
     ),
     provider: GOOGLE_INTERNAL_ROUTE,
@@ -296,6 +444,14 @@ export interface GoogleBridgeInputs {
   };
   /** The loaded `llm-pi-ai` module, whose `PiAiAdapter` the bridge reuses. */
   readonly host: Record<string, unknown> | undefined;
+  /**
+   * The pi the HOST installed, as {@link loadHostPi} found it.
+   *
+   * Required rather than looked up here so the caller decides what to do when
+   * the host's pi is missing: `registerResponsesProvider` loads it once and
+   * skips the mount with a console line, while a test passes its own copy.
+   */
+  readonly pi: PiRuntime;
   /** The catalogued models the route serves. */
   readonly specs: readonly CatalogModelSpec[];
   /** The credential reference inherited from the deployment's own route. */
@@ -343,7 +499,7 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
   if (typeof adapter !== "function" || specs.length === 0) {
     return undefined;
   }
-  const provider = googleProviderFor(specs, inputs.endpoint);
+  const provider = googleProviderFor(inputs.pi, specs, inputs.endpoint);
 
   // One profile, built once: the adapter memoizes its snapshot by the identity
   // of the profiles map, so a fresh map per call would rebuild the collection
