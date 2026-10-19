@@ -423,16 +423,26 @@ These exist in the schema but render no control — each is a literal, a marker,
 
 ## 📜 Compatibility & Verification
 
-**Verified on DeepSeek Harness 0.2.1-alpha.5 (Node 24+)**
+**Verified on DeepSeek Harness `0.2.1` — both the `alpha` and `rc` channels (Node 24+)**
+
+The harness publishes two **channels**, `alpha` and `rc`, and they are parallel tracks rather than a version ordering: semver sorts `0.2.1-rc.2` _above_ `0.2.1-alpha.5`. Both channels' latest is **`0.2.1`**, and that line is this plugin's target — it is tested against every published `0.2.1` build in both channels, and the `@deepseek-ai/dsh-typert-protocol` peer range says so exactly:
+
+```
+>=0.2.1-alpha.1 <0.2.2
+```
+
+One range covers the whole line on both channels: its lower bound (`alpha.1`) sorts below every `rc` of the same line, so rc needs no separate entry. A plain `<0.2.2` would **not** work — semver excludes prereleases unless a comparator in the same `major.minor.patch` tuple carries one, which is how a range written against one channel silently excludes the other.
 
 | Surface | Target |
 | :-- | :-- |
+| **Harness line** | **`0.2.1`**, `alpha` and `rc` channels alike (peer: `>=0.2.1-alpha.1 <0.2.2`) |
 | **Plugin package** | [`dsh-opencode-patch`](https://www.npmjs.com/package/dsh-opencode-patch) |
 | **Host profile** | DSH Web profile (`patchReload: live`) |
 | **Routes claimed** | `opencode`, `opencode-go`, `opencode-responses`, `opencode-anthropic` |
 | **Gateways** | `opencode.ai/zen/v1` (`/responses`, `/chat/completions`, `/messages`, `:streamGenerateContent`), `zen/go/v1` (`/chat/completions`) |
-| **Supported models** | `claude-sonnet-4-5`, `gpt-5.4`, `gemini-3.8-flash`, `deepseek-v4.1-flash`, `muse-spark-1.3-contributor-free`, `qwen3.8-flash` |
-| **Verification gate** | `vp check` clean, **955** deterministic tests green (unit + offline gateway mock), full schema validation, consumer install + load ([`scripts/check.ts`](./scripts/check.ts)) |
+| **Catalog** | Generated from `models.opencode.ai/api.json`; retirement follows the registry's own `status: "deprecated"` flag, with no hand-maintained id list |
+| **Upstream pi** | **Not bundled.** The bridge loads whatever `@earendil-works/pi-ai` the harness installed, so a harness bump never skews a pinned copy |
+| **Verification gate** | `vp check` clean, **961** deterministic tests green (unit + offline gateway mock), full schema validation, consumer install + load ([`scripts/check.ts`](./scripts/check.ts)) |
 
 ---
 

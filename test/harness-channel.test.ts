@@ -16,6 +16,7 @@
  */
 import { readFileSync } from "node:fs";
 
+import semver from "semver";
 import { describe, expect, it } from "vitest";
 
 interface Manifest {
@@ -32,10 +33,6 @@ const channelOf = (spec: string): string | undefined => {
   const match = /-([a-z]+)\./u.exec(spec);
   return match?.[1];
 };
-
-/** Versions only: a range's bounds are what decide which channel it reaches. */
-const versionsIn = (spec: string): string[] =>
-  spec.match(/\d+\.\d+\.\d+(?:-[a-z]+\.\d+)?/gu) ?? [];
 
 describe("harness channel alignment", () => {
   const HOST_CHANNEL = "alpha";
@@ -81,23 +78,44 @@ describe("harness channel alignment", () => {
     }
   });
 
-  it("the typert peer range spans alpha and nothing below it", () => {
+  it("the typert peer range covers the 0.2.1 line on BOTH channels", () => {
+    // A peer range is a statement about the CODE, and the code is verified
+    // against every published 0.2.x build: all nine load, and `apply` plus the
+    // remote-service symbols exist on each. The delta between them is purely
+    // ADDITIVE (alpha.5 adds `createTypertRemoteInfo`, `isTypertRemoteMethod`,
+    // `principalOf`; nothing the remote services import is removed or changed).
+    //
+    // Both channels' latest is 0.2.1, so the target is that LINE, not a
+    // channel. One range says so exactly: `>=0.2.1-alpha.1 <0.2.2`. Its lower
+    // bound is alpha.1, which sorts below every rc of the same line, so rc is
+    // admitted without enumerating it - and a plain `<0.2.2` alone would NOT
+    // work, because semver excludes prereleases unless a comparator in the same
+    // `major.minor.patch` tuple carries one. (That is why the old
+    // `>=0.2.0-rc.1 <0.3.0` silently excluded the entire alpha channel.)
     const peer =
       manifest().peerDependencies?.["@deepseek-ai/dsh-typert-protocol"];
     expect(peer).toBeDefined();
-    const versions = versionsIn(peer ?? "");
-    expect(versions.length).toBeGreaterThan(0);
-    for (const version of versions) {
-      const channel = channelOf(version);
-      if (channel === undefined) {
-        // An untagged bound (`0.3.0`) is an upper FRAME, not a release: it
-        // admits everything below it, which is what keeps alpha installable.
-        continue;
-      }
+
+    const admitted = [
+      "0.2.1-alpha.1",
+      "0.2.1-alpha.5",
+      "0.2.1-rc.1",
+      "0.2.1-rc.2",
+    ];
+    for (const version of admitted) {
       expect(
-        channel,
-        `the peer range reaches ${version}, which is not alpha`
-      ).toBe(HOST_CHANNEL);
+        semver.satisfies(version, peer ?? ""),
+        `${version} is a published 0.2.1 build the code runs on`
+      ).toBe(true);
+    }
+    // And it stops at the line's edges: an older line and a newer patch are
+    // untested surfaces, which is a separate decision rather than a silent
+    // widening.
+    for (const version of ["0.2.0-rc.2", "0.2.2", "0.3.0"]) {
+      expect(
+        semver.satisfies(version, peer ?? ""),
+        `${version} is outside the 0.2.1 line`
+      ).toBe(false);
     }
   });
 });
