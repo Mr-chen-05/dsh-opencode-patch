@@ -11,11 +11,13 @@ import { readFileSync } from "node:fs";
  * that loads after the wrapper. What this file proves is that the objects the
  * bridge builds by hand are the ones the real consumer accepts.
  */
-import { createRequire } from "node:module";
 
 import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
-import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
-import semver from "semver";
+import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy";
+import {
+  builtinProviders,
+  getBuiltinModels as piModelsFor,
+} from "@earendil-works/pi-ai/providers/all";
 import { describe, expect, it } from "vitest";
 
 import { OPENCODE_ZEN_CATALOG } from "../src/catalog-data.ts";
@@ -23,7 +25,9 @@ import {
   ambientAuthContext,
   emptyCredentialStore,
   type GoogleBridgeInputs,
+  type PiRuntime,
   googleProviderFor,
+  loadHostPi,
   registerGoogleBridge,
   resolveGatewayKey,
 } from "../src/google-bridge.ts";
@@ -57,9 +61,24 @@ interface ProviderLike {
   ) => AsyncIterable<unknown>;
 }
 
+/**
+ * The pi runtime the bridge consumes, built from THIS repo's devDependency.
+ *
+ * A deployment gets the harness's own pi (`loadHostPi` finds it through
+ * `dsh-llm-pi-ai`), and the shape is identical either way — these tests exercise
+ * the contract, not a version. `pi-runtime.test.ts` proves the loader finds the
+ * host's copy in the real tree.
+ */
+const testPi = (): PiRuntime => ({
+  getBuiltinModels: (plane) =>
+    piModelsFor(plane as Parameters<typeof piModelsFor>[0]),
+  googleGenerativeAIApi,
+  version: "test",
+});
+
 /** The bridge's provider, through the one cast the test needs. */
 const providerAs = (specs: typeof geminiSpecs): ProviderLike =>
-  googleProviderFor(specs) as unknown as ProviderLike;
+  googleProviderFor(testPi(), specs) as unknown as ProviderLike;
 
 /** The `llm` the bridge registers on: it records what the service received. */
 const recordingLlm = (): {
@@ -87,6 +106,7 @@ const bridgeInputs = (
   ctx: {},
   host: { PiAiAdapter },
   llm,
+  pi: testPi(),
   specs: geminiSpecs,
 });
 
@@ -432,33 +452,40 @@ describe("google-bridge · the key it resolves", () => {
   });
 });
 
-describe("google-bridge · the pi copy it may load", () => {
-  it("pins a pi version the wrapper's requirement accepts", () => {
-    // A second pi beside the wrapper's is the failure this guards: two module
-    // instances would drift apart the moment either side bumps. The wrapper
-    // states a RANGE, so the claim is that our exact pin satisfies it — both
-    // read live, so a harness bump that moves either side turns this red.
+describe("google-bridge · the pi copy it loads", () => {
+  it("declares no pi of its own at runtime, and loads the host's", async () => {
+    // The rule this replaced a version pin with: the plugin must NOT ship a pi.
+    // The wrapper (`dsh-llm-pi-ai`) already depends on `@earendil-works/pi-ai`
+    // with a range, so the host installs the pi its own release was tested
+    // against. A second copy here would put two versions in one tree and turn
+    // every harness bump into a version-skew bug.
     const ours = JSON.parse(readFileSync("package.json", "utf8")) as {
       dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
     };
-    const require = createRequire(import.meta.url);
-    const wrapperRoot = require.resolve("@deepseek-ai/dsh-llm-pi-ai");
-    const wrapperDir = wrapperRoot.slice(
-      0,
-      wrapperRoot.lastIndexOf("/lib/") + 1
-    );
-    const wrapper = JSON.parse(
-      readFileSync(`${wrapperDir}package.json`, "utf8")
-    ) as {
-      dependencies?: Record<string, string>;
-      peerDependencies?: Record<string, string>;
-    };
-    const ourVersion = ours.dependencies?.["@earendil-works/pi-ai"];
-    const required =
-      wrapper.dependencies?.["@earendil-works/pi-ai"] ??
-      wrapper.peerDependencies?.["@earendil-works/pi-ai"];
-    expect(ourVersion).toBeDefined();
-    expect(required).toBeDefined();
-    expect(semver.satisfies(ourVersion ?? "", required ?? "")).toBe(true);
+    expect(
+      ours.dependencies?.["@earendil-works/pi-ai"],
+      "pi is a runtime dependency again: a harness bump would skew against it"
+    ).toBeUndefined();
+    // It stays a devDependency for this repo's own tests and development.
+    expect(ours.devDependencies?.["@earendil-works/pi-ai"]).toBeDefined();
+
+    // And the loader actually reaches the HOST's copy, not a vendored one.
+    const pi = await loadHostPi();
+    expect(
+      pi,
+      "the harness's pi was not reachable from dsh-llm-pi-ai"
+    ).toBeDefined();
+    expect(typeof pi?.googleGenerativeAIApi).toBe("function");
+    expect(typeof pi?.getBuiltinModels).toBe("function");
+    expect(pi?.version).toMatch(/^\d+\.\d+\.\d+/u);
+  });
+
+  it("builds the provider from whichever copy the host installed", () => {
+    // A version change may alter what the protocol EMITS; it may not change
+    // whether the objects interoperate, because pi reads fields and never checks
+    // identity. The provider is built from the runtime it is given.
+    const models = providerAs(geminiSpecs).getModels();
+    expect(models.length).toBe(geminiSpecs.length);
   });
 });

@@ -113,8 +113,10 @@ export default defineConfig({
           "@deepseek-ai/cordis",
           "@deepseek-ai/dsh-typert-protocol",
           "@deepseek-ai/schemastery",
-          // The one runtime pi import lives in google-bridge.ts; bundling it
-          // would ship a second pi beside the one the wrapper loads.
+          // Not a runtime dependency any more: `google-bridge.ts` loads the
+          // harness's own pi at runtime, so a pinned copy here would ship the
+          // second pi this plugin deliberately stopped carrying. Kept external
+          // for the devDependency the unit tests import directly.
           "@earendil-works/pi-ai",
         ],
       },
