@@ -283,20 +283,9 @@ const withoutRoute = (value: unknown, key: "id" | "provider"): unknown =>
  * Exported for its own test: it is the one place I1's second clause lives, and the
  * interesting case is a model no catalog describes.
  */
-export const isServableModel = (
-  id: unknown,
-  route: string,
-  hidden: readonly string[] = []
-): boolean => {
+export const isServableModel = (id: unknown, route: string): boolean => {
   if (typeof id !== "string") {
     return true;
-  }
-  // A named exclusion outranks every rule below it, including retention: it is
-  // the deployment's own word about a model, and the retention list is this
-  // file's. A deployment that withholds an id the catalog retains, or the other
-  // way round, gets the deployment's answer.
-  if (hidden.includes(id)) {
-    return false;
   }
   // A free-tier id is OFFERED, and not because it is served from here - measured
   // since, and it is not: an API key, the account token, the token with its org,
@@ -483,9 +472,7 @@ export const hideResponsesRoute = (
         return models;
       }
       const servable = models.filter(
-        (model) =>
-          !isRecord(model) ||
-          isServableModel(model.id, provider, config.hiddenModels)
+        (model) => !isRecord(model) || isServableModel(model.id, provider)
       );
       // **Keyless deployments are offered only what they can actually call.**
       // The official client deletes every model whose price is non-zero when no
@@ -754,9 +741,6 @@ export const decoratePlaneAdapters = (
           model,
           signal,
         ]);
-        if (config.hiddenModels.includes(model)) {
-          return answered;
-        }
         const spec = findModelSpecOn(plane, model);
         if (spec === undefined) {
           return answered;
@@ -920,7 +904,7 @@ export const decoratePlaneAdapters = (
           provider,
           model,
         ]);
-        if (config.hiddenModels.includes(model) || !isRecord(answered)) {
+        if (!isRecord(answered)) {
           return answered;
         }
         const spec = findModelSpecOn(plane, model);

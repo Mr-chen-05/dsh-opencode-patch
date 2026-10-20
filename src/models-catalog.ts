@@ -420,6 +420,16 @@ export const isDeprecatedModelOn = (plane: "go" | "zen", id: string): boolean =>
   (plane === "go" ? deprecatedGoIds : deprecatedZenIds).has(id);
 
 /**
+ * Whether a live parse has ever landed in this process.
+ *
+ * `refreshCatalog` never throws — an offline host keeps serving the shipped
+ * shim — so a caller that needs to distinguish "the catalog says nothing is
+ * retired" from "the catalog could not be read" has to ask this instead of
+ * reading an empty result as an answer.
+ */
+export const isCatalogFresh = (): boolean => lastRefreshedAt > 0;
+
+/**
  * Fetch and merge the latest live model specifications from `models.dev`.
  *
  * Never throws: on network failure, timeout, or invalid reply, gracefully falls

@@ -292,7 +292,6 @@ describe("Config schema", () => {
         "endpoint",
         "freeModelMarker",
         "gatewayUrls",
-        "hiddenModels",
         "injectCoreTools",
         "injectOriginHeaders",
         "injectProject",
@@ -354,22 +353,6 @@ describe("Config schema", () => {
     expect(resolveConfig({ keySource: "" as never }).keySource).toBe(
       DEFAULT_KEY_SOURCE
     );
-  });
-
-  it("withholds the ids a deployment names, whatever the catalog says", () => {
-    // The counterpart to the retention rule, and the same reason: a deprecated
-    // id the gateway still serves but that misfires for a given account belongs
-    // in `hiddenModels`, because the reason is the deployment's and not the
-    // vendor's.
-    expect(
-      resolveConfig({ hiddenModels: ["big-pickle"] }).hiddenModels
-    ).toEqual(["big-pickle"]);
-    expect(resolveConfig({ hiddenModels: [] }).hiddenModels).toEqual([]);
-    expect(resolveConfig({}).hiddenModels).toEqual([]);
-    // A junk entry is dropped rather than carried, like every other list knob.
-    expect(
-      resolveConfig({ hiddenModels: ["ok", "", "  "] as never }).hiddenModels
-    ).toEqual(["ok"]);
   });
 
   it("accepts each endpoint family and degrades an unknown one to auto", () => {

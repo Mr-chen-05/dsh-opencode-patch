@@ -44,6 +44,7 @@ import {
   decoratePlaneAdapters,
   hideResponsesRoute,
 } from "./models-discovery.ts";
+import { ModelPurgeService } from "./purge-service.ts";
 import { registerResponsesProvider } from "./responses-provider.ts";
 import { isServableSdk } from "./responses-routes.ts";
 import { createStreamHook } from "./stream-hook.ts";
@@ -115,7 +116,7 @@ const mountByProvide = (
   ctx: CordisContext,
   serviceName: string,
   Service: new (ctx: never, options: never) => unknown,
-  options: unknown
+  options?: unknown
 ): void => {
   const { provide } = ctx as {
     provide?: (key: string, value: unknown) => void;
@@ -279,6 +280,37 @@ const verifyUsageService = (ctx: CordisContext): void => {
  * stream hook and discovery must not attach, or turns would run without the
  * session affinity this plugin exists to provide.
  */
+/**
+ * Roots that already carry the purge service, for the same reason the usage
+ * service keeps its own set: `apply` runs once per live reload, and a service
+ * tied to the activation fiber dies with it while a second registration is
+ * refused as a duplicate. Process-scoped is what a Gateway-scanned service wants.
+ */
+const purgeMountedOn = new WeakSet<object>();
+
+const installPurgeService = (ctx: CordisContext): void => {
+  const root: CordisContext = ctx.root ?? ctx;
+  if (purgeMountedOn.has(root)) {
+    return;
+  }
+  purgeMountedOn.add(root);
+  if (typeof ctx.plugin !== "function") {
+    mountByProvide(ctx, "opencodeModelPurge", ModelPurgeService);
+    return;
+  }
+  try {
+    root.plugin?.(ModelPurgeService);
+  } catch (error) {
+    purgeMountedOn.delete(root);
+    // Not fatal, and said out loud: without this service the card's purge row
+    // reports that it is unavailable rather than failing the whole plugin.
+    console.warn(
+      "[dsh-opencode-patch] the purge service did not mount; the card will say so",
+      error
+    );
+  }
+};
+
 const installFetchPatch = (
   ctx: CordisContext,
   config: ResolvedPluginConfig,
@@ -498,6 +530,7 @@ export const apply = (
 
   logRenameNotice(ctx);
   installUsageService(ctx, config);
+  installPurgeService(ctx);
 
   if (!installFetchPatch(ctx, config, als)) {
     return;

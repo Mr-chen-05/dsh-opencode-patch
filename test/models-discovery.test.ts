@@ -478,27 +478,10 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
     // `opencode-go` and not `opencode` means the Zen route keeps exactly the
     // behaviour it had, which is the difference between augmenting a route and
     // replacing the user's choice.
-    expect(isServableModel("deepseek-v4.1-flash", "opencode", [])).toBe(true);
-    // And a withhold on one plane says nothing about the other: the same id is
-    // still offered where it is not named, because the knob is a list of ids
-    // and not a per-plane decision.
-    expect(
-      isServableModel("deepseek-v4.1-flash", "opencode", ["big-pickle"])
-    ).toBe(true);
-  });
-
-  it("withholds an id a deployment names, outranking every other rule", () => {
-    // The deployment's own word about a model beats every rule this file
-    // applies - including retention. A deprecated id the gateway still serves
-    // but that misfires for a given account belongs in `hiddenModels`, because
-    // the reason is the deployment's and not the vendor's.
-    expect(
-      isServableModel("deepseek-v4.1-flash", "opencode", [
-        "deepseek-v4.1-flash",
-      ])
-    ).toBe(false);
-    // And an empty list changes nothing.
-    expect(isServableModel("deepseek-v4.1-flash", "opencode", [])).toBe(true);
+    expect(isServableModel("deepseek-v4.1-flash", "opencode")).toBe(true);
+    // The route is the only plane input there is; the same id on another plane
+    // is answered by that plane's own rules.
+    expect(isServableModel("deepseek-v4.1-flash", "opencode-go")).toBe(true);
   });
 
   it("refuses a model whose plane + SDK combination is declared unserved", () => {
@@ -829,24 +812,6 @@ describe("models-discovery: the adapter behind a plane route", () => {
     expect(stop).toBeUndefined();
   });
 
-  it("withholds an id a deployment names, whatever the adapter answered", async () => {
-    const llm = llmWithAdapters(() => ({}));
-    const stop = decoratePlaneAdapters(
-      llm as never,
-      resolveConfig({
-        enrichModels: true,
-        hiddenModels: ["minimax-m3.1-flash-free"],
-      })
-    );
-    const resolved = (await resolveOn(llm, "opencode-go")(
-      "opencode-go",
-      "minimax-m3.1-flash-free"
-    )) as { reasoning?: unknown };
-    // The deployment's word beats the catalog's.
-    expect(resolved.reasoning).toBeUndefined();
-    stop?.();
-  });
-
   it("accepts at dispatch every level the picker offers, for a model pi does not carry", () => {
     // The failure this exists for, in one case: `glm-5.3-flash-free` is on both
     // planes and in neither of pi's installed catalogs, so the materialized model
@@ -1014,27 +979,6 @@ describe("models-discovery: the adapter behind a plane route", () => {
     expect(modelOfOn(llm, "opencode")(undefined, "opencode", foreign.id)).toBe(
       foreign
     );
-
-    stop?.();
-  });
-
-  it("withholds an id a deployment names from modelOf too", () => {
-    const blank = { id: "glm-5.3-flash-free", reasoning: false };
-    const llm = llmWithAdapters(
-      () => ({}),
-      () => blank
-    );
-    const stop = decoratePlaneAdapters(
-      llm as never,
-      resolveConfig({
-        enrichModels: true,
-        hiddenModels: ["glm-5.3-flash-free"],
-      })
-    );
-
-    expect(
-      modelOfOn(llm, "opencode")(undefined, "opencode", "glm-5.3-flash-free")
-    ).toBe(blank);
 
     stop?.();
   });
