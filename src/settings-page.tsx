@@ -480,6 +480,20 @@ export const apply = (ctx: ClientContext): void => {
     if (meterRegisteredOn.has(ctx)) {
       return;
     }
+    // **Do not consume the one-shot on a scope that cannot register.**
+    // `slots` is optional at every call site, and the ten-second fallback hands
+    // over the ROOT context, which need not carry `slots` at all. Marking the
+    // guard before the attempt meant that a fallback which could not register
+    // still spent the one allowed registration: the scoped inject fired later
+    // with a scope that DID have `slots`, found the guard set, returned — and the
+    // meter never appeared anywhere, with no warning, because `?.` swallowed the
+    // no-op. Measured as "the pill just isn't there".
+    const { slots } = meterScope;
+    if (slots === undefined || typeof slots.inject !== "function") {
+      // Not an error: the other path is expected to carry it. Said once per
+      // scope so a composition where NO path has `slots` is not silent.
+      return;
+    }
     meterRegisteredOn.add(ctx);
     // `conversation.input.right` renders in the composer bar's trailing controls,
     // immediately BEFORE `conversation.input.model` — so it is the seat beside
@@ -487,8 +501,14 @@ export const apply = (ctx: ClientContext): void => {
     // tools group instead, a whole row away. Both are list slots, so both are
     // open to a plugin; this is the requested position.
     try {
-      meterScope.slots?.inject?.("conversation.input.right", () =>
-        meterScope.slots?.register?.(
+      slots.inject("conversation.input.right", () => {
+        // Console, because this is the one line that says the meter exists: the
+        // composer slot has no other trace, and a pill that fails to register is
+        // otherwise indistinguishable from a usage service that answered nothing.
+        console.info(
+          "[dsh-opencode-patch] the usage meter registered on conversation.input.right"
+        );
+        return slots.register?.(
           {
             id: "dsh-opencode-patch-usage",
             inject: createUsageInjector(meterScope),
@@ -496,8 +516,8 @@ export const apply = (ctx: ClientContext): void => {
             order: 50,
           },
           UsagePill
-        )
-      );
+        );
+      });
     } catch (error) {
       // Already registered by an earlier activation of this same bundle. The
       // meter is present; a second registration is the thing that is not, and

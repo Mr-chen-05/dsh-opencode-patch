@@ -1362,6 +1362,45 @@ describe("settings-page: every remote gets a mount", () => {
     }
   });
 
+  it("does not spend the one registration on a scope without `slots`", async () => {
+    // The failure this guards: `registerMeter` is reached from three places, and
+    // the mount's settlement hands over the ROOT context, which need not carry
+    // `slots`. Marking the one-shot guard before the attempt meant a path that
+    // could not register still consumed the registration — the scoped inject then
+    // found the guard set and returned, and the pill never appeared anywhere.
+    // `?.` swallowed the no-op, so nothing warned.
+    const injected: string[] = [];
+    const child = {
+      slots: {
+        inject: (slot: string) => {
+          injected.push(slot);
+          return () => {};
+        },
+        register: () => () => {},
+      },
+    };
+    const ctx = {
+      effect: (fn: () => unknown) => fn(),
+      // The scoped inject fires AFTER the mount has settled, with a scope that
+      // does carry `slots` — the ordering that used to lose the meter.
+      inject: (_names: string[], cb: (scope: unknown) => void) => {
+        setTimeout(() => {
+          cb(child);
+        }, 5);
+        return () => {};
+      },
+      locale: { register: () => () => {} },
+      remote: { $mount: async () => () => {} },
+      // The root has no `slots` at all.
+    };
+
+    apply(ctx as never);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    expect(injected).toEqual(["conversation.input.right"]);
+  });
+
   it("registers the meter from the mount alone when the scoped inject never fires", async () => {
     // The case the ten-second timeout used to cover. `ctx.inject` is present but
     // its services never appear, so the ONLY way the meter can show up is the
