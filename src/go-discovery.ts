@@ -669,12 +669,24 @@ export const declaredProviderModels = (
   } catch {
     return undefined;
   }
-  if (!Array.isArray(entries)) {
+  // **An ITERABLE, not an array.** The host's `loader.entries()` is a
+  // generator (`cordis-plugin-loader/lib/index.js`: `*entries() { for (const
+  // entry of Object.values(this.store)) yield entry; … }`), so an
+  // `Array.isArray` guard rejected it and this reader answered `undefined` for
+  // a loader that was working perfectly — measured as the routes still not
+  // mounting after the first version of this fix.
+  if (entries === null || typeof entries !== "object") {
+    return undefined;
+  }
+  if (
+    typeof (entries as { [Symbol.iterator]?: unknown })[Symbol.iterator] !==
+    "function"
+  ) {
     return undefined;
   }
   const declared: DeclaredModel[] = [];
   let found = false;
-  for (const entry of entries) {
+  for (const entry of entries as Iterable<unknown>) {
     if (!isRecord(entry) || !isRecord(entry.options)) {
       continue;
     }

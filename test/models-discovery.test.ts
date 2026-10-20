@@ -338,8 +338,8 @@ describe("models-discovery · an empty list from a route that declares models", 
         listModels: async () => [],
       },
       loader: {
-        entries: () => [
-          {
+        *entries() {
+          yield {
             options: {
               config: {
                 providers: {
@@ -347,8 +347,8 @@ describe("models-discovery · an empty list from a route that declares models", 
                 },
               },
             },
-          },
-        ],
+          };
+        },
       },
     } as unknown as CordisContext;
     const stop = hideResponsesRoute(ctx, resolveConfig());

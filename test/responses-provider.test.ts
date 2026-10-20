@@ -1700,8 +1700,8 @@ describe("responses-provider · the declaration needs no credential", () => {
     // loader entry's config and needs no credential at all.
     const ctx = {
       loader: {
-        entries: () => [
-          {
+        *entries() {
+          yield {
             options: {
               config: {
                 providers: {
@@ -1710,8 +1710,8 @@ describe("responses-provider · the declaration needs no credential", () => {
                 },
               },
             },
-          },
-        ],
+          };
+        },
       },
     } as unknown as CordisContext;
     expect([...(declaredModelsFromLoader(ctx, "opencode") ?? [])]).toEqual([

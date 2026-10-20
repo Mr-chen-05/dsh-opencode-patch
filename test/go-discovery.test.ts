@@ -1375,8 +1375,16 @@ describe("go-discovery: the installation's own store, and where it sits", () => 
 });
 
 describe("go-discovery · the declaration in the loader", () => {
+  // **A GENERATOR, because that is what the host returns.** The first version of
+  // this reader guarded with `Array.isArray` and rejected a working loader —
+  // measured as the routes still not mounting after the fix that was supposed to
+  // mount them.
   const loaderWith = (providers: unknown) => ({
-    loader: { entries: () => [{ options: { config: { providers } } }] },
+    loader: {
+      *entries() {
+        yield { options: { config: { providers } } };
+      },
+    },
   });
 
   it("reads the declared ids and names for one route", () => {
