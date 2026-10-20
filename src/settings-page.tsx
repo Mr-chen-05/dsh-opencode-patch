@@ -16,6 +16,7 @@ import {
 
 import { DEFAULT_PROVIDERS, readStringList } from "./config-values.ts";
 import { isRecord } from "./guards.ts";
+import { purgeRemote } from "./purge-contract.ts";
 import { OpencodeCard } from "./settings-card.tsx";
 import { en, zh } from "./settings-copy.ts";
 import { SPECS } from "./settings-fields.ts";
@@ -49,7 +50,10 @@ export const PKG = "dsh-opencode-patch";
  * sign-in row and its `opencodeLogin` namespace are v2 work.
  */
 export const patchRemote = {
-  descriptors: [...usageRemote.descriptors],
+  // ONE contribution, TWO namespaces. Typert enforces a unique package name per
+  // contribution, so mounting them separately with the same package throws
+  // "already registered" and drops the remote entirely.
+  descriptors: [...usageRemote.descriptors, ...purgeRemote.descriptors],
   package: PKG,
 };
 

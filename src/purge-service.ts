@@ -23,7 +23,7 @@ import {
 
 import { isRecord } from "./guards.ts";
 import {
-  isCatalogFresh,
+  didCatalogRefreshSucceed,
   isDeprecatedModelOn,
   refreshCatalog,
 } from "./models-catalog.ts";
@@ -109,7 +109,12 @@ export class ModelPurgeService extends TypertRemoteService {
     }
 
     await refreshCatalog(undefined, true);
-    const catalogRead = isCatalogFresh();
+    // **Whether THIS attempt read the registry**, not whether one ever did.
+    // `refreshCatalog` never rejects, and `isCatalogFresh()` answers "has this
+    // process refreshed at all?" — true for hours after a failure. Reporting
+    // that as `catalogRead` told the card "nothing is deprecated" for a read
+    // that never happened.
+    const catalogRead = didCatalogRefreshSucceed();
 
     const entries = editor.entries().filter((entry) => {
       const config = isRecord(entry) ? entry.options : undefined;
@@ -131,6 +136,13 @@ export class ModelPurgeService extends TypertRemoteService {
 
     const removed: PurgedModel[] = [];
     for (const entry of entries) {
+      // Collected per entry, then appended. NOT a fix for anything: an `edit`
+      // that throws propagates out of `purge()` before the return, so the report
+      // can never describe a rejected edit either way (checked, so this comment
+      // does not claim a failure mode that cannot occur). It is simply the
+      // narrower scope — each entry's removals stay attributable to that entry,
+      // which is what a partial-failure path would need if one is ever added.
+      const entryRemoved: PurgedModel[] = [];
       await editor.edit(entry, (current) => {
         const providers = isRecord(current.providers)
           ? { ...current.providers }
@@ -145,7 +157,7 @@ export class ModelPurgeService extends TypertRemoteService {
             if (id === undefined || !isDeprecatedModelOn(plane, id)) {
               return true;
             }
-            removed.push({ provider: route, id });
+            entryRemoved.push({ provider: route, id });
             return false;
           });
           if (kept.length !== declared.length) {
@@ -157,6 +169,7 @@ export class ModelPurgeService extends TypertRemoteService {
         }
         return { ...current, providers };
       });
+      removed.push(...entryRemoved);
     }
 
     return { removed, catalogRead };
