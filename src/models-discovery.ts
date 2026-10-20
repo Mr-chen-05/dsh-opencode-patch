@@ -18,6 +18,7 @@
 
 import type { ResolvedPluginConfig } from "./config.ts";
 import type { CordisContext } from "./cordis-context.ts";
+import { declaredProviderModels } from "./go-discovery.ts";
 import { isRecord } from "./guards.ts";
 import {
   catalogPlaneForRoute,
@@ -470,6 +471,25 @@ export const hideResponsesRoute = (
       const models = await Reflect.apply(originalListModels, this, [provider]);
       if (!Array.isArray(models)) {
         return models;
+      }
+      // **An empty answer from a route that DECLARES models is a credential
+      // fact, not a catalogue fact.** `dsh-llm-pi-ai` resolves the route's key
+      // before listing and answers `[]` when it cannot — which at boot is the
+      // ordinary case, and it emptied the picker for a route that declares
+      // nineteen models. The declaration is in the loader config and needs no
+      // credential, so it answers here.
+      //
+      // Only for the plane routes, and only when the adapter answered nothing:
+      // an adapter that answered keeps its own list, unchanged.
+      if (models.length === 0 && isPlaneRoute(provider)) {
+        const declared = declaredProviderModels(ctx, provider);
+        if (declared !== undefined && declared.length > 0) {
+          return declared.map((entry) => ({
+            id: entry.id,
+            name: entry.name ?? entry.id,
+            provider,
+          }));
+        }
       }
       const servable = models.filter(
         (model) => !isRecord(model) || isServableModel(model.id, provider)
