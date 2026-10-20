@@ -8,7 +8,10 @@
  * @module dsh-opencode-patch/purge-contract
  */
 
-import type { RemoteResult } from "@deepseek-ai/dsh-typert-protocol";
+import type {
+  RemoteResult,
+  TypertRemoteContribution,
+} from "@deepseek-ai/dsh-typert-protocol";
 
 /** One model removed from the deployment's own provider declaration. */
 export interface PurgedModel {
@@ -34,6 +37,76 @@ export interface PurgeResult {
 
 /** The remote namespace the host mounts and the card calls. */
 export const PURGE_NAMESPACE = "opencodeModelPurge";
+
+/** Whether a value is one `PurgedModel` row. */
+const isPurgedModel = (value: unknown): value is PurgedModel =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { id?: unknown }).id === "string" &&
+  typeof (value as { provider?: unknown }).provider === "string";
+
+/**
+ * Parse a purge result, rejecting anything that is not one.
+ *
+ * A whitelist, like every other codec on this seam: the client renders what it
+ * is told, so it must be told only the fields it renders.
+ *
+ * @param value - the decoded wire value.
+ * @returns the result, or `undefined` when it is not one.
+ */
+export const parsePurgeResult = (value: unknown): PurgeResult | undefined => {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const { removed, catalogRead } = value as {
+    catalogRead?: unknown;
+    removed?: unknown;
+  };
+  if (!Array.isArray(removed) || typeof catalogRead !== "boolean") {
+    return undefined;
+  }
+  const rows: PurgedModel[] = [];
+  for (const row of removed) {
+    if (!isPurgedModel(row)) {
+      return undefined;
+    }
+    rows.push({ id: row.id, provider: row.provider });
+  }
+  return { catalogRead, removed: rows };
+};
+
+/** The wire codec for one purge result, in the shape `usageCodec` uses. */
+const purgeResultCodec = {
+  create: () => ({ parse: parsePurgeResult }),
+  mode: "strict" as const,
+  schema: { parse: parsePurgeResult },
+  typeSymbol: "dsh-opencode-patch#PurgeResult",
+};
+
+/**
+ * The purge namespace, as a contribution the client mounts.
+ *
+ * **Without a descriptor the namespace never reaches the browser.** The host
+ * mounts the Service and the card asks `remote.opencodeModelPurge.purge`; a
+ * Remote is only reachable when a contribution carrying its descriptor was
+ * mounted on the client, so the row reported "unavailable" for a host that had
+ * the service all along. Same shape as `usageRemote`, and the card mounts both
+ * under one package name.
+ */
+export const purgeRemote: TypertRemoteContribution = {
+  descriptors: [
+    {
+      id: "dsh-opencode-patch#opencodeModelPurge/purge",
+      invocation: { kind: "direct" },
+      method: "purge",
+      namespace: PURGE_NAMESPACE,
+      parameters: [],
+      result: purgeResultCodec,
+      service: PURGE_NAMESPACE,
+    },
+  ],
+  package: "dsh-opencode-patch",
+};
 
 /** The one failure a purge reports: the profile cannot be rewritten here. */
 export const PURGE_UNAVAILABLE = "opencode/purge-unavailable";

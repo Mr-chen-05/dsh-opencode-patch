@@ -151,6 +151,50 @@ describe("purge: the refusals it can report", () => {
     expect(result.catalogRead).toBe(false);
     expect(result.removed).toEqual([]);
   });
+  it("reports nothing when the edit was rejected", async () => {
+    // `configEditor.edit` throws after the change has been computed — "Profile
+    // patch must be a YAML sequence" on a damaged document, "Configuration
+    // entry is no longer available" after a reload. Pushing into `removed` from
+    // inside the callback meant those ids were reported as purged for an edit
+    // that never landed.
+    answersRegistry();
+    const { entry } = editorWith({ zen: [{ id: "ll-alpha-free" }], go: [] });
+    const editor = {
+      edit: vi.fn(() =>
+        Promise.reject(new Error("Profile patch must be a YAML sequence"))
+      ),
+      entries: () => [entry],
+    };
+    const service = new ModelPurgeService(
+      ctxWith(editor as unknown as Parameters<typeof ctxWith>[0])
+    );
+    await expect(service.purge()).rejects.toThrow(/YAML sequence/u);
+    // The edit was ATTEMPTED (so the decision was made) and then rejected: the
+    // ids that decision named must not be reported as purged.
+    expect(editor.edit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not inherit an EARLIER refresh's success when this one fails", async () => {
+    // The defect this replaces: `catalogRead` read `isCatalogFresh()`, which
+    // advances only on success and so stays true for hours. A process that
+    // refreshed fine this morning and is offline now reported `catalogRead:
+    // true` — telling the card "nothing is deprecated" about a read that never
+    // happened. `refreshCatalog` never rejects, so its promise resolving is no
+    // evidence either; only the per-attempt flag is.
+    vi.resetModules();
+    const mod = await import("../src/models-catalog.ts");
+    // A successful refresh first...
+    vi.stubGlobal("fetch", () => Promise.resolve(Response.json(registry())));
+    await mod.refreshCatalog(undefined, true);
+    expect(mod.isCatalogFresh()).toBe(true);
+    // ...then the network goes away, and a purge must say so.
+    vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
+    const { ModelPurgeService: Live } = await import("../src/purge-service.ts");
+    const result = await new Live(
+      ctxWith(editorWith({ zen: [{ id: "mimo-v2.6-flash-free" }], go: [] }))
+    ).purge();
+    expect(result.catalogRead).toBe(false);
+  });
 });
 
 describe("purge: the shapes a profile row can take", () => {

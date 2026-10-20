@@ -111,6 +111,16 @@ const deprecatedGoIds = new Set<string>();
 const deprecatedZenIds = new Set<string>();
 
 let lastRefreshedAt = 0;
+/**
+ * Whether the MOST RECENT refresh attempt read a usable payload.
+ *
+ * Distinct from {@link lastRefreshedAt}, which only advances on success and so
+ * answers "has this process ever refreshed?" — a question that stays `true` for
+ * hours after a failure. A caller that must know whether THIS attempt landed
+ * (the purge, which reports "nothing was deprecated" versus "the catalog could
+ * not be read") needs this one.
+ */
+let lastRefreshSucceeded = false;
 let refreshPromise:
   | Promise<{
       go: readonly CatalogModelSpec[];
@@ -430,6 +440,21 @@ export const isDeprecatedModelOn = (plane: "go" | "zen", id: string): boolean =>
 export const isCatalogFresh = (): boolean => lastRefreshedAt > 0;
 
 /**
+ * Whether the most recent refresh attempt actually read the registry.
+ *
+ * Set to `false` when an attempt starts and only `true` by a payload that
+ * parsed, so a caller can distinguish "the catalog says none are deprecated"
+ * from "the catalog could not be read" — the two produce the same empty result
+ * and must not produce the same sentence.
+ *
+ * `refreshCatalog` never rejects, so its promise resolving says nothing about
+ * whether the read landed; this is the only way to tell.
+ *
+ * @returns whether the last attempt read a usable payload.
+ */
+export const didCatalogRefreshSucceed = (): boolean => lastRefreshSucceeded;
+
+/**
  * Fetch and merge the latest live model specifications from `models.dev`.
  *
  * Never throws: on network failure, timeout, or invalid reply, gracefully falls
@@ -461,6 +486,9 @@ export const refreshCatalog = (
   }
 
   refreshPromise = (async () => {
+    // Cleared BEFORE the attempt: a success that happens to precede a failed
+    // retry must not be reported as this attempt's outcome.
+    lastRefreshSucceeded = false;
     try {
       const response = await fetchFn(MODELS_OPENCODE_URL, {
         headers: { accept: "application/json" },
@@ -485,6 +513,7 @@ export const refreshCatalog = (
         }
         if (parsed.go.length > 0 || parsed.zen.length > 0) {
           lastRefreshedAt = Date.now();
+          lastRefreshSucceeded = true;
         }
       }
     } catch {

@@ -1299,13 +1299,18 @@ describe("settings-page: every remote gets a mount", () => {
       setTimeout(resolve, 0);
     });
 
-    // The meter's remote is the only one this build mounts. The sign-in row and
-    // its `opencodeLogin` namespace are v2 work: main carries the API key path
-    // only, so nothing here should depend on a login service existing.
+    // Every namespace the CARD actually calls must be mounted here, or its
+    // surface reports "unavailable" for a host that has the service — which is
+    // exactly what the purge row did before its descriptor existed. The sign-in
+    // row and its `opencodeLogin` namespace are v2 work: main carries the API key
+    // path only, so nothing here should depend on a login service existing.
     const services = mounted.flatMap((contribution) =>
       contribution.descriptors.map((d) => d.service)
     );
-    expect(services).toEqual(["opencodeGoUsage"]);
+    expect(services).toHaveLength(2);
+    expect(new Set(services)).toEqual(
+      new Set(["opencodeGoUsage", "opencodeModelPurge"])
+    );
     expect(mounted).toHaveLength(1);
     expect(mounted[0]?.package).toBe("dsh-opencode-patch");
   });
