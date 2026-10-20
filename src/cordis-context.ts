@@ -48,6 +48,16 @@ export interface CordisContext {
   get?: (name: string) => unknown;
   inject?: (deps: string[], cb: (scope: unknown) => void) => void;
   /**
+   * The ROOT context of this composition.
+   *
+   * Cordis exposes it on every context (`typert-protocol` reads `ctx.root` to
+   * install its invocation accessor), and it is the only scope whose lifetime is
+   * the process rather than one activation — which is what a service the
+   * Gateway scans has to have. Optional because a stand-in host may not carry it;
+   * the callers fall back to the context they were given.
+   */
+  root?: CordisContext;
+  /**
    * The loader's entry list. Every configured entry the host loaded keeps its
    * raw import result there, which is how the plugin reaches a package it is
    * deliberately not a dependency of.
