@@ -82,6 +82,8 @@ export {
   newOpenCodeMessageId,
   openCodeSessionIdFor,
   OPENCODE_UA,
+  pinnedSessionId,
+  sessionIdForRequest,
   PARENT_SESSION_ALT_HEADER,
   PARENT_SESSION_HEADER,
   SESSION_AFFINITY_HEADER,

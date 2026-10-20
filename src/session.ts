@@ -200,16 +200,55 @@ export const isOpenCodeSessionId = (value: unknown): value is string =>
 export const fallbackSessionId = (envName?: string): string => {
   const name =
     envName !== undefined && envName.length > 0 ? envName : undefined;
-  if (name !== undefined) {
-    const envId: unknown = process.env[name];
-    // Validated for the same reason a pinned header is: an id the gateway
-    // rejects earns a 401 that reads like a credential fault, and a derived id
-    // is strictly better than one that cannot be accepted.
-    if (isOpenCodeSessionId(envId)) {
-      return envId;
-    }
+  return pinnedSessionId(name === undefined ? undefined : process.env[name]);
+};
+
+/**
+ * The session id a deployment PINNED, or a derived default.
+ *
+ * The decision, with the environment already read: a pinned id is used only when
+ * the gateway would accept it, because `ses_dsh_default` starts with `ses_` and
+ * is not a session id at all — sending it earns a `401 Invalid API key`, which
+ * reads as a credential fault and is really a malformed header. Anything that
+ * cannot be accepted is replaced by a derived id rather than sent as written.
+ *
+ * Split from {@link fallbackSessionId} so the rule is testable without touching
+ * `process.env`: this half is a function of its arguments.
+ *
+ * @param pinned - the value the environment held, if any.
+ * @returns a session id the gateway accepts.
+ */
+export const pinnedSessionId = (pinned: unknown): string =>
+  isOpenCodeSessionId(pinned) ? pinned : openCodeSessionIdFor("default");
+
+/**
+ * Which session id a request carries, given everything that could decide it.
+ *
+ * The precedence, in order: the id of the turn that issued the request (the only
+ * source with certainty, because it is the conversation actually running); a
+ * header the deployment pinned, when the gateway would accept it; and otherwise
+ * a derived default.
+ *
+ * Extracted from the fetch patch, where it was an inline three-branch closure —
+ * unreachable from a test and therefore uncovered by construction.
+ *
+ * @param state - the turn's own session id, when a turn is being tracked.
+ * @param pinnedHeader - the `x-opencode-session` the request already carried.
+ * @param pinnedEnv - the id the session-id environment variable held.
+ * @returns the id to send.
+ */
+export const sessionIdForRequest = (
+  state: string | undefined,
+  pinnedHeader: unknown,
+  pinnedEnv: unknown
+): string => {
+  if (state !== undefined && state.length > 0) {
+    return state;
   }
-  return openCodeSessionIdFor("default");
+  if (isOpenCodeSessionId(pinnedHeader)) {
+    return pinnedHeader;
+  }
+  return pinnedSessionId(pinnedEnv);
 };
 
 /**
