@@ -24,7 +24,11 @@ import React from "react";
 import { formatUsd } from "./go-limits.ts";
 import { isRecord } from "./guards.ts";
 import type { Translate } from "./settings-copy.ts";
-import { isRemoteCall, remoteNamespace } from "./settings-remote.ts";
+import {
+  isRemoteCall,
+  remoteNamespace,
+  remoteNamespaceOf,
+} from "./settings-remote.ts";
 import type { GoUsage, UsageWindow } from "./usage-contract.ts";
 import { formatRelativeReset, getWindowState, resetLabel } from "./usage-ui.ts";
 
@@ -79,7 +83,13 @@ export const readGoUsage = async (
     );
     return undefined;
   }
-  const namespace = remoteNamespace(remote, "opencodeGoUsage");
+  // Through the context first: `remote.<ns>` is a service property, so an
+  // undeclared read THROWS and the guard answers `undefined` — the same answer as
+  // "no service". `ctx.get` does not consult `inject`, which is what makes a
+  // namespace this bundle mounts itself readable at all.
+  const namespace =
+    remoteNamespaceOf(scope, "opencodeGoUsage") ??
+    remoteNamespace(remote, "opencodeGoUsage");
   if (namespace === undefined) {
     console.warn(
       "[dsh-opencode-patch] usage read: no opencodeGoUsage service on the remote",

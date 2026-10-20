@@ -72,3 +72,47 @@ export const remoteNamespace = (
 /** Whether a value is one of the seam's call shapes. */
 export const isRemoteCall = (value: unknown): value is RemoteCall =>
   typeof value === "function";
+
+/**
+ * Read a namespace through the CONTEXT rather than the remote face.
+ *
+ * **This is the read that works for a namespace this bundle mounts itself.**
+ * `remote.<namespace>` is a Cordis service property, so reading it requires the
+ * name in `inject` — and a name there is a hard gate that holds the whole plugin
+ * until it exists, which is a deadlock when the same plugin is what mounts it.
+ * Cordis refuses the property access with
+ * `cannot get property "remote.<ns>" without inject`, {@link remoteNamespace}
+ * catches that and answers `undefined`, and the meter then reports
+ * "no usage service" for a service that is mounted and answering.
+ *
+ * Measured in a browser console, after the contribution mounted:
+ *
+ *   property read: false; ctx.get('remote.opencodeGoUsage'): object
+ *
+ * `ctx.get` does NOT consult `inject` (cordis reads the scope's store directly),
+ * so it reaches the namespace without declaring it. That is the documented
+ * difference between `get` and property access, and it is exactly the seam this
+ * needs.
+ *
+ * @param ctx - any context in the composition the contribution mounted on.
+ * @param namespace - the Remote namespace to read.
+ * @returns the namespace's calls, or `undefined` when it is not mounted.
+ */
+export const remoteNamespaceOf = (
+  ctx: unknown,
+  namespace: string
+): RemoteNamespace | undefined => {
+  if (!isObject(ctx)) {
+    return undefined;
+  }
+  const { get } = ctx as { get?: (name: string) => unknown };
+  if (typeof get !== "function") {
+    return undefined;
+  }
+  try {
+    const face: unknown = get.call(ctx, `remote.${namespace}`);
+    return isObject(face) ? (face as RemoteNamespace) : undefined;
+  } catch {
+    return undefined;
+  }
+};

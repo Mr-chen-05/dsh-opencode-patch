@@ -19,7 +19,7 @@ import { isRecord } from "./guards.ts";
 import { OpencodeCard } from "./settings-card.tsx";
 import { en, zh } from "./settings-copy.ts";
 import { SPECS } from "./settings-fields.ts";
-import { remoteNamespace } from "./settings-remote.ts";
+import { remoteNamespace, remoteNamespaceOf } from "./settings-remote.ts";
 import { readGoUsage } from "./settings-usage.tsx";
 import { usageRemote } from "./usage-contract.ts";
 import { UsagePill } from "./usage-pill.tsx";
@@ -80,7 +80,7 @@ export const SCOPED_PKG = "@viztor/dsh-opencode-patch";
  * throw.
  */
 
-export { remoteNamespace } from "./settings-remote.ts";
+export { remoteNamespace, remoteNamespaceOf } from "./settings-remote.ts";
 
 /** The value a Remote result carries, or a thrown failure. */
 
@@ -119,6 +119,24 @@ const mountRemote = (
     }
     try {
       dispose = await ctx.remote.$mount(contribution);
+      // Say what the mount actually produced. A `$mount` that RESOLVES without
+      // installing the namespace is otherwise indistinguishable from one that
+      // worked: the surface reads `remote.<namespace>`, finds nothing, and
+      // reports "no usage service" — which is the same sentence a host with no
+      // service at all produces. This line is what tells the two apart.
+      // Say something only when the mount did NOT produce a readable namespace.
+      // A `$mount` that resolves without installing one is otherwise
+      // indistinguishable from a working mount: the surface reads
+      // `remote.<namespace>`, finds nothing, and reports "no usage service" —
+      // the same sentence a host with no service at all produces.
+      if (remoteNamespaceOf(ctx, "opencodeGoUsage") === undefined) {
+        const face = isRecord(ctx.remote) ? Object.keys(ctx.remote) : [];
+        console.warn(
+          `[dsh-opencode-patch] ${what}: the mount settled but ` +
+            `remote.opencodeGoUsage is still unreachable; the remote exposes ` +
+            `[${face.join(", ")}]`
+        );
+      }
     } catch (error) {
       console.warn(`[dsh-opencode-patch] ${what} did not mount`, error);
     }
@@ -146,6 +164,14 @@ export const inject = [
 ];
 
 export interface ClientContext {
+  /**
+   * The composition's service lookup, which does NOT consult `inject`.
+   *
+   * It is the only way to reach a Remote namespace this bundle mounts itself:
+   * `remote.<ns>` is a service property and reading it undeclared throws. See
+   * `remoteNamespaceOf` in `settings-remote.ts`.
+   */
+  get?: (name: string) => unknown;
   configForms?: {
     get: (ns: string) => unknown;
     whileServed: (
@@ -405,7 +431,13 @@ export const apply = (ctx: ClientContext): void => {
       // No Host usage service means no meter: it registers only when tracking is
       // on, and an unavailable state the user cannot act on is worse than
       // absence.
-      const usage = remoteNamespace(meterScope.remote, "opencodeGoUsage");
+      // Through `ctx.get`, which does not consult `inject` — the property read
+      // is refused for a namespace this bundle mounts itself, and the refusal is
+      // indistinguishable from "no service". Measured: `property read: false;
+      // ctx.get('remote.opencodeGoUsage'): object`.
+      const usage =
+        remoteNamespaceOf(meterScope, "opencodeGoUsage") ??
+        remoteNamespace(meterScope.remote, "opencodeGoUsage");
       if (typeof usage?.read !== "function") {
         return {
           reason: "no usage service: remote.opencodeGoUsage.read is missing",

@@ -16,6 +16,7 @@ import {
   PKG,
   SPECS,
 } from "../src/settings-page.tsx";
+import { remoteNamespace, remoteNamespaceOf } from "../src/settings-remote.ts";
 import {
   elementName,
   findAll,
@@ -1360,6 +1361,36 @@ describe("settings-page: every remote gets a mount", () => {
     for (const unmount of unmounts) {
       unmount();
     }
+  });
+
+  it("reads the usage namespace through ctx.get, not the remote property", async () => {
+    // Measured in a browser console, after the contribution mounted:
+    //   property read: false; ctx.get('remote.opencodeGoUsage'): object
+    //
+    // `remote.<ns>` is a Cordis service property, so reading it needs the name in
+    // `inject` — a hard gate that deadlocks when this same bundle is what mounts
+    // it. The property read throws, the guard answers `undefined`, and the meter
+    // reported "no usage service" for a service that was mounted and answering.
+    // `ctx.get` does not consult `inject`, so it is the read that works.
+    const usage = { read: async () => ({ ok: true, value: {} }) };
+    const scope = {
+      get: (name: string) =>
+        name === "remote.opencodeGoUsage" ? usage : undefined,
+      // The property read is REFUSED, exactly as Cordis refuses it.
+      remote: new Proxy(
+        {},
+        {
+          get: () => {
+            throw new Error(
+              'cannot get property "remote.opencodeGoUsage" without inject'
+            );
+          },
+        }
+      ),
+    };
+    expect(remoteNamespaceOf(scope, "opencodeGoUsage")).toBe(usage);
+    // And the property path on its own really is unusable here.
+    expect(remoteNamespace(scope.remote, "opencodeGoUsage")).toBeUndefined();
   });
 
   it("does not spend the one registration on a scope without `slots`", async () => {

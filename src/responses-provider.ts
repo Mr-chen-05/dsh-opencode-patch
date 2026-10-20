@@ -954,13 +954,19 @@ export const registerResponsesProvider = async (
     const ids = await declaredModelsFor(ctx, plane);
     declaredByPlane.set(plane, ids);
     if (ids.size === 0) {
-      // Console, like the other boot lines: this is the decision a reader has to
-      // be able to verify — that nothing the deployment did not declare was
-      // mounted. It is also what a keyless deployment sees, which is correct:
-      // its route advertises nothing yet, so nothing is served for it here.
+      // **Say both causes, because this side cannot tell them apart.** The host
+      // answers `[]` from `listModels` either when the route declares no models or
+      // when its credential does not resolve (`dsh-llm-pi-ai/lib/index.js:1894`
+      // returns `[]` on MISSING_CREDENTIAL), and a route the deployment DID
+      // configure lands in the second case whenever the credential service is not
+      // readable in this process. Claiming "no models declared" was a lie in
+      // exactly the state that prompts an operator to check — measured on a second
+      // instance against a store that holds both keys: the profile declares 16 and
+      // 11 models, and the plugin announced there were none.
       console.info(
-        `[dsh-opencode-patch] ${plane}: no models declared on the route — ` +
-          "no internal route is mounted for it"
+        `[dsh-opencode-patch] ${plane}: no models could be read for the route — ` +
+          "it declares none, or its credential is not resolvable in this " +
+          "process — so no internal route is mounted for it"
       );
     }
   }
