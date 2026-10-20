@@ -70,6 +70,36 @@ const FORBIDDEN: readonly {
   },
 ];
 
+describe("architecture · no source module imports a test library", () => {
+  const SRC = join(import.meta.dirname, "..", "src");
+
+  it("keeps vitest and testing-library out of everything in src/", () => {
+    // Wider than `utils/`: an effect module importing `vitest` would be just as
+    // fatal to a published package, and just as invisible in review. The gate on
+    // `lib/client.js`'s requires catches it only if the import survives to the
+    // bundle, which a type-only import does not.
+    const violations: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!/\.tsx?$/u.test(entry.name)) {
+          continue;
+        }
+        const source = stripComments(readFileSync(full, "utf8"));
+        if (/from\s+"(?:vitest|@testing-library[^"]*)"/u.test(source)) {
+          violations.push(full.slice(SRC.length + 1));
+        }
+      }
+    };
+    walk(SRC);
+    expect(violations).toEqual([]);
+  });
+});
+
 describe("architecture · utils/ holds only pure functions", () => {
   it("has utilities to check", () => {
     // Without this the suite passes vacuously on an empty folder — the exact

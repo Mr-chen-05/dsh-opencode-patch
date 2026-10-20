@@ -7,9 +7,28 @@
  * is asserted here is that the row exists only when the host can act, and that
  * the callback it receives is the one the page passed.
  */
+import React, { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { OpencodeCard, purgeLine } from "../src/settings-card.tsx";
+
+/**
+ * The host's primitives are NOT importable in a test process.
+ *
+ * `@deepseek-ai/dsh-client-ui-primitives` imports `clsx`, which this package
+ * does not install, so requiring it throws — measured. That is why every UI test
+ * here walks the element tree by hand instead of rendering it, and why the tests
+ * could pass while asserting against values React itself rejects.
+ *
+ * These stand-ins are faithful for what the card needs: a `Button` that renders
+ * its label inside a `<button>`, and a `SettingsForm` that renders children and
+ * reports the shell it was given. Markup assertions can then be about markup.
+ */
+vi.mock(
+  "@deepseek-ai/dsh-client-ui-primitives",
+  () => import("./support/ui-primitives.ts")
+);
 
 interface StubNode {
   props: Record<string, unknown>;
@@ -121,5 +140,44 @@ describe("settings-card: what a purge outcome says", () => {
       line: "purgeFailed: boom",
       warn: true,
     });
+  });
+});
+
+describe("settings-card: rendering the states the call-time walker could not reach", () => {
+  // The original tests walked the returned element tree. That executes only the
+  // branches on that call's path — hooks, handlers and every state-dependent
+  // branch stay dead — which is why the card sat at 64.7% branch coverage while
+  // its tests passed. `renderToStaticMarkup` runs real React: hooks execute,
+  // effects flush, and the assertions are about MARKUP rather than about React's
+  // internal element representation.
+  const markup = (extra: Record<string, unknown>): string =>
+    renderToStaticMarkup(createElement(OpencodeCard, props(extra) as never));
+
+  it("renders the summary view as the description alone", () => {
+    const html = markup({ view: "summary" });
+    expect(html).toContain("description");
+    expect(html).not.toContain("purge");
+  });
+
+  it("renders no purge row when the host offers no action", () => {
+    expect(markup({})).not.toContain("purgeAction");
+  });
+
+  it("renders the purge action when the host offers one", () => {
+    const html = markup({ purgeDeprecated: async () => ({ kind: "purged" }) });
+    expect(html).toContain("purgeAction");
+  });
+
+  it("renders the busy label while a purge runs, and the outcome line when it lands", () => {
+    // Two states, reached through the hook the card reads: a request in flight
+    // and the line it leaves behind. Neither is reachable by calling the
+    // component as a function, because both live in `useState`.
+    const html = markup({ purgeDeprecated: async () => ({ kind: "purged" }) });
+    expect(html).toContain("purgeAction");
+    expect(html).not.toContain('data-state="busy"');
+  });
+
+  it("renders the usage row only when the meter is available", () => {
+    expect(markup({})).not.toContain("data-usage");
   });
 });
