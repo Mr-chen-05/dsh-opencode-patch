@@ -19,6 +19,7 @@ import {
   isOpenCodeSessionId,
   newOpenCodeMessageId,
   openCodeSessionIdFor,
+  sessionIdForRequest,
   type ActiveTurnState,
   withStore,
 } from "../src/index.ts";
@@ -437,5 +438,48 @@ describe("newOpenCodeMessageId: the value x-opencode-request carries", () => {
       expect(isOpenCodeMessageId(bad), bad).toBe(false);
     }
     expect(isOpenCodeMessageId(42)).toBe(false);
+  });
+});
+
+describe("session · which id a request carries", () => {
+  const VALID = `ses_0123456789ab${"A".repeat(14)}`;
+  const PINNED = `ses_abcdef012345${"B".repeat(14)}`;
+  // The "absent" case, named so it reads as a value rather than lint noise.
+  const ABSENT = undefined;
+
+  it("prefers the turn's own id above everything", () => {
+    // The only source with certainty: it is the conversation actually running.
+    expect(sessionIdForRequest(VALID, PINNED, PINNED)).toBe(VALID);
+  });
+
+  it("ignores an empty turn id and falls through", () => {
+    expect(sessionIdForRequest("", PINNED, ABSENT)).toBe(PINNED);
+  });
+
+  it("honours a pinned header only when the gateway would accept it", () => {
+    expect(sessionIdForRequest(ABSENT, PINNED, ABSENT)).toBe(PINNED);
+    // `ses_dsh_default` starts with `ses_` and is not a session id; sending it
+    // earns a 401 that reads like a credential fault.
+    const derived = sessionIdForRequest(ABSENT, "ses_dsh_default", ABSENT);
+    expect(derived).not.toBe("ses_dsh_default");
+    expect(isOpenCodeSessionId(derived)).toBe(true);
+  });
+
+  it("prefers a valid pinned header over the environment", () => {
+    expect(sessionIdForRequest(ABSENT, PINNED, VALID)).toBe(PINNED);
+  });
+
+  it("uses a valid pinned env id, and derives when it is not one", () => {
+    expect(sessionIdForRequest(ABSENT, ABSENT, VALID)).toBe(VALID);
+    for (const bad of [undefined, null, "", "ses_dsh_default", 42]) {
+      const derived = sessionIdForRequest(ABSENT, ABSENT, bad);
+      expect(isOpenCodeSessionId(derived), String(bad)).toBe(true);
+    }
+  });
+
+  it("derives the same default every time, so a conversation stays stable", () => {
+    expect(sessionIdForRequest(ABSENT, ABSENT, ABSENT)).toBe(
+      sessionIdForRequest(ABSENT, ABSENT, ABSENT)
+    );
   });
 });

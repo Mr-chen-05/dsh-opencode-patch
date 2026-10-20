@@ -35,7 +35,6 @@ import {
   toolNamesOf,
 } from "./request-shape.ts";
 import {
-  fallbackSessionId,
   isOpenCodeMessageId,
   isOpenCodeSessionId,
   OPENCODE_UA,
@@ -44,6 +43,7 @@ import {
   SESSION_AFFINITY_HEADER,
   SESSION_HEADER,
   SESSION_ID_HEADER,
+  sessionIdForRequest,
 } from "./session.ts";
 import { maybeInjectCoreTools } from "./tool-fallback.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
@@ -130,25 +130,6 @@ export const isOpenCodeRequest = (
     return true;
   }
   return false;
-};
-
-const resolveSessionHeader = (
-  state: ActiveTurnState | undefined,
-  headers: Headers,
-  sessionIdEnv: string
-): string => {
-  if (state) {
-    return state.value;
-  }
-  // A header a deployment pinned is honoured only when the gateway would accept
-  // it. `ses_dsh_default` starts with `ses_` and is not a session id, and sending
-  // it earns a 401 that reads like a credential fault — so a malformed one is
-  // replaced by a derived id rather than passed through.
-  const existing = headers.get(SESSION_HEADER);
-  if (isOpenCodeSessionId(existing)) {
-    return existing;
-  }
-  return fallbackSessionId(sessionIdEnv);
 };
 
 /**
@@ -348,10 +329,14 @@ export const patchFetch = (
     // paths into one gateway - so nothing here has to pick one. `x-opencode-
     // request` is the one header of the set this plugin does not send, because
     // the CLI fills it from its own user id and the turn store has no equivalent.
-    const sessionVal = resolveSessionHeader(
-      state,
-      headers,
-      config.sessionIdEnv
+    const envName =
+      config.sessionIdEnv !== undefined && config.sessionIdEnv.length > 0
+        ? config.sessionIdEnv
+        : undefined;
+    const sessionVal = sessionIdForRequest(
+      state?.value,
+      headers.get(SESSION_HEADER),
+      envName === undefined ? undefined : process.env[envName]
     );
     headers.set("x-opencode-session-id", sessionVal);
     headers.set(SESSION_HEADER, sessionVal);
