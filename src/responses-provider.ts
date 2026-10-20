@@ -890,12 +890,21 @@ export const declaredModelsFromLoader = (
   } catch {
     return undefined;
   }
-  if (!Array.isArray(entries)) {
+  // The host's `loader.entries()` is a GENERATOR, not an array — an
+  // `Array.isArray` guard rejects it and this answers `undefined` for a loader
+  // that works, which is exactly what happened.
+  if (entries === null || typeof entries !== "object") {
+    return undefined;
+  }
+  if (
+    typeof (entries as { [Symbol.iterator]?: unknown })[Symbol.iterator] !==
+    "function"
+  ) {
     return undefined;
   }
   const ids = new Set<string>();
   let found = false;
-  for (const entry of entries) {
+  for (const entry of entries as Iterable<unknown>) {
     if (!isRecord(entry) || !isRecord(entry.options)) {
       continue;
     }
