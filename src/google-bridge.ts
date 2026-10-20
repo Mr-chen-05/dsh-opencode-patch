@@ -67,9 +67,9 @@ import type { CatalogModelSpec } from "./catalog-data.ts";
 import type { EndpointFamily } from "./config-values.ts";
 import { readCredentialsResolver } from "./cordis-context.ts";
 import { resolveOpencodeStoreKey } from "./go-discovery.ts";
-import { isRecord } from "./guards.ts";
 import { type Plane, piModelFor } from "./pi-provider.ts";
 import { GOOGLE_INTERNAL_ROUTE } from "./responses-routes.ts";
+import { isRecord } from "./utils/guards.ts";
 
 /**
  * pi's installed catalog entry for one model on one plane, or undefined when

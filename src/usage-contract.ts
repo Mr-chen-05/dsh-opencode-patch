@@ -10,8 +10,8 @@ import type {
   TypertRemoteContribution,
 } from "@deepseek-ai/dsh-typert-protocol";
 
-import { isRecord } from "./guards.ts";
 import type { SessionUsageSnapshot } from "./session-cost.ts";
+import { isRecord } from "./utils/guards.ts";
 
 /** The active model's published monthly allowance, resolved on the Host. */
 export interface ModelAllowanceSnapshot {

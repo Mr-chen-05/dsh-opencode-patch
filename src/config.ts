@@ -28,7 +28,7 @@ import {
   readString,
   readStringList,
 } from "./config-values.ts";
-import { isRecord } from "./guards.ts";
+import { isRecord } from "./utils/guards.ts";
 
 export {
   DEFAULT_ENDPOINT_FAMILY,

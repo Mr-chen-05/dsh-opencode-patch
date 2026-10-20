@@ -27,14 +27,6 @@ import {
   isModelsListingUrl,
 } from "./models-catalog.ts";
 import {
-  ANTHROPIC_VERSION,
-  authHeaderFor,
-  gatewayPlaneFor,
-  headerSourceOf,
-  requestUrlOf,
-  toolNamesOf,
-} from "./request-shape.ts";
-import {
   isOpenCodeMessageId,
   isOpenCodeSessionId,
   OPENCODE_UA,
@@ -43,10 +35,19 @@ import {
   SESSION_AFFINITY_HEADER,
   SESSION_HEADER,
   SESSION_ID_HEADER,
+  digestOf,
   sessionIdForRequest,
 } from "./session.ts";
 import { maybeInjectCoreTools } from "./tool-fallback.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
+import {
+  ANTHROPIC_VERSION,
+  authHeaderFor,
+  gatewayPlaneFor,
+  headerSourceOf,
+  requestUrlOf,
+  toolNamesOf,
+} from "./utils/request-shape.ts";
 
 /**
  * Whether the model a body names is one the gateway admits with no key.
@@ -336,7 +337,8 @@ export const patchFetch = (
     const sessionVal = sessionIdForRequest(
       state?.value,
       headers.get(SESSION_HEADER),
-      envName === undefined ? undefined : process.env[envName]
+      envName === undefined ? undefined : process.env[envName],
+      digestOf
     );
     headers.set("x-opencode-session-id", sessionVal);
     headers.set(SESSION_HEADER, sessionVal);

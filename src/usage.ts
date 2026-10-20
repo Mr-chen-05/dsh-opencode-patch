@@ -27,7 +27,6 @@ import {
 } from "./go-discovery.ts";
 import { GO_MODEL_LIMITS } from "./go-limits-data.ts";
 import { allowanceFor, type ModelAllowance } from "./go-limits.ts";
-import { isRecord } from "./guards.ts";
 import { OPENCODE_PATCH_USER_AGENT } from "./identity.ts";
 import {
   type CatalogModelSpec,
@@ -48,6 +47,7 @@ import {
   type UsageQuery,
   type UsageWindow,
 } from "./usage-contract.ts";
+import { isRecord } from "./utils/guards.ts";
 
 const USAGE_MAX_BYTES = 1024 * 1024;
 

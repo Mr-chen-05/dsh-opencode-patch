@@ -29,7 +29,6 @@ import { type CordisContext, readEntryOptions } from "./cordis-context.ts";
 import { recordDebug } from "./debug.ts";
 import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
-import { isFetchFunction, isRecord } from "./guards.ts";
 import { LEGACY_NAME, LEGACY_PKG, name } from "./identity.ts";
 import { getCapturedApiKey, isPlaceholderApiKey } from "./key-capture.ts";
 import {
@@ -50,6 +49,7 @@ import { isServableSdk } from "./responses-routes.ts";
 import { createStreamHook } from "./stream-hook.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
 import { GoUsageService } from "./usage.ts";
+import { isFetchFunction, isRecord } from "./utils/guards.ts";
 
 /**
  * One catalog row in the shape DSH's model-discovery surface expects.

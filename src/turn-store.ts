@@ -10,7 +10,7 @@
 
 import type { AsyncLocalStorage } from "node:async_hooks";
 
-import { getAsyncIterator } from "./guards.ts";
+import { getAsyncIterator } from "./utils/guards.ts";
 
 /** What one active streamed turn contributes to outgoing requests. */
 export interface ActiveTurnState {

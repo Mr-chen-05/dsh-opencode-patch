@@ -12,7 +12,7 @@
  */
 
 import { readString } from "./config-values.ts";
-import { isFunctionLike, isRecord } from "./guards.ts";
+import { isFunctionLike, isRecord } from "./utils/guards.ts";
 
 /**
  * The disposer `llm.registerAdapter` returns.

@@ -15,7 +15,6 @@ import {
 } from "@deepseek-ai/dsh-client-ui-primitives";
 
 import { DEFAULT_PROVIDERS, readStringList } from "./config-values.ts";
-import { isRecord } from "./guards.ts";
 import { purgeRemote } from "./purge-contract.ts";
 import { OpencodeCard } from "./settings-card.tsx";
 import { en, zh } from "./settings-copy.ts";
@@ -25,6 +24,7 @@ import { remoteNamespace, remoteNamespaceOf } from "./settings-remote.ts";
 import { readGoUsage } from "./settings-usage.tsx";
 import { usageRemote } from "./usage-contract.ts";
 import { UsagePill } from "./usage-pill.tsx";
+import { isRecord } from "./utils/guards.ts";
 
 // Re-exported so the field register stays reachable from the bundle entry.
 export { SPECS };

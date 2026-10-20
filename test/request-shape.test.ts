@@ -17,7 +17,7 @@ import {
   modelIdOf,
   requestUrlOf,
   toolNamesOf,
-} from "../src/request-shape.ts";
+} from "../src/utils/request-shape.ts";
 
 describe("request-shape · gatewayPlaneFor", () => {
   it("attributes each endpoint family to its plane", () => {

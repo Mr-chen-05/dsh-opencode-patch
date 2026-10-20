@@ -446,40 +446,57 @@ describe("session · which id a request carries", () => {
   const PINNED = `ses_abcdef012345${"B".repeat(14)}`;
   // The "absent" case, named so it reads as a value rather than lint noise.
   const ABSENT = undefined;
+  // A DETERMINISTIC digest: the point of injecting it is that the rule can be
+  // exercised without arranging a crypto module or depending on a real hash.
+  const digest = (value: string) => {
+    const bytes = new Uint8Array(32);
+    for (let i = 0; i < value.length; i += 1) {
+      bytes[i % 32] = (bytes[i % 32] ?? 0) + (value.codePointAt(i) ?? 0);
+    }
+    return {
+      bytes,
+      hex: [...bytes].map((b) => b.toString(16).padStart(2, "0")).join(""),
+    };
+  };
 
   it("prefers the turn's own id above everything", () => {
     // The only source with certainty: it is the conversation actually running.
-    expect(sessionIdForRequest(VALID, PINNED, PINNED)).toBe(VALID);
+    expect(sessionIdForRequest(VALID, PINNED, PINNED, digest)).toBe(VALID);
   });
 
   it("ignores an empty turn id and falls through", () => {
-    expect(sessionIdForRequest("", PINNED, ABSENT)).toBe(PINNED);
+    expect(sessionIdForRequest("", PINNED, ABSENT, digest)).toBe(PINNED);
   });
 
   it("honours a pinned header only when the gateway would accept it", () => {
-    expect(sessionIdForRequest(ABSENT, PINNED, ABSENT)).toBe(PINNED);
+    expect(sessionIdForRequest(ABSENT, PINNED, ABSENT, digest)).toBe(PINNED);
     // `ses_dsh_default` starts with `ses_` and is not a session id; sending it
     // earns a 401 that reads like a credential fault.
-    const derived = sessionIdForRequest(ABSENT, "ses_dsh_default", ABSENT);
+    const derived = sessionIdForRequest(
+      ABSENT,
+      "ses_dsh_default",
+      ABSENT,
+      digest
+    );
     expect(derived).not.toBe("ses_dsh_default");
     expect(isOpenCodeSessionId(derived)).toBe(true);
   });
 
   it("prefers a valid pinned header over the environment", () => {
-    expect(sessionIdForRequest(ABSENT, PINNED, VALID)).toBe(PINNED);
+    expect(sessionIdForRequest(ABSENT, PINNED, VALID, digest)).toBe(PINNED);
   });
 
   it("uses a valid pinned env id, and derives when it is not one", () => {
-    expect(sessionIdForRequest(ABSENT, ABSENT, VALID)).toBe(VALID);
+    expect(sessionIdForRequest(ABSENT, ABSENT, VALID, digest)).toBe(VALID);
     for (const bad of [undefined, null, "", "ses_dsh_default", 42]) {
-      const derived = sessionIdForRequest(ABSENT, ABSENT, bad);
+      const derived = sessionIdForRequest(ABSENT, ABSENT, bad, digest);
       expect(isOpenCodeSessionId(derived), String(bad)).toBe(true);
     }
   });
 
   it("derives the same default every time, so a conversation stays stable", () => {
-    expect(sessionIdForRequest(ABSENT, ABSENT, ABSENT)).toBe(
-      sessionIdForRequest(ABSENT, ABSENT, ABSENT)
+    expect(sessionIdForRequest(ABSENT, ABSENT, ABSENT, digest)).toBe(
+      sessionIdForRequest(ABSENT, ABSENT, ABSENT, digest)
     );
   });
 });
