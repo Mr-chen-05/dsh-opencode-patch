@@ -324,6 +324,75 @@ describe("decorateModelDiscovery", () => {
   });
 });
 
+describe("models-discovery · an empty list from a route that declares models", () => {
+  it("falls back to the declaration, so the picker is not emptied by a missing key", async () => {
+    // `dsh-llm-pi-ai` resolves the route's credential before listing and answers
+    // [] when it cannot — at boot, the ordinary case. Measured consequence: the
+    // composer offered none of that route's models at all, so there was no
+    // OpenCode model to select and the usage meter (gated to OpenCode) could
+    // never appear.
+    const ctx = {
+      llm: {
+        listProviders: () => [{ id: "opencode" }],
+        listConfigurableProviders: () => [],
+        listModels: async () => [],
+      },
+      loader: {
+        entries: () => [
+          {
+            options: {
+              config: {
+                providers: {
+                  opencode: { models: [{ id: "gpt-5.4", name: "GPT-5.4" }] },
+                },
+              },
+            },
+          },
+        ],
+      },
+    } as unknown as CordisContext;
+    const stop = hideResponsesRoute(ctx, resolveConfig());
+    const listed = (await ctx.llm?.listModels?.("opencode")) as Array<{
+      id: string;
+      name: string;
+      provider: string;
+    }>;
+    expect(listed).toEqual([
+      { id: "gpt-5.4", name: "GPT-5.4", provider: "opencode" },
+    ]);
+    stop?.();
+  });
+
+  it("leaves an adapter's own answer alone", async () => {
+    const ctx = {
+      llm: {
+        listProviders: () => [],
+        listConfigurableProviders: () => [],
+        listModels: async () => [
+          { id: "adapter-row", name: "Adapter Row", provider: "opencode" },
+        ],
+      },
+      loader: {
+        entries: () => [
+          {
+            options: {
+              config: {
+                providers: { opencode: { models: [{ id: "declared" }] } },
+              },
+            },
+          },
+        ],
+      },
+    } as unknown as CordisContext;
+    const stop = hideResponsesRoute(ctx, resolveConfig());
+    const listed = (await ctx.llm?.listModels?.("opencode")) as Array<{
+      id: string;
+    }>;
+    expect(listed.map((m) => m.id)).toEqual(["adapter-row"]);
+    stop?.();
+  });
+});
+
 describe("models-discovery: hiding the internal Responses route", () => {
   const hostWith = () => {
     const seen: string[] = [];

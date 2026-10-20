@@ -606,3 +606,105 @@ export const resolveRoutedKey = async (
     tier,
   };
 };
+
+/** One model entry as the operator declared it in a provider row. */
+export interface DeclaredModel {
+  readonly id: string;
+  readonly name?: string;
+}
+
+/**
+ * The models a provider row DECLARES, read from the loader's configuration.
+ *
+ * **Credential-free, which is the point.** `ctx.llm.listModels(route)` resolves
+ * the route's credential first and answers `[]` when it cannot, so at boot — the
+ * ordinary case — a route that declares nineteen models reads as declaring none.
+ * Measured consequences, both from the same cause:
+ *
+ *   - no internal route was mounted for the plane;
+ *   - the composer's picker offered none of that route's models at all.
+ *
+ * The declaration itself needs no credential: it is the `models:` array the
+ * operator wrote, in the loader entry's config — the same shape
+ * {@link discoverGoConfig} already walks.
+ *
+ * `ctx.get` first, because `ctx.loader` throws without the name in `inject`; the
+ * property is the guarded fallback for a context that serves only that.
+ *
+ * @param ctx - the host context.
+ * @param route - the provider route id (`opencode`, `opencode-go`, ...).
+ * @returns the declared entries, or `undefined` when the loader holds no row for
+ *   that route — "cannot read" and "declares nothing" must stay distinguishable.
+ */
+export const declaredProviderModels = (
+  ctx: unknown,
+  route: string
+): readonly DeclaredModel[] | undefined => {
+  if (!isRecord(ctx)) {
+    return undefined;
+  }
+  let loader: unknown;
+  const { get } = ctx as { get?: unknown };
+  if (typeof get === "function") {
+    try {
+      loader = Reflect.apply(get, ctx, ["loader"]);
+    } catch {
+      loader = undefined;
+    }
+  }
+  if (loader === undefined) {
+    try {
+      const { loader: viaProperty } = ctx as { loader?: unknown };
+      loader = viaProperty;
+    } catch {
+      return undefined;
+    }
+  }
+  if (!isRecord(loader) || typeof loader.entries !== "function") {
+    return undefined;
+  }
+  let entries: unknown;
+  try {
+    entries = Reflect.apply(loader.entries, loader, []);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(entries)) {
+    return undefined;
+  }
+  const declared: DeclaredModel[] = [];
+  let found = false;
+  for (const entry of entries) {
+    if (!isRecord(entry) || !isRecord(entry.options)) {
+      continue;
+    }
+    const config: unknown = entry.options.config;
+    if (!isRecord(config) || !isRecord(config.providers)) {
+      continue;
+    }
+    const provider: unknown = config.providers[route];
+    if (!isRecord(provider)) {
+      continue;
+    }
+    found = true;
+    const models: unknown = provider.models;
+    if (!Array.isArray(models)) {
+      continue;
+    }
+    for (const model of models) {
+      if (!isRecord(model) || typeof model.id !== "string") {
+        continue;
+      }
+      if (model.id.length === 0) {
+        continue;
+      }
+      declared.push({
+        id: model.id,
+        ...(typeof model.name === "string" && model.name.length > 0
+          ? { name: model.name }
+          : {}),
+      });
+    }
+  }
+  return found ? declared : undefined;
+};
