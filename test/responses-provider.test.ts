@@ -1717,11 +1717,17 @@ describe("responses-provider · an empty declaration mounts nothing", () => {
       await registerResponsesProvider(ctx);
       // Nothing declared, so nothing registered — the whole point.
       expect(registered).toEqual([]);
-      expect(
-        info.mock.calls.some((call) =>
-          String(call[0]).includes("no models declared on the route")
-        )
-      ).toBe(true);
+      // The report must not assert a cause it cannot see. `[]` means either "this
+      // route declares nothing" or "its credential did not resolve" — a route the
+      // deployment DID configure lands in the second case when the credential
+      // service is unreadable in this process, and announcing "no models declared"
+      // there sends the operator looking at a configuration that was never wrong.
+      const line = info.mock.calls
+        .map((call) => String(call[0]))
+        .find((text) => text.includes("no models could be read"));
+      expect(line).toBeDefined();
+      expect(line).toContain("declares none");
+      expect(line).toContain("credential is not resolvable");
     } finally {
       info.mockRestore();
     }
