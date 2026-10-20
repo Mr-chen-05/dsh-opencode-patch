@@ -10,6 +10,7 @@
  */
 
 import {
+  Button,
   SettingsForm,
   type SettingsFormShell,
 } from "@deepseek-ai/dsh-client-ui-primitives";
@@ -19,6 +20,7 @@ import { SettingsBooleanField } from "./settings-boolean-field.tsx";
 import { SettingsChoiceField } from "./settings-choice-field.tsx";
 import type { Translate } from "./settings-copy.ts";
 import { CARD_FIELDS, type CardFieldSpec } from "./settings-fields.ts";
+import type { PurgeOutcome } from "./settings-purge.ts";
 import { UsageSummary } from "./settings-usage.tsx";
 import type { GoUsage } from "./usage-contract.ts";
 
@@ -57,12 +59,126 @@ const GroupHeading: React.FC<{ first: boolean; label: string }> = (props) => (
   </div>
 );
 
+/**
+ * The purge row: one sentence, one button, and the outcome underneath.
+ *
+ * It says "rewrites your profile" rather than "hides", because that is what it
+ * does — a read-time filter would leave the declaration in place and make the
+ * model's absence unexplainable from the configuration.
+ */
+/**
+ * What one outcome says, and whether it reads as a warning.
+ *
+ * Pure, so every branch is reachable from a test without mounting a component —
+ * the container below then has no decisions left in it.
+ */
+export const purgeLine = (
+  t: Translate,
+  outcome: PurgeOutcome
+): { line: string; warn: boolean } => {
+  if (outcome.kind === "unavailable") {
+    return { line: t("purgeUnavailable"), warn: true };
+  }
+  if (outcome.kind === "failed") {
+    return { line: `${t("purgeFailed")}: ${outcome.message}`, warn: true };
+  }
+  if (outcome.result.removed.length === 0) {
+    return outcome.result.catalogRead
+      ? { line: t("purgeNothing"), warn: false }
+      : { line: t("purgeCatalogUnread"), warn: true };
+  }
+  return {
+    line: `${String(outcome.result.removed.length)} ${t("purgeRemoved")}`,
+    warn: false,
+  };
+};
+
+const PurgeRow: React.FC<{
+  onPurge: () => Promise<PurgeOutcome>;
+  t: Translate;
+}> = (props) => {
+  const [state, setState] = React.useState<{
+    busy: boolean;
+    line?: string;
+    warn?: boolean;
+  }>({ busy: false });
+
+  const run = async (): Promise<void> => {
+    setState({ busy: true });
+    const outcome = await props.onPurge();
+    setState({ busy: false, ...purgeLine(props.t, outcome) });
+  };
+
+  return (
+    <div
+      style={{
+        borderBottom: "0.5px solid var(--dsw-alias-border-l2)",
+        marginBottom: 16,
+        paddingBottom: 14,
+      }}
+    >
+      <div
+        style={{
+          alignItems: "center",
+          display: "flex",
+          gap: 12,
+          justifyContent: "space-between",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>
+            {props.t("purgeTitle")}
+          </div>
+          <div
+            style={{
+              color: "var(--dsw-alias-label-caption)",
+              fontSize: 12,
+              marginTop: 2,
+            }}
+          >
+            {props.t("purgeHint")}
+          </div>
+        </div>
+        <Button
+          disabled={state.busy}
+          onClick={() => {
+            void run();
+          }}
+          size="sm"
+          variant="outline"
+        >
+          {state.busy ? props.t("purgeBusy") : props.t("purgeAction")}
+        </Button>
+      </div>
+      {state.line !== undefined && (
+        <div
+          style={{
+            color: state.warn
+              ? "var(--dsw-alias-label-warning, var(--dsw-alias-label-caption))"
+              : "var(--dsw-alias-label-caption)",
+            fontSize: 12,
+            marginTop: 6,
+          }}
+        >
+          {state.line}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export interface CardProps {
   discard: () => void;
   /** The active UI language, read at render so a switch moves this section too. */
   getLocale?: () => string | undefined;
   /** The Host's quota read; absent when the usage service is not registered. */
   readUsage?: () => Promise<GoUsage | undefined>;
+  /**
+   * The Host's purge action, absent when no purge service is mounted. The row is
+   * rendered only when this exists: a button that cannot act is worse than no
+   * row, because it invites a click that explains nothing.
+   */
+  purgeDeprecated?: () => Promise<PurgeOutcome>;
   /**
    * The Host's sign-in remote. Never absent: the page always hands over the three
    * calls, and each resolves the service when it is invoked, so a remote that mounts
@@ -194,6 +310,9 @@ export const OpencodeCard: React.FC<CardProps> = (props: CardProps) => {
             t={t}
           />
         </div>
+      )}
+      {props.purgeDeprecated !== undefined && (
+        <PurgeRow onPurge={props.purgeDeprecated} t={t} />
       )}
       <SettingsForm
         labels={formLabels(t)}
