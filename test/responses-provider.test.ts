@@ -710,10 +710,16 @@ describe("responses-provider: registration is best-effort", () => {
   });
 
   it("stands down when the host offers no scope to mount into", async () => {
-    const info = vi.fn();
+    // A route that declares nothing has nothing to mount, so the mount stands
+    // down before it ever looks for a scope — and registering an adapter anyway
+    // is what used to put the catalog on a route the user had not filled.
     const ctx = {
-      llm: { listProviders: () => [], registerAdapter: vi.fn() },
-      logger: { info },
+      llm: {
+        listModels: async () => [],
+        listProviders: () => [],
+        registerAdapter: vi.fn(),
+      },
+      logger: { info: () => {}, warn: () => {} },
       loader: {
         entries: () => [
           {
@@ -725,9 +731,7 @@ describe("responses-provider: registration is best-effort", () => {
       },
     } as unknown as CordisContext;
     await expect(registerResponsesProvider(ctx)).resolves.toBeUndefined();
-    expect(info).toHaveBeenCalledWith(
-      expect.stringContaining("no isolate/plugin scope")
-    );
+    expect(ctx.llm?.registerAdapter).not.toHaveBeenCalled();
   });
 });
 
@@ -1574,9 +1578,10 @@ describe("responses-provider · declared models a missing route would strand", (
 });
 
 describe("responses-provider · the keyless and unreadable declarations", () => {
-  it("keeps a route whole when the host cannot list its models", async () => {
-    // `declaredModelsFor` answers `undefined` when the service is absent, which the
-    // mount must read as "could not tell" rather than "declared nothing".
+  it("mounts nothing when the host cannot list its models", async () => {
+    // No `listModels` means no declaration can be read. That is now the same
+    // answer as an empty one — nothing — because filling the gap with the
+    // catalog is what put 58 undeclared models on hidden routes.
     const ctx = {
       llm: { listProviders: () => [], registerAdapter: () => () => {} },
       loader: { entries: () => [] },
@@ -1612,8 +1617,9 @@ describe("responses-provider · the keyless and unreadable declarations", () => 
   });
 
   it("does not throw when the listing fails", async () => {
-    // A host whose `listModels` throws is the same case as one that has none: the
-    // mount falls back to the catalog rather than failing the boot.
+    // A host whose `listModels` throws is the same case as one that answers
+    // nothing: no declaration can be read, so nothing is mounted and the boot
+    // does not fail. Mounting the catalog instead is the override this removed.
     const ctx = {
       llm: {
         listModels: () => {
@@ -1679,13 +1685,20 @@ describe("responses-provider · declared models the catalog cannot describe", ()
   });
 });
 
-describe("responses-provider · an unreadable declaration is not an empty one", () => {
-  it("keeps the route when the host answers [] because no key resolved", async () => {
+describe("responses-provider · an empty declaration mounts nothing", () => {
+  it("mounts no internal route when the host answers [] for a route", async () => {
     // `dsh-llm-pi-ai` answers `[]` from `listModels` when the route's credential
-    // cannot be resolved (`lib/index.js:1894`), which is the keyless deployment
-    // this plugin supports for free models. Reading that as "declared nothing"
-    // mounts no internal route and breaks the protocol split for a deployment that
-    // merely lacks a key.
+    // cannot be resolved (`lib/index.js:1894`) — the keyless deployment this
+    // plugin supports. An earlier revision read that as "the declaration could
+    // not be read" and fell back to the whole catalog; measured on a live host,
+    // that mounted 58 models the deployment never declared:
+    //
+    //   mounted opencode-responses … 30 model(s); opencode-anthropic … 18;
+    //   opencode-go-responses … 5; opencode-go-anthropic … 5
+    //
+    // A route's model list belongs to the operator, so `[]` now mounts nothing.
+    // Dispatch does not depend on these routes any more: `decoratePlaneAdapters`
+    // names each model's `api`, and `dsh-llm-pi-ai` dispatches per model.
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const registered: string[] = [];
     const ctx = {
@@ -1702,12 +1715,11 @@ describe("responses-provider · an unreadable declaration is not an empty one", 
     } as unknown as CordisContext;
     try {
       await registerResponsesProvider(ctx);
-      // Nothing could be narrowed, so the mount is not narrowed either: the
-      // routes exist and are hidden from every listing, which is what keeps them
-      // out of a picker.
+      // Nothing declared, so nothing registered — the whole point.
+      expect(registered).toEqual([]);
       expect(
         info.mock.calls.some((call) =>
-          String(call[0]).includes("declared models could not be read")
+          String(call[0]).includes("no models declared on the route")
         )
       ).toBe(true);
     } finally {
