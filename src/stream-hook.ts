@@ -16,7 +16,6 @@ import type { ResolvedPluginConfig } from "./config.ts";
 import { readSessionMetaResolver } from "./cordis-context.ts";
 import type { DebugContext } from "./debug.ts";
 import { recordDebug } from "./debug.ts";
-import { isAsyncIterableLike, isRecord } from "./guards.ts";
 import {
   catalogPlaneForRoute,
   findModelSpec,
@@ -33,6 +32,7 @@ import {
 } from "./session.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
 import { withStore } from "./turn-store.ts";
+import { isAsyncIterableLike, isRecord } from "./utils/guards.ts";
 
 interface StreamOptions {
   model?: unknown;

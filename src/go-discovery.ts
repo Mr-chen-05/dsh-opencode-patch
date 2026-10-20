@@ -22,7 +22,6 @@ import os from "node:os";
 import type { KeySourcePolicy } from "./config-values.ts";
 import { DEFAULT_USAGE_BASE_URL, DEFAULT_USAGE_KEY_ENV } from "./config.ts";
 import { isLoaderHost, readCredentialsResolver } from "./cordis-context.ts";
-import { isRecord } from "./guards.ts";
 import {
   extractApiKeyFromHeaders,
   getCapturedApiKey,
@@ -30,6 +29,7 @@ import {
 } from "./key-capture.ts";
 import { opencodeDatabasePath } from "./opencode-paths.ts";
 import { readOpencodeCredentials } from "./opencode-store.ts";
+import { isRecord } from "./utils/guards.ts";
 
 /** Gateway settings found in other entries, if any. */
 export interface DiscoveredGoConfig {

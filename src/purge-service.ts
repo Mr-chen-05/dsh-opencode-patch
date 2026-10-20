@@ -21,7 +21,6 @@ import {
   TypertRemoteService,
 } from "@deepseek-ai/dsh-typert-protocol";
 
-import { isRecord } from "./guards.ts";
 import {
   didCatalogRefreshSucceed,
   isDeprecatedModelOn,
@@ -32,6 +31,7 @@ import {
   type PurgeResult,
   type PurgedModel,
 } from "./purge-contract.ts";
+import { isRecord } from "./utils/guards.ts";
 
 /** A provider route the plugin knows how to read a plane from. */
 const PLANES: readonly { route: string; plane: "go" | "zen" }[] = [

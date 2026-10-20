@@ -19,7 +19,6 @@
 import type { ResolvedPluginConfig } from "./config.ts";
 import type { CordisContext } from "./cordis-context.ts";
 import { declaredProviderModels } from "./go-discovery.ts";
-import { isRecord } from "./guards.ts";
 import {
   catalogPlaneForRoute,
   type CatalogPlane,
@@ -43,6 +42,7 @@ import {
   protocolFromModelId,
   UNSERVED_PLANE_SDKS,
 } from "./responses-routes.ts";
+import { isRecord } from "./utils/guards.ts";
 
 export interface DiscoveryCandidate {
   contextWindow?: number;

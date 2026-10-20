@@ -22,7 +22,6 @@ import {
 import React from "react";
 
 import { formatUsd } from "./go-limits.ts";
-import { isRecord } from "./guards.ts";
 import type { Translate } from "./settings-copy.ts";
 import {
   isRemoteCall,
@@ -31,6 +30,7 @@ import {
 } from "./settings-remote.ts";
 import type { GoUsage, UsageWindow } from "./usage-contract.ts";
 import { formatRelativeReset, getWindowState, resetLabel } from "./usage-ui.ts";
+import { isRecord } from "./utils/guards.ts";
 
 /** The three windows, in the order the panel lists them. */
 const WINDOWS = [

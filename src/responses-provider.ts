@@ -44,7 +44,6 @@ import { DEFAULT_USAGE_KEY_ENV, type ResolvedPluginConfig } from "./config.ts";
 import type { CordisContext } from "./cordis-context.ts";
 import { declaredProviderModels } from "./go-discovery.ts";
 import { loadHostPi, registerGoogleBridge } from "./google-bridge.ts";
-import { isFunctionLike, isRecord } from "./guards.ts";
 import {
   type CatalogModelSpec,
   getLiveGoCatalog,
@@ -58,6 +57,7 @@ import {
   ROUTE_FOR_PLANE_PROTOCOL,
   SELF_MOUNTED_ROUTES,
 } from "./responses-routes.ts";
+import { isFunctionLike, isRecord } from "./utils/guards.ts";
 
 /** The host plugin whose `apply` this module mounts. */
 const PI_AI_PACKAGE = "@deepseek-ai/dsh-llm-pi-ai";

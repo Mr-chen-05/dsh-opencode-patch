@@ -11,8 +11,8 @@
  */
 
 import { ALL_MODELS_MARKER } from "./config-values.ts";
-import { isRecord, isUnknownArray } from "./guards.ts";
 import { findModelSpec } from "./models-catalog.ts";
+import { isRecord, isUnknownArray } from "./utils/guards.ts";
 
 /** Path segment that marks a Responses-API body worth inspecting. */
 export const RESPONSES_PATH = "/responses";

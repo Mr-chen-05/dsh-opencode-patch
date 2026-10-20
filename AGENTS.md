@@ -41,10 +41,41 @@ A file's name does not decide whether it is public — its content does. Inciden
 Host bundle (`lib/index.mjs`), a thin `apply` barrel over small modules:
 
 - `src/index.ts` · `src/identity.ts` · `src/lifecycle.ts` — the public barrel, the identity constants, and the `apply()` composition (one installer per side effect, in load-bearing order).
-- `src/config.ts` · `src/config-values.ts` · `src/guards.ts` — the schema and its defaults; dependency-free readers and type guards. The client bundle may import these, and it does — along with the contract and presentation modules (`usage-contract.ts`, `login-contract.ts`, `settings-copy.ts`, `settings-fields.ts`, `usage-ui.ts`, `go-limits.ts`). The rule is not a list of names: **the client may import a module that reaches nothing host-only** — no cordis context, no credential seam, no node built-in — and the bundle gate is what enforces it, by failing the build rather than by anyone remembering. An earlier version of this line named two files as the only ones allowed, which the tree had already outgrown.
+- `src/config.ts` · `src/config-values.ts` · `src/utils/guards.ts` — the schema and its defaults; dependency-free readers and type guards. The client bundle may import these, and it does — along with the contract and presentation modules (`usage-contract.ts`, `login-contract.ts`, `settings-copy.ts`, `settings-fields.ts`, `usage-ui.ts`, `go-limits.ts`). The rule is not a list of names: **the client may import a module that reaches nothing host-only** — no cordis context, no credential seam, no node built-in — and the bundle gate is what enforces it, by failing the build rather than by anyone remembering. An earlier version of this line named two files as the only ones allowed, which the tree had already outgrown.
+
+## `src/utils/` — pure by construction, enforced by test
+
+    src/utils/   a function of its arguments. No context, no globals, no I/O.
+    src/         effects: read a context, ask a utility, cause something.
+
+**The membership test for `utils/` is a property, not a vibe:** no `node:*`, no `@deepseek-ai/cordis`, no `process.env`, no imports from outside the folder except `guards.ts`. `test/architecture.test.ts` walks the tree and fails the build otherwise — verified by planting a violation of each kind and watching it fail.
+
+It is the same trick `scripts/check.ts` already uses for the client bundle, at finer grain.
+
+**Why `utils` and not `decisions`/`pure`/subject folders.** `utils` is the name a reader already has for these, and needs no glossary. What stops it becoming the usual dumping ground is the gate above: `fetch-patch.ts` is 498 lines and everything in it is _arguably_ a utility, and the gate says no because it reads a context. Subject folders (`gateway/`, `identity/`) describe what code is _about_, which is a real second axis — adopt it when a folder outgrows reading, not at 37 modules.
+
+**The pattern that made things untestable, and the fix.** Every offender was a decision computed inline from whatever was in scope:
+
+| cause                             | fix                                      |
+| :-------------------------------- | :--------------------------------------- |
+| not exported                      | export it                                |
+| read a global (`process.env`)     | take the VALUE as a parameter            |
+| took a transport type (`Headers`) | read at the edge, decide on values       |
+| buried in a 600-line grab-bag     | give it a module named after its subject |
+
+`session-id.ts` shows all four at once: `openCodeSessionIdFor` took a string and hashed it internally, so testing the _construction_ needed a crypto module. It now takes the digest (`deriveSessionId`), and `session.ts` — the effect half — computes it in one line. Same for the env: `pinnedSessionId` takes the value.
+
+## What moved
+
+| to `utils/`        | from                          |
+| :----------------- | :---------------------------- |
+| `request-shape.ts` | new (extracted in #74)        |
+| `guards.ts`        | `src/`                        |
+| `session-id.ts`    | the rules inside `session.ts` |
+
 - `src/session.ts` · `src/turn-store.ts` — the `ses_<12hex><14base62>` derivation and the `AsyncLocalStorage` turn store.
 - `src/stream-hook.ts` · `src/fetch-patch.ts` · `src/tool-fallback.ts` — the `llm/stream` hook, the fetch interceptor, and the free-tier `read`/`bash` fallback.
-- `src/request-shape.ts` — the fetch patch's PURE decisions, extracted so each branch is unit-testable on its own: which plane a URL belongs to, which credential header a protocol reads, the URL and header source of a `fetch` input, the model id and tool names a JSON body carries, and the Anthropic version constant. Everything here is a function of its arguments — no context, no globals, no I/O. The rule it encodes: **a predicate that lives in a closure cannot be exercised alone**, so its branches survive until some integration path happens to take them. `hasSessionHeader` and `isOpenCodeRequest` were exported and tested; their six private siblings were not, and that was the difference.
+- `src/utils/request-shape.ts` — the fetch patch's PURE decisions, extracted so each branch is unit-testable on its own: which plane a URL belongs to, which credential header a protocol reads, the URL and header source of a `fetch` input, the model id and tool names a JSON body carries, and the Anthropic version constant. Everything here is a function of its arguments — no context, no globals, no I/O. The rule it encodes: **a predicate that lives in a closure cannot be exercised alone**, so its branches survive until some integration path happens to take them. `hasSessionHeader` and `isOpenCodeRequest` were exported and tested; their six private siblings were not, and that was the difference.
 - `src/key-capture.ts` · `src/go-discovery.ts` · `src/usage.ts` · `src/usage-contract.ts` — credential extraction, quota discovery, the usage service, and the shared shape.
 - `src/catalog-data.ts` · `src/models-catalog.ts` · `src/models-discovery.ts` — the generated static shim, the `models.dev` parser with SWR refresh, and discovery decoration. `catalog-data.ts` is **generated**; never hand-edit it.
 - A note on the sweep that found the two entries around here, because it nearly produced a false one: grepping for a symbol's callers while EXCLUDING the file that defines it makes every same-file call look like no call at all. `resolveGoKeyForRef` reads as unreferenced that way and is not — `resolveGoApiKey` calls it, and the usage service calls that. (An earlier version of this line said that is "how the Go endpoint keeps Zen keys away from itself"; there is no such exclusion, and the note below records why.) Check the defining file too before believing an export is dead.

@@ -20,8 +20,8 @@ import {
   type ReasoningOptionSpec,
 } from "./catalog-data.ts";
 import { DEFAULT_GATEWAY_URLS } from "./config.ts";
-import { isRecord } from "./guards.ts";
 import type { ModelCostRate } from "./session-cost.ts";
+import { isRecord } from "./utils/guards.ts";
 
 // The catalog data is part of this module's public surface (and of the
 // package's, via `index.ts`), so re-export it rather than making callers

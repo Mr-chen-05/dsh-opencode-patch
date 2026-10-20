@@ -24,7 +24,7 @@
 
 import { DatabaseSync } from "node:sqlite";
 
-import { isRecord } from "./guards.ts";
+import { isRecord } from "./utils/guards.ts";
 
 /** A credential as the installation stores it, minus everything unused. */
 export interface OpencodeCredential {

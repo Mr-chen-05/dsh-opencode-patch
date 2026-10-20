@@ -15,7 +15,7 @@
  * @module dsh-opencode-patch/key-capture
  */
 
-import { isRecord } from "./guards.ts";
+import { isRecord } from "./utils/guards.ts";
 
 /** Account tiers a captured credential can belong to. */
 export type KeyTier = "go" | "zen" | "unknown";

@@ -10,9 +10,9 @@
  * @module dsh-opencode-patch/settings-purge
  */
 
-import { isRecord } from "./guards.ts";
 import { PURGE_NAMESPACE, type PurgeResult } from "./purge-contract.ts";
 import { remoteNamespace, remoteNamespaceOf } from "./settings-remote.ts";
+import { isRecord } from "./utils/guards.ts";
 
 /** What one click produced, in a shape the card can render without guessing. */
 export type PurgeOutcome =

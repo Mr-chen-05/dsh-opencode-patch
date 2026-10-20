@@ -6,8 +6,8 @@
  * @module dsh-opencode-patch/usage-ui
  */
 
-import { isRecord } from "./guards.ts";
 import type { GoUsage, UsageWindow } from "./usage-contract.ts";
+import { isRecord } from "./utils/guards.ts";
 
 export const RADIUS = 5.5;
 export const CIRCUMFERENCE = 2 * Math.PI * RADIUS;

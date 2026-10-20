@@ -6,7 +6,7 @@
  * @module dsh-opencode-patch/config-values
  */
 
-import { isUnknownArray } from "./guards.ts";
+import { isUnknownArray } from "./utils/guards.ts";
 
 /** Marker meaning "apply to every model" instead of a literal substring. */
 export const ALL_MODELS_MARKER = "*";
