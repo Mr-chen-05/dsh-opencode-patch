@@ -832,15 +832,15 @@ export const narrowToDeclared = <T extends { readonly id: string }>(
 const declaredModelsFor = async (
   ctx: CordisContext,
   route: string
-): Promise<ReadonlySet<string> | undefined> => {
+): Promise<ReadonlySet<string>> => {
   const listModels = ctx.llm?.listModels;
   if (typeof listModels !== "function") {
-    return undefined;
+    return new Set();
   }
   try {
     const listed = await Reflect.apply(listModels, ctx.llm, [route]);
     if (!Array.isArray(listed)) {
-      return undefined;
+      return new Set();
     }
     const ids = new Set<string>();
     for (const entry of listed) {
@@ -849,20 +849,27 @@ const declaredModelsFor = async (
         ids.add(id);
       }
     }
-    // **An empty list is not a declaration.** The host answers `[]` whenever the
-    // route's credential cannot be resolved (`dsh-llm-pi-ai/lib/index.js:1894`
-    // returns `[]` on MISSING_CREDENTIAL) — which is exactly the keyless
-    // deployment this plugin supports for free models. Reading that as "the user
-    // declared nothing" would mount no internal route at all and break the
-    // protocol split for a deployment that only lacks a key.
+    // **An empty list means the route declares nothing — and nothing is what
+    // gets mounted.** An earlier revision read `[]` as "the declaration could
+    // not be read" and fell back to the whole catalog, on the theory that the
+    // mounted routes were hidden so the widening was invisible. Measured on a
+    // live host, that fallback mounted **58 models the deployment never
+    // declared** across four internal routes:
     //
-    // A genuinely empty declaration is indistinguishable from this, and the two
-    // errors do not cost the same: mounting with the catalog is harmless because
-    // the mounted routes are hidden from every listing, while mounting nothing
-    // breaks dispatch.
-    return ids.size > 0 ? ids : undefined;
+    //   mounted opencode-responses … with 30 model(s); opencode-anthropic … 18;
+    //   opencode-go-responses … 5; opencode-go-anthropic … 5
+    //
+    // A route's model list is the operator's decision; a fallback that fills it
+    // with the catalog is precisely the override this plugin must not perform.
+    // The reason the old comment gave for the fallback — that mounting nothing
+    // "breaks the protocol split for a deployment that only lacks a key" — no
+    // longer holds: the adapter decoration now names each model's `api`
+    // (`decoratePlaneAdapters`), and `dsh-llm-pi-ai` dispatches per model, so a
+    // declared Responses/Anthropic model reaches its protocol on the route the
+    // user configured. The internal routes are a legacy path, not the mechanism.
+    return ids;
   } catch {
-    return undefined;
+    return new Set();
   }
 };
 
@@ -945,15 +952,15 @@ export const registerResponsesProvider = async (
   const declaredByPlane = new Map<string, ReadonlySet<string>>();
   for (const plane of ["opencode", "opencode-go"]) {
     const ids = await declaredModelsFor(ctx, plane);
-    if (ids !== undefined) {
-      declaredByPlane.set(plane, ids);
-    }
-  }
-  for (const plane of ["opencode", "opencode-go"]) {
-    if (!declaredByPlane.has(plane)) {
+    declaredByPlane.set(plane, ids);
+    if (ids.size === 0) {
+      // Console, like the other boot lines: this is the decision a reader has to
+      // be able to verify — that nothing the deployment did not declare was
+      // mounted. It is also what a keyless deployment sees, which is correct:
+      // its route advertises nothing yet, so nothing is served for it here.
       console.info(
-        `[dsh-opencode-patch] ${plane}: the declared models could not be read ` +
-          "(no resolvable credential yet) — internal routes keep the catalog"
+        `[dsh-opencode-patch] ${plane}: no models declared on the route — ` +
+          "no internal route is mounted for it"
       );
     }
   }
