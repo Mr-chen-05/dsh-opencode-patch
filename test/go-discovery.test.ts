@@ -34,6 +34,7 @@ import {
   KEY_SOURCE_POLICIES,
 } from "../src/config.ts";
 import {
+  declaredProviderModels,
   discoverGoConfig,
   effectiveGoKeyRef,
   resolveGoApiKey,
@@ -1370,5 +1371,72 @@ describe("go-discovery: the installation's own store, and where it sits", () => 
     await expect(
       resolveGoApiKey(composition(), undefined, "auto", true)
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("go-discovery · the declaration in the loader", () => {
+  const loaderWith = (providers: unknown) => ({
+    loader: { entries: () => [{ options: { config: { providers } } }] },
+  });
+
+  it("reads the declared ids and names for one route", () => {
+    const ctx = loaderWith({
+      opencode: { models: [{ id: "gpt-5.4", name: "GPT-5.4" }, { id: "" }] },
+      "opencode-go": { models: [{ id: "deepseek-v4.1-flash" }] },
+    });
+    expect(declaredProviderModels(ctx, "opencode")).toEqual([
+      { id: "gpt-5.4", name: "GPT-5.4" },
+    ]);
+    // A route the loader does not describe is UNDEFINED, not empty: "cannot
+    // read" and "declares nothing" must stay distinguishable.
+    expect(declaredProviderModels(ctx, "nvidia")).toBeUndefined();
+  });
+
+  it("answers an empty list for a row that declares no models", () => {
+    expect(
+      declaredProviderModels(loaderWith({ opencode: {} }), "opencode")
+    ).toEqual([]);
+  });
+
+  it("survives a context it cannot read at all", () => {
+    // Not an object, no loader anywhere, and a `get` that throws: each is
+    // "cannot read", never an exception out of a boot path.
+    expect(declaredProviderModels(undefined, "opencode")).toBeUndefined();
+    expect(declaredProviderModels({}, "opencode")).toBeUndefined();
+    expect(
+      declaredProviderModels(
+        {
+          get: () => {
+            throw new Error("no loader");
+          },
+        },
+        "opencode"
+      )
+    ).toBeUndefined();
+    // A `get` that answers nothing falls through to the property, which here
+    // does not exist either.
+    expect(
+      declaredProviderModels({ get: () => undefined }, "opencode")
+    ).toBeUndefined();
+  });
+
+  it("survives entries that are not an array or not shaped like rows", () => {
+    expect(
+      declaredProviderModels({ loader: { entries: () => "nope" } }, "opencode")
+    ).toBeUndefined();
+    expect(
+      declaredProviderModels(
+        {
+          loader: {
+            entries: () => [
+              null,
+              { options: null },
+              { options: { config: {} } },
+            ],
+          },
+        },
+        "opencode"
+      )
+    ).toBeUndefined();
   });
 });
