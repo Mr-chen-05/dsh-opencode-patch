@@ -43,6 +43,7 @@ import {
 import type { CordisContext } from "../src/index.ts";
 import { baseForProtocol } from "../src/pi-provider.ts";
 import {
+  declaredModelsFromLoader,
   loadPiAiAdapterHost,
   loadPiAiModule,
   reasoningEffortsFor,
@@ -1682,6 +1683,70 @@ describe("responses-provider · declared models the catalog cannot describe", ()
     expect(
       undescribedDeclaredModels(new Map([["opencode", new Set([spec.id])]]))
     ).toEqual([]);
+  });
+});
+
+describe("responses-provider · the declaration needs no credential", () => {
+  it("reads the declared models from the loader, not from listModels", () => {
+    // Measured in a live host at boot:
+    //   opencode: no models could be read for the route - it declares none, or
+    //   its credential is not resolvable in this process - so no internal route
+    //   is mounted for it
+    //
+    // `dsh-llm-pi-ai` resolves the route's credential before listing, and
+    // answers [] when it cannot. At boot that is the normal case, so the
+    // declaration read as "nothing declared" and every protocol route stayed
+    // unregistered for the life of the process. The declaration is in the
+    // loader entry's config and needs no credential at all.
+    const ctx = {
+      loader: {
+        entries: () => [
+          {
+            options: {
+              config: {
+                providers: {
+                  opencode: { models: [{ id: "gpt-5.4" }, { id: "" }, null] },
+                  "opencode-go": { models: [{ id: "deepseek-v4.1-flash" }] },
+                },
+              },
+            },
+          },
+        ],
+      },
+    } as unknown as CordisContext;
+    expect([...(declaredModelsFromLoader(ctx, "opencode") ?? [])]).toEqual([
+      "gpt-5.4",
+    ]);
+    expect([...(declaredModelsFromLoader(ctx, "opencode-go") ?? [])]).toEqual([
+      "deepseek-v4.1-flash",
+    ]);
+    // A route the loader does not describe is UNDEFINED, not empty: "cannot
+    // read" and "declared nothing" must stay distinguishable.
+    expect(declaredModelsFromLoader(ctx, "nvidia")).toBeUndefined();
+  });
+
+  it("reaches the loader through ctx.get, which does not consult inject", () => {
+    // `ctx.loader` throws without the name in `inject`; a context that serves
+    // only `get` is still one this can read.
+    const ctx = {
+      get: (name: string) =>
+        name === "loader"
+          ? {
+              entries: () => [
+                {
+                  options: {
+                    config: {
+                      providers: { opencode: { models: [{ id: "x" }] } },
+                    },
+                  },
+                },
+              ],
+            }
+          : undefined,
+    } as unknown as CordisContext;
+    expect([...(declaredModelsFromLoader(ctx, "opencode") ?? [])]).toEqual([
+      "x",
+    ]);
   });
 });
 
