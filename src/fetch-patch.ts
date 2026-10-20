@@ -27,6 +27,14 @@ import {
   isModelsListingUrl,
 } from "./models-catalog.ts";
 import {
+  ANTHROPIC_VERSION,
+  authHeaderFor,
+  gatewayPlaneFor,
+  headerSourceOf,
+  requestUrlOf,
+  toolNamesOf,
+} from "./request-shape.ts";
+import {
   fallbackSessionId,
   isOpenCodeMessageId,
   isOpenCodeSessionId,
@@ -39,28 +47,6 @@ import {
 } from "./session.ts";
 import { maybeInjectCoreTools } from "./tool-fallback.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
-
-/**
- * Which gateway plane a URL belongs to.
- *
- * From the URL alone, because the observer is called with nothing else and a
- * mis-attributed rotation would move the wrong plane's credential. The Go plane
- * lives under `/zen/go` and the Zen plane under `/zen`, so the longer path is
- * matched first — and an unrecognised URL answers `""` rather than guessing,
- * because a rotation is a side effect.
- */
-const gatewayPlaneFor = (url: string): string => {
-  const path = new URL(url).pathname;
-  // Both endpoint families, because a credential's format decides which one a
-  // request belongs on and the plane is the same either way.
-  if (/\/(?:zen|inference)\/go\//u.test(path)) {
-    return "opencode-go";
-  }
-  if (/\/(?:zen|inference)\//u.test(path)) {
-    return "opencode";
-  }
-  return "";
-};
 
 /**
  * Whether the model a body names is one the gateway admits with no key.
@@ -100,97 +86,11 @@ const isFreeModelBody = (body: RequestInit["body"]): boolean => {
   }
 };
 
-/** The credential header the request's protocol actually reads. */
-const toolNamesOf = (body: RequestInit["body"]): string => {
-  if (typeof body !== "string" || body.length === 0) {
-    return "";
-  }
-  try {
-    const parsed: unknown = JSON.parse(body);
-    if (typeof parsed !== "object" || parsed === null) {
-      return "";
-    }
-    const tools: unknown = (parsed as Record<string, unknown>).tools;
-    if (!Array.isArray(tools)) {
-      return "";
-    }
-    const names: string[] = [];
-    for (const tool of tools) {
-      if (typeof tool !== "object" || tool === null) {
-        continue;
-      }
-      const rec = tool as Record<string, unknown>;
-      const direct = rec.name;
-      if (typeof direct === "string") {
-        names.push(direct);
-        continue;
-      }
-      const fn = rec.function;
-      if (typeof fn === "object" && fn !== null) {
-        const fname = (fn as Record<string, unknown>).name;
-        if (typeof fname === "string") {
-          names.push(fname);
-        }
-      }
-    }
-    return names.join(",");
-  } catch {
-    return "";
-  }
-};
-const authHeaderFor = (url: string): string => {
-  const path = new URL(url).pathname;
-  if (path.endsWith("/messages")) {
-    return "x-api-key";
-  }
-  if (
-    /\/models\/[^/]+:(?:streamGenerateContent|generateContent)$/u.test(path)
-  ) {
-    return "x-goog-api-key";
-  }
-  return "authorization";
-};
-
-const extractUrl = (input: RequestInfo | URL): string => {
-  if (typeof input === "string") {
-    return input;
-  }
-  if (input instanceof URL) {
-    return input.toString();
-  }
-  if (typeof input === "object" && input !== null && "url" in input) {
-    const urlProp: unknown = input.url;
-    if (typeof urlProp === "string") {
-      return urlProp;
-    }
-    if (urlProp instanceof URL) {
-      return urlProp.toString();
-    }
-  }
-  return "";
-};
-
-const readHeaderSource = (
-  input: RequestInfo | URL,
-  init?: RequestInit
-): HeadersInit | undefined => {
-  if (init?.headers !== undefined) {
-    return init.headers;
-  }
-  if (typeof Request !== "undefined" && input instanceof Request) {
-    return input.headers;
-  }
-  return undefined;
-};
-
-/** Whether the request already carries a session header (any casing). */
-const ANTHROPIC_VERSION = "2023-06-01";
-
 export const hasSessionHeader = (
   input: RequestInfo | URL,
   init?: RequestInit
 ): boolean => {
-  const source = readHeaderSource(input, init);
+  const source = headerSourceOf(input, init);
   if (source === undefined) {
     return false;
   }
@@ -308,13 +208,13 @@ export const patchFetch = (
     init?: RequestInit
   ): Promise<Response> {
     const state = als.getStore();
-    const url = extractUrl(input);
+    const url = requestUrlOf(input);
 
     if (!isOpenCodeRequest(url, state, config.providers, config.gatewayUrls)) {
       return original.call(this, input, init);
     }
 
-    const headers = new Headers(readHeaderSource(input, init));
+    const headers = new Headers(headerSourceOf(input, init));
 
     // Capture the API key from the request headers so that quota monitoring,
     // usage display, and key resolution don't have to rely purely on static env vars.

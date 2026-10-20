@@ -42,6 +42,7 @@ import { pathToFileURL } from "node:url";
 
 import { DEFAULT_USAGE_KEY_ENV, type ResolvedPluginConfig } from "./config.ts";
 import type { CordisContext } from "./cordis-context.ts";
+import { declaredProviderModels } from "./go-discovery.ts";
 import { loadHostPi, registerGoogleBridge } from "./google-bridge.ts";
 import { isFunctionLike, isRecord } from "./guards.ts";
 import {
@@ -830,105 +831,28 @@ export const narrowToDeclared = <T extends { readonly id: string }>(
   declared === undefined ? models : models.filter((m) => declared.has(m.id));
 
 /**
- * The ids a provider row declares, read from the LOADER's configuration.
+ * The model ids a provider row declares, from the loader's configuration.
  *
- * **Credential-free, which is the point.** `ctx.llm.listModels(route)` is the
- * obvious source and the wrong one at boot: `dsh-llm-pi-ai` resolves the route's
- * credential first and answers `[]` when it cannot
- * (`lib/index.js` returns `[]` on `MISSING_CREDENTIAL`). At boot that is the
- * normal case, so the declaration read as "nothing declared", the mount
- * concluded no model needed an internal route, and every protocol route stayed
- * unregistered for the life of the process — measured in a live host:
- *
- *   opencode: no models could be read for the route - it declares none, or its
- *   credential is not resolvable in this process - so no internal route is
- *   mounted for it
- *
- * The declaration itself needs no credential: it is the `models:` array the
- * operator wrote, sitting in the loader entry's config. Reading it there is both
- * exact and available at boot, and it is the same shape `discoverGoConfig`
- * already parses.
- *
- * `ctx.get` rather than `ctx.loader`: property access throws without the name in
- * `inject`, and this service's context never declared it.
+ * A thin projection of {@link declaredProviderModels}, which owns the reading
+ * itself — `ctx.get` for the loader (property access throws without `inject`),
+ * `entries()` as the generator it is, and the `models:` array the operator
+ * wrote. Both callers in this file want ids only; the shared reader answers
+ * rows because the picker needs their names, so the set is built here rather
+ * than duplicating the walk.
  *
  * @param ctx - the host context.
  * @param route - the plane route (`opencode`, `opencode-go`).
  * @returns the declared ids, or `undefined` when the loader holds no entry for
  *   that route (a composition this plugin cannot read, not an empty declaration).
  */
-export const declaredModelsFromLoader = (
+const declaredIdsFromLoader = (
   ctx: CordisContext,
   route: string
 ): ReadonlySet<string> | undefined => {
-  // `ctx.get` first (no `inject` needed); the property as a fallback for a
-  // context that serves only that, guarded because THAT is the read that throws.
-  let loader: unknown;
-  if (typeof ctx.get === "function") {
-    try {
-      loader = Reflect.apply(ctx.get, ctx, ["loader"]);
-    } catch {
-      loader = undefined;
-    }
-  }
-  if (loader === undefined) {
-    try {
-      // Destructured rather than `ctx.loader` so the read stays inside this
-      // guard — it is the one that THROWS when `loader` is not injected.
-      const { loader: viaProperty } = ctx;
-      loader = viaProperty;
-    } catch {
-      return undefined;
-    }
-  }
-  if (!isRecord(loader) || typeof loader.entries !== "function") {
-    return undefined;
-  }
-  let entries: unknown;
-  try {
-    entries = Reflect.apply(loader.entries, loader, []);
-  } catch {
-    return undefined;
-  }
-  // The host's `loader.entries()` is a GENERATOR, not an array — an
-  // `Array.isArray` guard rejects it and this answers `undefined` for a loader
-  // that works, which is exactly what happened.
-  if (entries === null || typeof entries !== "object") {
-    return undefined;
-  }
-  if (
-    typeof (entries as { [Symbol.iterator]?: unknown })[Symbol.iterator] !==
-    "function"
-  ) {
-    return undefined;
-  }
-  const ids = new Set<string>();
-  let found = false;
-  for (const entry of entries as Iterable<unknown>) {
-    if (!isRecord(entry) || !isRecord(entry.options)) {
-      continue;
-    }
-    const config: unknown = entry.options.config;
-    if (!isRecord(config) || !isRecord(config.providers)) {
-      continue;
-    }
-    const provider: unknown = config.providers[route];
-    if (!isRecord(provider)) {
-      continue;
-    }
-    found = true;
-    const models: unknown = provider.models;
-    if (!Array.isArray(models)) {
-      continue;
-    }
-    for (const model of models) {
-      const id = isRecord(model) ? model.id : undefined;
-      if (typeof id === "string" && id.length > 0) {
-        ids.add(id);
-      }
-    }
-  }
-  return found ? ids : undefined;
+  const declared = declaredProviderModels(ctx, route);
+  return declared === undefined
+    ? undefined
+    : new Set(declared.map((model) => model.id));
 };
 
 const declaredModelsFor = async (
@@ -938,7 +862,7 @@ const declaredModelsFor = async (
   // The configuration first: it is the operator's own word and it needs no
   // credential. `listModels` stays as the fallback for a composition whose
   // loader this plugin cannot read.
-  const declared = declaredModelsFromLoader(ctx, route);
+  const declared = declaredIdsFromLoader(ctx, route);
   if (declared !== undefined) {
     return declared;
   }
