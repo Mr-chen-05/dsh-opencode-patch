@@ -1416,7 +1416,7 @@ describe("go-discovery · the declaration in the loader", () => {
     // A `get` that answers nothing falls through to the property, which here
     // does not exist either.
     expect(
-      declaredProviderModels({ get: () => undefined }, "opencode")
+      declaredProviderModels({ get: () => {} }, "opencode")
     ).toBeUndefined();
   });
 
