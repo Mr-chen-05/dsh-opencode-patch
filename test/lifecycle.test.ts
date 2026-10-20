@@ -125,6 +125,35 @@ describe("apply (plugin lifecycle)", () => {
     expect(mounted).toContain("GoUsageService");
   });
 
+  it("mounts the usage service once per root, so a reload cannot lose it", () => {
+    // Measured on a live host: the plugin is applied more than once (a live
+    // reload does it on every patch). The second activation's registration was
+    // refused as a duplicate because the first was still alive, and when that
+    // first fiber then disposed it took the service with it — leaving NONE, and
+    // the Gateway with nothing to expose. The browser console said exactly that:
+    //   "the usage meter is not rendering: no usage service:
+    //    remote.opencodeGoUsage.read is missing"
+    //
+    // Reproduced on real cordis: apply → present, apply again → present,
+    // dispose the first then re-apply → MISSING. On the root, once per process,
+    // the service survives that ordering.
+    const mounted: string[] = [];
+    const ctx = {
+      effect: () => {},
+      llm: {},
+      on: () => {},
+      plugin: (component: unknown) => {
+        mounted.push((component as { name?: string })?.name ?? "");
+      },
+    } as unknown as CordisContext;
+    // The root IS this context: no `root` property means the composition's own.
+    ctx.root = ctx;
+
+    apply(ctx, { usageEnabled: true });
+    apply(ctx, { usageEnabled: true });
+    expect(mounted.filter((name) => name === "GoUsageService")).toHaveLength(1);
+  });
+
   it("reports WHY the usage service is unreachable, in each of the three ways", () => {
     // A browser console carried:
     //

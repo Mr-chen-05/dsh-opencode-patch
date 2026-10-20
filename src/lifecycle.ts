@@ -137,6 +137,15 @@ const mountByProvide = (
   }
 };
 
+/**
+ * Roots that already carry the usage service.
+ *
+ * Keyed on the ROOT context rather than the activation, so a live reload neither
+ * registers a duplicate nor loses the one it has. See {@link installUsageService}
+ * for the measured failure this prevents.
+ */
+const usageMountedOn = new WeakSet<object>();
+
 const installUsageService = (
   ctx: CordisContext,
   config: ResolvedPluginConfig
@@ -163,20 +172,47 @@ const installUsageService = (
     mountByProvide(ctx, "opencodeGoUsage", GoUsageService, usageOptions);
     return;
   }
+  // **Registered on the ROOT context, once per process.**
+  //
+  // Measured, and it is the whole of "the usage meter is not rendering: no usage
+  // service: remote.opencodeGoUsage.read is missing": the host applies this
+  // plugin more than once (a live reload does it on every patch), and the second
+  // activation's `ctx.plugin(GoUsageService, …)` was refused as a duplicate
+  // because the first activation's service was still alive. Then the first
+  // fiber disposed — taking its service with it — and the second registration
+  // had already been lost. Net result: no service at all, and the Gateway has
+  // nothing to expose.
+  //
+  // Reproduced on a real cordis: apply → `present`, apply again →
+  // `present`, dispose the first then re-apply → `MISSING`.
+  //
+  // Tied to the activation fiber, the service cannot survive that ordering. On
+  // the root it belongs to the process, which is what a Gateway-scanned service
+  // should be: `read()` resolves the credential per call, so a long-lived
+  // instance holds no state that a reload could stale. The cost is that turning
+  // `usageEnabled` off needs a process restart rather than a reload; a meter
+  // that disappears and never comes back is the worse trade.
+  const root: CordisContext = ctx.root ?? ctx;
+  if (usageMountedOn.has(root)) {
+    verifyUsageService(root);
+    return;
+  }
+  usageMountedOn.add(root);
   // A throw here is not local: `apply` runs its installers in order, so an
   // unguarded throw takes every installer AFTER this one down with it - silently,
   // because nothing catches it either. Reported and contained instead, so a
   // meter that cannot mount is a meter that says so rather than one that also
   // takes the rest of the plugin with it.
   try {
-    ctx.plugin(GoUsageService, usageOptions);
+    root.plugin?.(GoUsageService, usageOptions);
   } catch (error) {
+    usageMountedOn.delete(root);
     ctx.logger?.warn?.(
       "[dsh-opencode-patch] the usage service did not mount; the meter will render nothing",
       error
     );
   }
-  verifyUsageService(ctx);
+  verifyUsageService(root);
 };
 
 /**
