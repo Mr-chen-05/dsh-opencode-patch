@@ -84,12 +84,6 @@ export const CONFIG_ONLY_FIELDS: readonly {
     reason: "URL substrings; only a mirror or relay needs to change them",
   },
   {
-    field: "hiddenModels",
-    reason:
-      "ids withheld from every listing; the counterpart to the retention rule, " +
-      "and a list of ids nobody should type into a settings form",
-  },
-  {
     field: "maxContextWindow",
     reason:
       "context ceiling in tokens; an override for deployments tuning context limits",

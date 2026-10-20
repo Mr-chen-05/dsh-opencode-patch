@@ -19,6 +19,7 @@ import { isRecord } from "./guards.ts";
 import { OpencodeCard } from "./settings-card.tsx";
 import { en, zh } from "./settings-copy.ts";
 import { SPECS } from "./settings-fields.ts";
+import { purgeDeprecatedModels } from "./settings-purge.ts";
 import { remoteNamespace, remoteNamespaceOf } from "./settings-remote.ts";
 import { readGoUsage } from "./settings-usage.tsx";
 import { usageRemote } from "./usage-contract.ts";
@@ -654,6 +655,9 @@ export const apply = (ctx: ClientContext): void => {
                 getLocale: () => ctx.locale?.getLocale?.()?.active,
                 hooks: { opencodeCard: store },
                 readUsage: () => readGoUsage(ctx),
+                // The profile rewrite: needs the host's config editor, so it is a
+                // Remote, and the card shows its outcome rather than assuming one.
+                purgeDeprecated: () => purgeDeprecatedModels(ctx),
                 // The sign-in remote, when the host mounted one. Same shape as
                 // the meter's: the card calls, the host holds the credential.
                 ...model.actions(),
