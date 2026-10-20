@@ -305,12 +305,20 @@ describe("decorateModelDiscovery", () => {
       { baseURL: "https://opencode.ai/zen/v1", provider: "opencode" },
       undefined
     );
-    // The refresh does NOT add catalog rows the deployment did not declare.
-    expect(ids).not.toContain("minimax-m3.1-flash-free");
-    expect(ids).toHaveLength(1);
-    // Kept, not removed: it answers on zen (measured `403 FreeTierError`), so it
-    // is not retired. Removing it was hiding a working model.
+    // **Discovery JOINS the catalog; a route's own list does not.** The two
+    // surfaces answer different questions: `listModels(route)` is what a route
+    // serves (the operator's decision, never widened), while `discoverModels` is
+    // what the endpoint offers — the list a user picks from before anything is
+    // declared. Left to the wrapper, that list comes from pi's installed
+    // snapshot, a fixed vintage that was measured missing
+    // `glm-5.3-flash-free` while both the bundled catalog and the live /models
+    // endpoint had it.
+    expect(ids).toContain("minimax-m3.1-flash-free");
+    expect(ids.length).toBeGreaterThan(1);
+    // The adapter's own row is kept, not removed.
     expect(ids).toContain("beam-free");
+    // And it is not duplicated by the join.
+    expect(ids.filter((id) => id === "beam-free")).toHaveLength(1);
     stop?.();
     expect(ctx.llm?.discoverModels).toBe(original);
   });
