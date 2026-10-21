@@ -193,9 +193,17 @@ const loaderOf = (ctx: unknown): Record<string, unknown> | undefined => {
   if (!isRecord(ctx)) {
     return undefined;
   }
-  const direct: unknown = ctx.loader;
-  if (isRecord(direct) && isFunctionLike(direct.entries)) {
-    return direct;
+  // Guarded, because THIS read throws: cordis answers
+  // `cannot get property "loader" without inject` for an undeclared name, and
+  // this plugin declares only `llm`. An unguarded read here failed the whole
+  // mount, not just the lookup.
+  try {
+    const { loader: direct } = ctx as { loader?: unknown };
+    if (isRecord(direct) && isFunctionLike(direct.entries)) {
+      return direct;
+    }
+  } catch {
+    // Not injected: the `ctx.get` path below is the one that works.
   }
   if (!isFunctionLike(ctx.get)) {
     return undefined;
