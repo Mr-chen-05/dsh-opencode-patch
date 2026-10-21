@@ -221,6 +221,28 @@ describe("settings: the summary container", () => {
       );
     });
   });
+
+  it("renders a refresh button that can be clicked to refresh usage", async () => {
+    let calls = 0;
+    const read = () => {
+      calls += 1;
+      return Promise.resolve(usage());
+    };
+    const view = render(
+      <UsageSummary getLocale={() => "zh"} readUsage={read} t={t} />
+    );
+    await waitFor(() => {
+      expect(view.container.textContent).toContain("72%");
+    });
+    expect(calls).toBe(1);
+
+    const button = view.container.querySelector("button");
+    expect(button).not.toBeNull();
+    button?.click();
+    await waitFor(() => {
+      expect(calls).toBeGreaterThanOrEqual(2);
+    });
+  });
 });
 
 describe("settings-usage: reading until the remote answers", () => {
@@ -235,6 +257,31 @@ describe("settings-usage: reading until the remote answers", () => {
     };
     expect(await readUntilAnswered(read, 5, noSleep)).toBe(answered);
     expect(calls).toBe(1);
+  });
+
+  it("retries when read throws an error on early attempts and returns answer", async () => {
+    let calls = 0;
+    const read = () => {
+      calls += 1;
+      if (calls < 3) {
+        return Promise.reject(
+          new Error("transient network or cold-start error")
+        );
+      }
+      return Promise.resolve(answered);
+    };
+    expect(await readUntilAnswered(read, 5, noSleep)).toBe(answered);
+    expect(calls).toBe(3);
+  });
+
+  it("returns undefined after all attempts throw errors rather than unhandled rejection", async () => {
+    let calls = 0;
+    const read = () => {
+      calls += 1;
+      return Promise.reject(new Error("repeated outage"));
+    };
+    expect(await readUntilAnswered(read, 3, noSleep)).toBeUndefined();
+    expect(calls).toBe(3);
   });
 
   it("keeps asking while the answer is undefined", async () => {
