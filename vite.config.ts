@@ -184,7 +184,7 @@ export default defineConfig({
       include: ["src/**/*.ts", "src/**/*.tsx"],
       exclude: ["src/index.ts", "src/**/*.d.ts"],
       provider: "v8",
-      reporter: ["text-summary", "json-summary", "html"],
+      reporter: ["text-summary", "json-summary", "json", "html"],
       // The ratchet. 95 / 90 / 93 / 95 until 2026-10-06; re-measured 2026-10-16
       // at 94.58 / 89.96 / 93.18 / 94.55 once the suite was actually run rather
       // than assumed. The lines and statements floors sit just under the current
@@ -221,11 +221,19 @@ export default defineConfig({
       // registration that was never made — so reaching them would mean making
       // the test harness call a handle only it can see. That is coverage
       // theatre: it buys a number rather than a behaviour.
+      // Floors are set just below the measured value rather than at it, so a
+      // single removed test fails the build — a ratchet, not a target.
+      //
+      // `perFile: true, 100%` is what the harness itself runs, and it is the
+      // right destination: their doc is explicit that "an uncovered line is
+      // often dead code the gate flags for deletion, not a missing test to bolt
+      // on". Getting there from here is real work across 25 files, so this
+      // raises the floor first and the per-file work follows.
       thresholds: {
-        statements: 94.5,
-        branches: 89.9,
-        functions: 92.9,
-        lines: 94.5,
+        statements: 95.4,
+        branches: 90.4,
+        functions: 94.9,
+        lines: 95.4,
         // Floors on the load-bearing modules only, so a well-covered average
         // cannot hide one that stopped being exercised: the protocol mount is
         // the piece with four host contracts to survive, and it must stay

@@ -1,6 +1,5 @@
 /**
- * The real composition: what the plugin leaves the WORLD holding, not what it
- * called.
+ * The real composition: a genuine cordis `Context`, not a stand-in.
  *
  * The DeepSeek harness's testing policy states the rule this file exists for:
  *
@@ -8,112 +7,112 @@
  * > composition through Loader and assert model-visible request/log, durable
  * > state, or user-visible output.
  *
- * The bug that motivated it is exactly the class that rule describes. Every
- * unit test passed while `opencodeModelPurge` was mounted on the host and
- * unreachable from the browser, because each test asserted the CALL rather than
- * the RESULT: "the service was mounted", "the descriptors list what they list".
- * Neither was false. The feature was still dead.
+ * The bug that motivated it is exactly that class. Every unit test passed while
+ * `opencodeModelPurge` was mounted on the host and unreachable from the browser,
+ * because each asserted the CALL rather than the RESULT: "the service was
+ * mounted", "the descriptors list what they list". Neither was false. The
+ * feature was still dead.
  *
- * So every assertion here is about what a consumer can OBSERVE afterwards — the
- * service a `ctx.get` resolves, the methods that service exposes, the host hooks
- * that were installed — never about which function was invoked.
+ * **Why a real `Context` and not an object literal.** Their plugins use
+ * `new Context()` because `@deepseek-ai/cordis` is a peer dependency in every one
+ * of their 312 packages. It is one here too now, so this test can mount the
+ * plugin the way the Loader does — `ctx.plugin({ inject, apply })` — which means
+ * cordis itself decides whether the plugin activates. A missing or wrong
+ * declaration then fails HERE, in the suite, instead of throwing in a deployment
+ * as `cannot get property "loader" without inject`.
  *
  * @module test/composition.test
  */
+import { Context } from "@deepseek-ai/cordis";
 import { describe, expect, it } from "vitest";
 
-import { apply } from "../src/index.ts";
+import { apply, inject } from "../src/index.ts";
 import type { CordisContext } from "../src/index.ts";
 
+/** The one service the plugin declares, shaped as the plugin reads it. */
+const llmService = () => ({
+  listModels: async () => [],
+  listProviders: () => [],
+  registerAdapter: () => () => {},
+  registerModelDiscovery: () => {},
+});
+
 /**
- * A context that behaves like a mounted host: `plugin()` really registers, and
- * `get()` really resolves what was registered.
+ * Mount the plugin the way the Loader does.
  *
- * This is the difference from the `ctx.plugin(...)` suites this replaces — they
- * recorded calls into an array, which no consumer could observe. Here a service
- * the plugin mounts becomes visible through the same access path the plugin's
- * own code uses at runtime.
+ * `inject` is the plugin's OWN declaration, so cordis keeps it inactive until
+ * `llm` exists — exactly the ordering a real host provides and a hand-built
+ * context could not.
  */
-const hostWith = (options: { readonly configEditor?: boolean } = {}) => {
-  const services = new Map<string, unknown>();
-  const installedAt: string[] = [];
-  const ctx = {
-    effect: (fn: () => unknown) => {
-      installedAt.push("effect");
-      return fn();
+const mount = async (
+  options: {
+    readonly withLlm?: boolean;
+    readonly config?: Record<string, unknown>;
+  } = {}
+) => {
+  const ctx = new Context();
+  if (options.withLlm !== false) {
+    ctx.provide("llm", llmService() as never);
+  }
+  let activated = false;
+  const fiber = ctx.plugin({
+    inject,
+    apply: (scope: unknown) => {
+      activated = true;
+      apply(scope as CordisContext, options.config ?? {});
     },
-    get: (name: string) => {
-      if (name === "configEditor" && options.configEditor === true) {
-        return { edit: async () => {}, entries: () => [] };
-      }
-      return services.get(name);
-    },
-    llm: {
-      listModels: async () => [],
-      listProviders: () => [],
-      registerAdapter: () => () => {},
-      registerModelDiscovery: () => {},
-    },
-    on: () => {},
-    plugin: (component: { name?: string }) => {
-      // The real service keys its registration with `super(ctx, "name")`, which
-      // this stand-in cannot see; the NAME is what it registers under.
-      if (component.name !== undefined) {
-        services.set(component.name, component);
-      }
-    },
-    root: undefined as unknown,
-  };
-  ctx.root = ctx;
-  return { ctx: ctx as unknown as CordisContext, services, installedAt };
+  });
+  await fiber.await?.();
+  await new Promise((resolve) => {
+    setTimeout(resolve, 10);
+  });
+  return { activated, ctx };
 };
 
-describe("composition · what a consumer can observe after apply()", () => {
-  it("leaves the purge service answerable, and it exposes `purge`", () => {
+describe("composition · a real cordis Context", () => {
+  it("activates only once its declared service is provided", async () => {
+    // The reason `inject` is a declaration and not a convention: without `llm`
+    // cordis must NOT run the plugin, because everything the plugin installs
+    // decorates that service.
+    const without = await mount({ withLlm: false });
+    expect(without.activated, "activated without its declared `llm`").toBe(
+      false
+    );
+
+    const withService = await mount();
+    expect(withService.activated).toBe(true);
+  });
+
+  it("leaves the purge service reachable through ctx.get", async () => {
     // The exact failure that shipped: the service mounted, the namespace was
     // never contributed, and the row said "unavailable" forever. Here the
-    // question is the consumer's: can anything reach a purge at all?
-    const { ctx, services } = hostWith();
-    apply(ctx, { usageEnabled: false });
-    const purge = services.get("ModelPurgeService");
-    expect(
-      purge,
-      "the purge service must be registered on the root"
-    ).toBeDefined();
-    // The method the remote declares must exist on the class that was mounted,
-    // or the namespace is answerable and still cannot answer.
-    expect(
-      typeof (purge as { prototype?: { purge?: unknown } })?.prototype?.purge
-    ).toBe("function");
+    // question is the consumer's, through the same access path the host uses.
+    const { ctx } = await mount({ config: { usageEnabled: false } });
+    const purge = ctx.get("opencodeModelPurge") as
+      | { purge?: unknown }
+      | undefined;
+    expect(purge, "the purge service must be reachable").toBeDefined();
+    expect(typeof purge?.purge).toBe("function");
   });
 
-  it("leaves the usage service answerable only while the meter is on", () => {
-    const off = hostWith();
-    apply(off.ctx, { usageEnabled: false });
-    expect(off.services.has("GoUsageService")).toBe(false);
+  it("leaves the usage service reachable only while the meter is on", async () => {
+    const off = await mount({ config: { usageEnabled: false } });
+    expect(off.ctx.get("opencodeGoUsage")).toBeUndefined();
 
-    const on = hostWith();
-    apply(on.ctx, { usageEnabled: true });
-    const usage = on.services.get("GoUsageService");
+    const on = await mount({ config: { usageEnabled: true } });
+    const usage = on.ctx.get("opencodeGoUsage") as
+      | { read?: unknown }
+      | undefined;
     expect(usage, "the meter needs a reachable usage service").toBeDefined();
-    expect(
-      typeof (usage as { prototype?: { read?: unknown } })?.prototype?.read
-    ).toBe("function");
+    expect(typeof usage?.read).toBe("function");
   });
 
-  it("installs the host hooks a turn needs, not just records that it tried", () => {
-    // `effect` is how this plugin does anything host-side. If `apply` returns
-    // with none installed, the plugin is loaded and inert.
-    const { ctx, installedAt } = hostWith();
-    apply(ctx, { usageEnabled: true });
-    expect(installedAt.length).toBeGreaterThan(0);
-  });
-
-  it("survives an apply() with no config editor, which must not throw", () => {
+  it("installs without a config editor, which must not throw", async () => {
     // A composition without the settings service is a real deployment: the
     // card's purge row reports unavailability rather than the plugin failing to
-    // load. Proven by applying, not by reading a branch.
-    const { ctx } = hostWith({ configEditor: false });
-    expect(() => apply(ctx, { usageEnabled: false })).not.toThrow();
+    // load. Proven by mounting, not by reading a branch.
+    const { activated, ctx } = await mount({ config: { usageEnabled: false } });
+    expect(activated).toBe(true);
+    expect(ctx.get("opencodeModelPurge")).toBeDefined();
   });
 });
