@@ -8,6 +8,9 @@
 
 import type { GoUsage, UsageWindow } from "./usage-contract.ts";
 import { isRecord } from "./utils/guards.ts";
+import { isZenProvider } from "./utils/request-shape.ts";
+
+export { isZenProvider };
 
 export const RADIUS = 5.5;
 export const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
@@ -831,21 +834,6 @@ export const getAffectingWindow = (usage: GoUsage): AffectingWindowResult => {
   //    answer for the weekly window (33%) while the 5-hour window (11%) was the
   //    live constraint — read as "why is it showing the weekly limit?".
   return { key: "rolling", label: "5-Hour", window: usage.rolling };
-};
-
-/**
- * Whether a provider route is OpenCode Zen rather than Go.
- *
- * Both routes share the `opencode` prefix, so the distinguishing signal is
- * the presence of `go`: `opencode-go` is the subscription plan, plain
- * `opencode` is Zen pay-as-you-go.
- */
-export const isZenProvider = (provider?: string): boolean => {
-  if (typeof provider !== "string") {
-    return false;
-  }
-  const lower = provider.toLowerCase();
-  return lower.includes("opencode") && !lower.includes("go");
 };
 
 /**

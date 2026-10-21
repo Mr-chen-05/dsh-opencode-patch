@@ -199,3 +199,18 @@ export const toolNamesOf = (body: RequestInit["body"]): string => {
  * request without it as a client error.
  */
 export const ANTHROPIC_VERSION = "2023-06-01";
+
+/**
+ * Whether a provider route is OpenCode Zen rather than Go.
+ *
+ * Both routes share the `opencode` prefix, so the distinguishing signal is
+ * the presence of `go`: `opencode-go` is the subscription plan, plain
+ * `opencode` is Zen pay-as-you-go.
+ */
+export const isZenProvider = (provider?: string): boolean => {
+  if (typeof provider !== "string") {
+    return false;
+  }
+  const lower = provider.toLowerCase();
+  return lower.includes("opencode") && !lower.includes("go");
+};
