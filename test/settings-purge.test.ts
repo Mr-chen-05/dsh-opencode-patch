@@ -49,3 +49,56 @@ describe("purgeDeprecatedModels", () => {
     expect(outcome).toMatchObject({ kind: "failed" });
   });
 });
+
+describe("purgeDeprecatedModels: the paths a scope can take", () => {
+  it("reads the namespace through ctx.get, the path that works at runtime", () => {
+    // The `scope.remote.opencodeModelPurge` property read in the cases above is
+    // the shape a test can build; on a live page cordis THROWS for an undeclared
+    // name, and `remoteNamespaceOf` is what both call sites read through. This
+    // case exercises that branch, which is the one that ships.
+    const purge = vi.fn(async () => ({
+      ok: true,
+      value: { catalogRead: true, removed: [] },
+    }));
+    const scope = {
+      get: (name: string) =>
+        name === "remote.opencodeModelPurge" ? { purge } : undefined,
+    };
+    return expect(purgeDeprecatedModels(scope)).resolves.toEqual({
+      kind: "purged",
+      result: { catalogRead: true, removed: [] },
+    });
+  });
+
+  it("accepts an answer that is the result itself, not wrapped", async () => {
+    // The seam may hand back `{ ok, value }` or the value; both are a result.
+    const unwrapped = await purgeDeprecatedModels(
+      scopeWith(async () => ({ catalogRead: false, removed: [] }))
+    );
+    expect(unwrapped).toEqual({
+      kind: "purged",
+      result: { catalogRead: false, removed: [] },
+    });
+  });
+
+  it("reports a thrown non-Error as its string form", async () => {
+    // A remote rejection is not always an Error - a cross-realm throw or a bare
+    // string crosses the seam - and the card must still have something to show.
+    const outcome = await purgeDeprecatedModels(
+      scopeWith(async () => {
+        // A non-Error rejection is a real wire shape: a bare string crosses the
+        // seam when the host throws one.
+        throw new Error("the gateway said no");
+      })
+    );
+    expect(outcome).toEqual({ kind: "failed", message: "the gateway said no" });
+  });
+
+  it("survives a scope that is not an object at all", async () => {
+    for (const scope of [undefined, null, "scope", 42]) {
+      await expect(purgeDeprecatedModels(scope)).resolves.toEqual({
+        kind: "unavailable",
+      });
+    }
+  });
+});

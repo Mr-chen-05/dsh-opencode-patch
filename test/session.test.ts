@@ -18,6 +18,7 @@ import {
   isOpenCodeMessageId,
   isOpenCodeSessionId,
   newOpenCodeMessageId,
+  fallbackSessionId,
   openCodeSessionIdFor,
   sessionIdForRequest,
   type ActiveTurnState,
@@ -498,5 +499,41 @@ describe("session · which id a request carries", () => {
     expect(sessionIdForRequest(ABSENT, ABSENT, ABSENT, digest)).toBe(
       sessionIdForRequest(ABSENT, ABSENT, ABSENT, digest)
     );
+  });
+});
+
+const VALID_ENV_ID = `ses_0123456789ab${"C".repeat(14)}`;
+
+describe("session · the fallback id reads the environment", () => {
+  const AN_ENV_NAME = "DSH_OPENCODE_SESSION_ID_TEST";
+
+  afterEach(() => {
+    Reflect.deleteProperty(process.env, AN_ENV_NAME);
+  });
+
+  it("uses a pinned environment id when it is a session id", () => {
+    // Headless runs pin one id per process, so this path is a real deployment
+    // shape rather than a defensive branch.
+    process.env[AN_ENV_NAME] = VALID_ENV_ID;
+    expect(fallbackSessionId(AN_ENV_NAME)).toBe(VALID_ENV_ID);
+  });
+
+  it("derives a default when the variable is unset or malformed", () => {
+    // An id the gateway would answer 401 to is replaced, not sent.
+    process.env[AN_ENV_NAME] = "ses_dsh_default";
+    const derived = fallbackSessionId(AN_ENV_NAME);
+    expect(derived).not.toBe("ses_dsh_default");
+    expect(isOpenCodeSessionId(derived)).toBe(true);
+
+    Reflect.deleteProperty(process.env, AN_ENV_NAME);
+    expect(isOpenCodeSessionId(fallbackSessionId(AN_ENV_NAME))).toBe(true);
+  });
+
+  it("derives a default when no variable name is given at all", () => {
+    // A blank name is "no variable", not "read the empty name".
+    for (const name of [undefined, ""]) {
+      const derived = fallbackSessionId(name);
+      expect(isOpenCodeSessionId(derived)).toBe(true);
+    }
   });
 });

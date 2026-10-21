@@ -123,6 +123,11 @@ describe("purge: the refusals it can report", () => {
   });
 
   it("refuses when no entry declares an opencode provider", async () => {
+    // `fetch` is stubbed because `purge()` reads the live catalog first: without
+    // this the case made a REAL network request, and under a loaded runner it
+    // timed out at 5s roughly one run in four. A unit test may not depend on the
+    // network for its speed.
+    answersRegistry();
     const service = new ModelPurgeService(
       ctxWith({
         edit: vi.fn(),
@@ -245,5 +250,119 @@ describe("purge: the shapes a profile row can take", () => {
 
   it("refuses a context that is not an object", () => {
     expect(() => new ModelPurgeService(null)).toThrow(TypeError);
+  });
+});
+
+describe("purge: the shapes a config editor can take", () => {
+  it("refuses an editor that is not one, rather than failing inside it", async () => {
+    // `configEditor` is read structurally: any object with `entries` and `edit`.
+    // A composition that exposes half of it must be reported as "no editor",
+    // which the card can explain, not crash mid-rewrite.
+    for (const editor of [
+      undefined,
+      null,
+      "editor",
+      {},
+      { entries: () => [] },
+      { edit: async () => {} },
+      { entries: "nope", edit: async () => {} },
+    ]) {
+      await expect(
+        new ModelPurgeService(ctxWith(editor)).purge()
+      ).rejects.toMatchObject({ code: "opencode/purge-unavailable" });
+    }
+  });
+
+  it("skips entries whose options chain is not shaped like a profile row", async () => {
+    // Only one entry in a real loader has this shape; the rest must be walked
+    // past without throwing. These are the intermediates the filter reads.
+    parseModelsDevCatalog(registry());
+    answersRegistry();
+    const declared = {
+      options: {
+        config: {
+          providers: { opencode: { models: [{ id: "ll-alpha-free" }] } },
+        },
+        id: "llm-pi-ai",
+      },
+    };
+    const editor = {
+      edit: vi.fn(
+        async (
+          _e: unknown,
+          change: (c: Record<string, unknown>) => Record<string, unknown>
+        ) => change(declared.options.config as Record<string, unknown>)
+      ),
+      entries: () => [
+        null,
+        "string",
+        {},
+        { options: null },
+        { options: { config: null } },
+        { options: { config: { providers: null } } },
+        { options: { config: { providers: { opencode: "not a block" } } } },
+        declared,
+      ],
+    };
+    const result = await new ModelPurgeService(
+      ctxWith(editor as unknown as Parameters<typeof ctxWith>[0])
+    ).purge();
+    // The one well-formed row was still read.
+    expect(result.catalogRead).toBe(true);
+  });
+
+  it("handles a provider block with no models array", async () => {
+    parseModelsDevCatalog(registry());
+    answersRegistry();
+    const entry = {
+      options: {
+        config: {
+          providers: {
+            opencode: { api: "openai-completions" },
+            "opencode-go": { models: "not an array" },
+          },
+        },
+        id: "llm-pi-ai",
+      },
+    };
+    const editor = {
+      edit: vi.fn(),
+      entries: () => [entry],
+    };
+    const result = await new ModelPurgeService(
+      ctxWith(editor as unknown as Parameters<typeof ctxWith>[0])
+    ).purge();
+    expect(result.removed).toEqual([]);
+  });
+
+  it("keeps a model row declared as a bare string", async () => {
+    // The profile's rows are objects, but the schema also accepts a bare id.
+    // A string row has no `id` field, so the reader must still name it.
+    parseModelsDevCatalog(registry());
+    answersRegistry();
+    const entry = {
+      options: {
+        config: {
+          providers: {
+            opencode: { models: ["fledge-alpha-free", { id: "live-id" }] },
+          },
+        },
+        id: "llm-pi-ai",
+      },
+    };
+    const editor = {
+      edit: vi.fn(
+        async (
+          _e: unknown,
+          change: (c: Record<string, unknown>) => Record<string, unknown>
+        ) => change(entry.options.config as Record<string, unknown>)
+      ),
+      entries: () => [entry],
+    };
+    const result = await new ModelPurgeService(
+      ctxWith(editor as unknown as Parameters<typeof ctxWith>[0])
+    ).purge();
+    // A retired bare-string row is removable; a live object row is kept.
+    expect(result.removed.map((r) => r.id)).toContain("fledge-alpha-free");
   });
 });
