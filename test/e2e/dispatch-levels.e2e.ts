@@ -339,7 +339,7 @@ describe.skipIf(!ENABLED)(
       try {
         const answer = modelOfOn(fixture.llm.adapters, "opencode")(
           "opencode",
-          "qwen3.8-max"
+          "qwen3.6-plus"
         );
         const map = ((answer as { thinkingLevelMap?: unknown })
           .thinkingLevelMap ?? {}) as Record<string, unknown>;
