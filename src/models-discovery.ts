@@ -33,6 +33,7 @@ import {
   thinkingLevelMapFor,
 } from "./pi-provider.ts";
 import {
+  GO_GOOGLE_INTERNAL_ROUTE,
   internalRouteFor,
   isInternalRoute,
   isServableSdk,
@@ -730,6 +731,32 @@ export const decoratePlaneAdapters = (
         model: string,
         signal?: AbortSignal
       ): Promise<unknown> => {
+        // Go's shipped catalog cannot resolve Gemini before the stream hook runs.
+        // Ask the native bridge during model preparation as well as generation.
+        if (
+          provider === "opencode-go" &&
+          internalRouteFor(
+            provider,
+            model,
+            findModelSpecOn("go", model)?.provider_npm,
+            config.modelRoutes[model]?.api
+          ) === GO_GOOGLE_INTERNAL_ROUTE
+        ) {
+          const target = adapters.get(GO_GOOGLE_INTERNAL_ROUTE)?.adapter;
+          const resolve = target?.[method];
+          if (target !== undefined && typeof resolve === "function") {
+            const prepared: unknown = await Reflect.apply(resolve, target, [
+              GO_GOOGLE_INTERNAL_ROUTE,
+              model,
+              signal,
+            ]);
+            if (isRecord(prepared))
+              return method === "prepareCall" && isRecord(prepared.model)
+                ? { ...prepared, model: { ...prepared.model, provider } }
+                : { ...prepared, provider };
+            return prepared;
+          }
+        }
         // The original with the adapter as its receiver: both methods are class
         // methods that read `this` (pi-ai's open with `this.current()`), and a
         // detached call fails the provider's whole catalog load.

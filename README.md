@@ -146,6 +146,8 @@ DSH speaks three of the four families itself. The fourth — Google Generative A
 
 ### 2. OpenCode Go (`provider: opencode-go`) — subscription quota
 
+- **Google Generative AI** (`https://opencode.ai/inference/go/google/v1beta/models/*:streamGenerateContent`): `gemini-4-argon-contributor`, served by the internal `opencode-go-google` adapter. Add the model under your existing `opencode-go` provider; the bridge inherits that provider's API key reference (default `OPENCODE_GO_API_KEY`). It supports image attachments and signed tool-call replay. Only configured models are mounted; access still depends on your Go plan. This endpoint is also used with `endpoint: legacy`, because Go has no legacy Google endpoint.
+
 - **OpenAI Chat Completions** (`https://opencode.ai/zen/go/v1/chat/completions`): `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `deepseek-v4-pro`, `deepseek-v4.1-flash`, `glm-5.2`, `glm-5.3`, `glm-5.3-flash`, `hy3`, `hy4-preview`, `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`, `longcat-2.0`, `longcat-2.5-preview-free`, `mimo-v2.5`, `mimo-v2.5-pro`, `mimo-v2.6-flash`, `mimo-v2.6-pro`, `qwen3.6-plus`, `qwen3.7-max`, `space-bunny`, `space-bunny-free`, `step-5-preview-free`
 - **OpenAI Responses** (`https://opencode.ai/zen/go/v1/responses`): `gpt-5.6-luna`, `gpt-6-luna`, `grok-4.5`, `grok-4.6`, `grok-4.7`, `muse-spark-1.2-contributor`, `muse-spark-1.3-contributor`
 - **Anthropic Messages** (`https://opencode.ai/zen/go/v1/messages`): `claude-haiku-5-5`, `minimax-m2.7`, `minimax-m3`, `qwen3.7-plus`, `qwen3.8-flash`, `qwen3.8-max`

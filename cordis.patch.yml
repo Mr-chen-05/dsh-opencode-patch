@@ -28,7 +28,7 @@
 # See src/settings-fields.ts CONFIG_ONLY_FIELDS.
 #   providers: [string]         provider route keys to intercept (default: opencode, opencode-go,
 #                               opencode-responses, opencode-anthropic, opencode-google,
-#                               opencode-go-responses, opencode-go-anthropic — must cover every
+#                               opencode-go-responses, opencode-go-anthropic, opencode-go-google — covers every
 #                               route this layer declares, including the Google bridge's).
 #   userAgent: string           optional custom User-Agent override (default empty = use OpenCode CLI UA).
 #   originClient: string        x-opencode-client value (default 'cli').
@@ -51,6 +51,7 @@
           - opencode-google
           - opencode-go-responses
           - opencode-go-anthropic
+          - opencode-go-google
         injectUserAgent: true
         userAgent: ""
         injectOriginHeaders: true

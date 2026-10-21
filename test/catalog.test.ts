@@ -1104,8 +1104,12 @@ describe("routing · the plane half of the decision", () => {
 
   it("leaves a model with no protocol alone", () => {
     expect(
-      internalRouteFor("opencode-go", "grok-4.7", "@ai-sdk/google")
-    ).toBeUndefined();
+      internalRouteFor(
+        "opencode-go",
+        "gemini-4-argon-contributor",
+        "@ai-sdk/google"
+      )
+    ).toBe("opencode-go-google");
     expect(internalRouteFor("opencode-go", "grok-4.7")).toBeUndefined();
   });
 });

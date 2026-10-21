@@ -11,6 +11,8 @@
  * @module test/client-channels.test
  */
 
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { opencodeDatabaseFile, opencodeRoots } from "../src/opencode-paths.ts";
@@ -77,8 +79,8 @@ describe("OpenCode Client Channels & Database File Resolution", () => {
       },
       "/tmp"
     );
-    expect(linuxRoots.data).toBe("/home/you/.local/share/opencode");
-    expect(linuxRoots.config).toBe("/home/you/.config/opencode");
+    expect(linuxRoots.data).toBe(join("/home/you/.local/share", "opencode"));
+    expect(linuxRoots.config).toBe(join("/home/you/.config", "opencode"));
 
     const macRoots = opencodeRoots(
       {
@@ -88,8 +90,10 @@ describe("OpenCode Client Channels & Database File Resolution", () => {
       },
       "/var/tmp"
     );
-    expect(macRoots.data).toBe("/Users/you/.local/share/opencode");
-    expect(macRoots.tmp).toBe("/var/tmp/opencode");
+    expect(macRoots.data).toBe(
+      join("/Users/you", ".local", "share", "opencode")
+    );
+    expect(macRoots.tmp).toBe(join("/var/tmp", "opencode"));
 
     const winRoots = opencodeRoots(
       {

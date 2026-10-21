@@ -63,7 +63,10 @@ describe("mount · the protocols the harness can build", () => {
           .filter(([, route]) => SELF_MOUNTED_ROUTES.has(route))
           .map(([protocol]) => protocol)
     );
-    expect(selfMounted).toEqual(["google-generative-ai"]);
+    expect(selfMounted).toEqual([
+      "google-generative-ai",
+      "google-generative-ai",
+    ]);
   });
 });
 

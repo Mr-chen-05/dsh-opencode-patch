@@ -49,9 +49,10 @@ import {
   getLiveGoCatalog,
   getLiveZenCatalog,
 } from "./models-catalog.ts";
-import { baseForProtocol, protocolFor } from "./pi-provider.ts";
+import { baseForProtocol, protocolFor, type Plane } from "./pi-provider.ts";
 import {
   GOOGLE_INTERNAL_ROUTE,
+  GO_GOOGLE_INTERNAL_ROUTE,
   GOOGLE_SDK,
   PROTOCOL_FOR_SDK,
   ROUTE_FOR_PLANE_PROTOCOL,
@@ -61,9 +62,6 @@ import { isFunctionLike, isRecord } from "./utils/guards.ts";
 
 /** The host plugin whose `apply` this module mounts. */
 const PI_AI_PACKAGE = "@deepseek-ai/dsh-llm-pi-ai";
-
-/** The route whose profile the internal routes inherit their credential from. */
-const SOURCE_ROUTE = "opencode";
 
 /** Services hidden from the mounted instance; see the module header. */
 const HIDDEN_SERVICES: readonly string[] = ["authorization", "settings"];
@@ -401,7 +399,10 @@ export const loadPiAiAdapterHost = async (
  * @param ctx - host context carrying the loader.
  * @returns the declared reference, or the documented default.
  */
-export const inheritedCredentialRef = (ctx: unknown): string => {
+export const inheritedCredentialRef = (
+  ctx: unknown,
+  plane: Plane = "opencode"
+): string => {
   for (const entry of loaderEntries(ctx)) {
     if (!isRecord(entry) || !isRecord(entry.options)) {
       continue;
@@ -414,7 +415,7 @@ export const inheritedCredentialRef = (ctx: unknown): string => {
     if (!isRecord(config) || !isRecord(config.providers)) {
       continue;
     }
-    const source = config.providers[SOURCE_ROUTE];
+    const source = config.providers[plane];
     if (!isRecord(source)) {
       continue;
     }
@@ -423,7 +424,9 @@ export const inheritedCredentialRef = (ctx: unknown): string => {
       return ref;
     }
   }
-  return DEFAULT_CREDENTIAL_REF;
+  return plane === "opencode-go"
+    ? DEFAULT_USAGE_KEY_ENV
+    : DEFAULT_CREDENTIAL_REF;
 };
 
 /**
@@ -507,7 +510,10 @@ const sdksForProtocol = (protocol: string): string[] =>
  */
 const planeSource = (plane: string, ctx: unknown) =>
   plane === "opencode-go"
-    ? { apiKeyEnv: DEFAULT_USAGE_KEY_ENV, catalog: getLiveGoCatalog() }
+    ? {
+        apiKeyEnv: inheritedCredentialRef(ctx, "opencode-go"),
+        catalog: getLiveGoCatalog(),
+      }
     : { apiKeyEnv: inheritedCredentialRef(ctx), catalog: getLiveZenCatalog() };
 
 /**
@@ -923,77 +929,18 @@ export const registerResponsesProvider = async (
     return undefined;
   }
   const declared = declaredRoutes(llm);
-  // The bridge route first. It registers on the real service through this
-  // plugin's own adapter, so it needs nothing from the wrapper's mount below:
-  // a deployment that declares every protocol route in its profile still gets
-  // the Gemini models, which were the one protocol a declared route could
-  // never name. Its withdrawal joins the disposer this function returns, and
-  // every early exit below hands it back rather than leaking it.
-  // The pi the HOST installed, which is the one the wrapper mounts — loaded once
-  // here rather than declared as a dependency, so a harness bump moves the wire
-  // implementation without a version skew in between (see `google-bridge.ts`).
-  const hostPi = await loadHostPi();
-  if (!declared.has(GOOGLE_INTERNAL_ROUTE) && hostPi === undefined) {
-    console.info(
-      "[dsh-opencode-patch] the Google bridge did not mount: the harness's " +
-        "@earendil-works/pi-ai could not be resolved from dsh-llm-pi-ai — " +
-        "the Gemini models will not be offered (every other route is unaffected)"
-    );
-  }
-  const bridgeHandle =
-    declared.has(GOOGLE_INTERNAL_ROUTE) || hostPi === undefined
-      ? undefined
-      : registerGoogleBridge({
-          apiKeyRef: inheritedCredentialRef(ctx),
-          // And, last, the installation's own store - off unless the deployment
-          // opted in, which is what `config` carries here.
-          readOpencodeStore: config?.readOpencodeStore === true,
-          // The same endpoint family the internal routes below are mounted with,
-          // so a deployment cannot end up sending to two families at once.
-          endpoint: config?.endpoint,
-          ctx,
-          host: await loadPiAiAdapterHost(ctx),
-          pi: hostPi,
-          // The bridge reads the RAW catalog, not the config-shaped profile:
-          // its pi models carry this catalog's cost, so pi's own usage
-          // accounting lands the right numbers without our meter's help.
-          // `registerAdapter` is a prototype method of the real `llm` service —
-          // handing the detached function over loses the service, and the
-          // registration then reads `this.ctx` off the box it arrived in and dies
-          // on the first boot that reaches this line at all. Bound to `llm`, the
-          // call lands exactly where the documented `ctx.llm.registerAdapter(…)`
-          // idiom puts it: on the service the plugin's context resolved.
-          llm: {
-            registerAdapter: llm.registerAdapter.bind(llm),
-          },
-          specs: planeSource("opencode", ctx).catalog.filter(
-            (spec) => spec.provider_npm === GOOGLE_SDK
-          ),
-        });
-  if (bridgeHandle !== undefined) {
-    ctx.logger?.info?.(
-      "[dsh-opencode-patch] bridged the Gemini models to %s (own adapter)",
-      GOOGLE_INTERNAL_ROUTE
-    );
-  }
-  const bridgeDispose =
-    bridgeHandle === undefined
-      ? undefined
-      : () => {
-          releaseRegistration(bridgeHandle);
-        };
-  // A deployment that already declares a route in its profile keeps it: the user
-  // hand-picks the models it serves, and mounting over that would take the choice
-  // away. Deferring is the point — this module exists so a deployment that
-  // declares NOTHING still works, not to override one that does.
   // **What the deployment declared, per plane.** The mount serves the protocols a
   // declared model needs, with only those models: a route's model list is what the
   // picker shows, and the whole protocol catalog there is how models nobody
   // selected reached it. Read from the host, which holds the user's configuration.
-  const declaredByPlane = new Map<string, ReadonlySet<string>>();
-  for (const plane of ["opencode", "opencode-go"]) {
-    const ids = await declaredModelsFor(ctx, plane);
-    declaredByPlane.set(plane, ids);
+  const declaredByPlane = new Map(
+    await Promise.all(
+      ["opencode", "opencode-go"].map(
+        async (plane) => [plane, await declaredModelsFor(ctx, plane)] as const
+      )
+    )
+  );
+  for (const [plane, ids] of declaredByPlane) {
     if (ids.size === 0) {
       // **Say both causes, because this side cannot tell them apart.** The host
       // answers `[]` from `listModels` either when the route declares no models or
@@ -1011,6 +958,71 @@ export const registerResponsesProvider = async (
       );
     }
   }
+
+  // The bridge route first. It registers on the real service through this
+  // plugin's own adapter, so it needs nothing from the wrapper's mount below:
+  // a deployment that declares every protocol route in its profile still gets
+  // the Gemini models, which were the one protocol a declared route could
+  // never name. Its withdrawal joins the disposer this function returns, and
+  // every early exit below hands it back rather than leaking it.
+  // The pi the HOST installed, which is the one the wrapper mounts — loaded once
+  // here rather than declared as a dependency, so a harness bump moves the wire
+  // implementation without a version skew in between (see `google-bridge.ts`).
+  const hostPi = await loadHostPi();
+  if (!declared.has(GOOGLE_INTERNAL_ROUTE) && hostPi === undefined) {
+    console.info(
+      "[dsh-opencode-patch] the Google bridge did not mount: the harness's " +
+        "@earendil-works/pi-ai could not be resolved from dsh-llm-pi-ai — " +
+        "the Gemini models will not be offered (every other route is unaffected)"
+    );
+  }
+  const bridgeHandles: unknown[] = [];
+  const bridgeHost = await loadPiAiAdapterHost(ctx);
+  try {
+    for (const plane of ["opencode", "opencode-go"] as const) {
+      const route =
+        plane === "opencode-go"
+          ? GO_GOOGLE_INTERNAL_ROUTE
+          : GOOGLE_INTERNAL_ROUTE;
+      if (declared.has(route) || hostPi === undefined) continue;
+      const source = planeSource(plane, ctx);
+      const ids = declaredByPlane.get(plane);
+      const handle = registerGoogleBridge({
+        apiKeyRef: source.apiKeyEnv,
+        plane,
+        readOpencodeStore: config?.readOpencodeStore === true,
+        endpoint: config?.endpoint,
+        ctx,
+        host: bridgeHost,
+        pi: hostPi,
+        llm: { registerAdapter: llm.registerAdapter.bind(llm) },
+        specs: source.catalog.filter(
+          (spec) =>
+            spec.provider_npm === GOOGLE_SDK && ids?.has(spec.id) === true
+        ),
+      });
+      if (handle !== undefined) {
+        bridgeHandles.push(handle);
+        ctx.logger?.info?.(
+          "[dsh-opencode-patch] bridged the Gemini models to %s (own adapter)",
+          route
+        );
+      }
+    }
+  } catch (error) {
+    for (const handle of bridgeHandles) releaseRegistration(handle);
+    throw error;
+  }
+  const bridgeDispose =
+    bridgeHandles.length === 0
+      ? undefined
+      : () => {
+          for (const handle of bridgeHandles) releaseRegistration(handle);
+        };
+  // A deployment that already declares a route in its profile keeps it: the user
+  // hand-picks the models it serves, and mounting over that would take the choice
+  // away. Deferring is the point — this module exists so a deployment that
+  // declares NOTHING still works, not to override one that does.
   const undescribed = undescribedDeclaredModels(declaredByPlane);
   if (undescribed.length > 0) {
     // CONSOLE, not `ctx.logger`: cordis's logger only buffers (its default
