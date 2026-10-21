@@ -182,12 +182,12 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // replacing the whole set — so these counts are the cold-start picker, and a
     // silent drop here is a model nobody can pick. Regenerate with
     // `scripts/regenerate-catalog-shim.ts` rather than editing by hand.
-    expect(OPENCODE_ZEN_CATALOG.length).toBe(85);
+    expect(OPENCODE_ZEN_CATALOG.length).toBe(84);
     const freeModels = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free === true);
     // Only the free tiers the registry still lists as active. The count is the
     // `is_free` flag the shim carries, NOT the `-free` suffix: `big-pickle` is
     // flagged and is not suffixed, so a suffix rule would have missed it.
-    expect(freeModels.length).toBe(10);
+    expect(freeModels.length).toBe(11);
 
     const ids = new Set(OPENCODE_ZEN_CATALOG.map((m) => m.id));
     expect(ids.has("beam-free")).toBe(true);
@@ -226,7 +226,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // Every plane we declare a route for is present in the cold-start shim, so
     // the mount has models to serve before the first refresh ever runs.
     expect(buckets.get("@ai-sdk/openai")?.length).toBe(31);
-    expect(buckets.get("@ai-sdk/anthropic")?.length).toBe(18);
+    expect(buckets.get("@ai-sdk/anthropic")?.length).toBe(17);
 
     // And each of those SDKs maps to a protocol this plugin actually serves, so
     // no carried model names a format with nowhere to go.
@@ -253,7 +253,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const responses = modelsForSdk("@ai-sdk/openai").map((m) => m.id);
     const anthropic = modelsForSdk("@ai-sdk/anthropic").map((m) => m.id);
     expect(responses.length).toBe(33);
-    expect(anthropic.length).toBe(21);
+    expect(anthropic.length).toBe(20);
     expect(responses.filter((id) => anthropic.includes(id))).toEqual([]);
     // The flagship of each plane is on the shim, so a cold start can serve it.
     expect(responses).toContain("muse-spark-1.2");
@@ -274,7 +274,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
       );
     }
     expect(modelsForSdk("@ai-sdk/openai", zen).length).toBe(31);
-    expect(modelsForSdk("@ai-sdk/anthropic", zen).length).toBe(18);
+    expect(modelsForSdk("@ai-sdk/anthropic", zen).length).toBe(17);
     // And the ones that would have leaked are genuinely Go-only.
     const goOnly = ["muse-spark-1.3-contributor", "qwen3.7-plus"];
     for (const id of goOnly) {
