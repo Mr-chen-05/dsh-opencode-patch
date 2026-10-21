@@ -69,6 +69,9 @@ export const Tag = (props: { children?: React.ReactNode }) =>
 export const IconInfoOutlineRegular = () =>
   createElement("span", { "data-icon": "info" });
 
+export const IconRefreshOutlineRegular = () =>
+  createElement("span", { "data-icon": "refresh" });
+
 export const StateDot = () => createElement("i", { "data-dot": "true" });
 
 export const Tooltip = pass;

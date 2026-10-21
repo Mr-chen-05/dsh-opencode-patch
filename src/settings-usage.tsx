@@ -16,6 +16,7 @@
 
 import {
   IconInfoOutlineRegular,
+  IconRefreshOutlineRegular,
   StateDot,
   Tooltip,
 } from "@deepseek-ai/dsh-client-ui-primitives";
@@ -131,6 +132,8 @@ const statusText = (
 
 export interface UsageSummaryViewProps {
   locale: string | undefined;
+  onRefresh?: () => void | Promise<void>;
+  refreshing?: boolean;
   t: Translate;
   usage: GoUsage | undefined;
 }
@@ -141,6 +144,8 @@ export interface UsageSummaryViewProps {
  */
 export const UsageSummaryView = ({
   locale,
+  onRefresh,
+  refreshing = false,
   t,
   usage,
 }: UsageSummaryViewProps): React.ReactElement => {
@@ -187,11 +192,54 @@ export const UsageSummaryView = ({
             </span>
           </Tooltip>
         </span>
-        <span
-          style={{ color: "var(--dsw-alias-label-secondary)", fontSize: 11 }}
+        <div
+          style={{
+            alignItems: "center",
+            display: "inline-flex",
+            gap: 6,
+          }}
         >
-          {statusText(t, usage, limited)}
-        </span>
+          <span
+            style={{ color: "var(--dsw-alias-label-secondary)", fontSize: 11 }}
+          >
+            {statusText(t, usage, limited)}
+          </span>
+          {onRefresh !== undefined && (
+            <button
+              aria-label={refreshing ? t("usageRefreshing") : t("usageRetry")}
+              disabled={refreshing}
+              onClick={() => {
+                void onRefresh();
+              }}
+              style={{
+                alignItems: "center",
+                background: "transparent",
+                border: "none",
+                borderRadius: 4,
+                color: "var(--dsw-alias-label-secondary)",
+                cursor: refreshing ? "default" : "pointer",
+                display: "inline-flex",
+                height: 18,
+                justifyContent: "center",
+                opacity: refreshing ? 0.6 : 1,
+                padding: 2,
+                width: 18,
+              }}
+              type="button"
+            >
+              <span
+                style={{
+                  animation: refreshing
+                    ? "dsh-oc-spin 0.9s linear infinite"
+                    : undefined,
+                  display: "inline-flex",
+                }}
+              >
+                <IconRefreshOutlineRegular size={11} />
+              </span>
+            </button>
+          )}
+        </div>
       </div>
 
       {usage !== undefined &&
@@ -288,30 +336,41 @@ export const readUntilAnswered = async (
   attempts = 5,
   sleep: (attempt: number) => Promise<void> = (attempt) =>
     new Promise((resolve) => {
-      setTimeout(resolve, 250 * (attempt + 1));
+      setTimeout(resolve, 300 * (attempt + 1));
     }),
   live: () => boolean = () => true
 ): Promise<GoUsage | undefined> => {
+  let lastError: unknown;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (!live()) {
       return undefined;
     }
-    // Sequential on purpose: each attempt waits for the previous answer, and the
-    // wait between them is the retry.
-    // oxlint-disable-next-line no-await-in-loop -- see above.
-    const next = await read();
-    if (next !== undefined) {
-      return next;
+    try {
+      // Sequential on purpose: each attempt waits for the previous answer, and the
+      // wait between them is the retry.
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      const next = await read();
+      if (next !== undefined) {
+        return next;
+      }
+    } catch (error: unknown) {
+      lastError = error;
     }
     if (attempt < attempts - 1) {
       // oxlint-disable-next-line no-await-in-loop -- the delay IS the retry.
       await sleep(attempt);
     }
   }
+  if (lastError !== undefined) {
+    console.warn(
+      "[dsh-opencode-patch] usage read: all attempts failed",
+      lastError
+    );
+  }
   return undefined;
 };
 
-/** The container: reads once when the card appears, then hands off to the view. */
+/** The container: reads once when the card appears, on window focus, or via manual refresh. */
 export const UsageSummary: React.FC<UsageSummaryProps> = ({
   getLocale,
   readUsage,
@@ -319,43 +378,42 @@ export const UsageSummary: React.FC<UsageSummaryProps> = ({
 }) => {
   const [usage, setUsage] = React.useState<GoUsage | undefined>();
   const [settled, setSettled] = React.useState(false);
+  const [refreshing, setRefreshing] = React.useState(false);
+
+  const fetchUsage = React.useCallback(async () => {
+    if (readUsage === undefined) {
+      return;
+    }
+    setRefreshing(true);
+    let next: GoUsage | undefined;
+    try {
+      next = await readUntilAnswered(readUsage, 5, undefined, () => true);
+    } catch (error) {
+      // The meter's empty state is the same for every cause, so the one place
+      // that knows the read failed says which it was. Without this, a failing
+      // read and a service that was never mounted look identical.
+      console.warn("[dsh-opencode-patch] usage read failed", error);
+      next = undefined;
+    } finally {
+      setRefreshing(false);
+    }
+    setUsage(next);
+    setSettled(true);
+  }, [readUsage]);
 
   React.useEffect(() => {
-    if (readUsage === undefined) {
-      // Every path returns a cleanup, so the effect's shape does not depend on
-      // which branch ran.
-      return () => {
-        // No read was started, so there is nothing to cancel.
-      };
-    }
-    let live = true;
-    void (async () => {
-      // The remote is mounted by an asynchronous effect, so a card that appears
-      // first reads against a remote that is not there yet and answers
-      // `undefined` - and there is nothing to read again, because the effect's
-      // dependency is this closure, whose identity changes every render while its
-      // answer does not. The meter does not have the problem: it reads on every
-      // turn. So this reads until answered, which is the difference between a card
-      // that is briefly empty and one that is empty until the page is reloaded.
-      let next: GoUsage | undefined;
-      try {
-        next = await readUntilAnswered(readUsage, 5, undefined, () => live);
-      } catch (error) {
-        // The meter's empty state is the same for every cause, so the one place
-        // that knows the read failed says which it was. Without this, a failing
-        // read and a service that was never mounted look identical.
-        console.warn("[dsh-opencode-patch] usage read failed", error);
-        next = undefined;
-      }
-      if (live) {
-        setUsage(next);
-        setSettled(true);
-      }
-    })();
-    return () => {
-      live = false;
+    void fetchUsage();
+  }, [fetchUsage]);
+
+  React.useEffect(() => {
+    const onFocus = () => {
+      void fetchUsage();
     };
-  }, [readUsage]);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [fetchUsage]);
 
   if (readUsage === undefined) {
     return <></>;
@@ -365,6 +423,8 @@ export const UsageSummary: React.FC<UsageSummaryProps> = ({
   return (
     <UsageSummaryView
       locale={getLocale?.()}
+      onRefresh={fetchUsage}
+      refreshing={refreshing}
       t={t}
       usage={settled ? usage : undefined}
     />
