@@ -48,6 +48,7 @@ import {
   type UsageWindow,
 } from "./usage-contract.ts";
 import { isRecord } from "./utils/guards.ts";
+import { isZenProvider } from "./utils/request-shape.ts";
 
 const USAGE_MAX_BYTES = 1024 * 1024;
 
@@ -369,9 +370,13 @@ export class GoUsageService extends TypertRemoteService {
     }
 
     if (!response.ok) {
-      if (response.status === 403 && text.includes("EntitlementError")) {
+      const isZen = isZenProvider(targetProvider);
+      if (
+        (response.status === 403 && text.includes("EntitlementError")) ||
+        (response.status === 401 && isZen)
+      ) {
         const zenInfo = await resolveZenCreditInfo(this.ctx);
-        if (zenInfo.isConfigured) {
+        if (zenInfo.isConfigured || isZen) {
           return zenOverflowUsage(source, sessionId, query);
         }
         throw new RemoteError(
