@@ -305,20 +305,17 @@ describe("decorateModelDiscovery", () => {
       { baseURL: "https://opencode.ai/zen/v1", provider: "opencode" },
       undefined
     );
-    // **Discovery JOINS the catalog; a route's own list does not.** The two
-    // surfaces answer different questions: `listModels(route)` is what a route
-    // serves (the operator's decision, never widened), while `discoverModels` is
-    // what the endpoint offers — the list a user picks from before anything is
-    // declared. Left to the wrapper, that list comes from pi's installed
-    // snapshot, a fixed vintage that was measured missing
-    // `glm-5.3-flash-free` while both the bundled catalog and the live /models
-    // endpoint had it.
-    expect(ids).toContain("minimax-m3.1-flash-free");
-    expect(ids.length).toBeGreaterThan(1);
-    // The adapter's own row is kept, not removed.
+    // **Discovery does NOT join the catalog.** It briefly did — reasoning that
+    // "browse to pick" is a different surface from "what this route serves" — and
+    // the owner's instruction had been explicit: *user can select them from the
+    // list, but we shouldn't override the user's config for what is usable*. The
+    // join made Settings list models the deployment never declared.
+    //
+    // The refresh adds nothing the adapter did not answer.
+    expect(ids).not.toContain("minimax-m3.1-flash-free");
+    expect(ids).toHaveLength(1);
+    // Kept, not removed: it answers on zen, so it is not retired.
     expect(ids).toContain("beam-free");
-    // And it is not duplicated by the join.
-    expect(ids.filter((id) => id === "beam-free")).toHaveLength(1);
     stop?.();
     expect(ctx.llm?.discoverModels).toBe(original);
   });

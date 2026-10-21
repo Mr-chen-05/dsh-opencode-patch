@@ -499,22 +499,26 @@ describe("usage-pill: derived copy & failure parsing", () => {
     // The colour decision reads the WINDOW, not the free flag — the pill
     // combines the two, so here it is the window side that is pinned: unchanged
     // for every state the plan can be in.
-    expect(
-      getWindowColorFor(
-        getAffectingWindow(
-          createMockUsage({
-            monthly: {
-              percent: 100,
-              resetsAt: isoAt(1000),
-              status: "rate-limited",
-            },
-          })
-        )
+    // The TOKEN decides the colour; a fallback may follow it, so these assert
+    // which token won rather than its exact string. The fallback is what keeps
+    // the paint right in a scope where the host's theme declares no variable.
+    const limited = getWindowColorFor(
+      getAffectingWindow(
+        createMockUsage({
+          monthly: {
+            percent: 100,
+            resetsAt: isoAt(1000),
+            status: "rate-limited",
+          },
+        })
       )
-    ).toBe("var(--dsw-alias-state-error-primary)");
-    expect(getWindowColorFor()).toBe("var(--dsw-alias-state-success-primary)");
-    expect(getWindowColorFor(getAffectingWindow(createMockUsage()))).toBe(
-      "var(--dsw-alias-state-success-primary)"
+    );
+    expect(limited).toMatch(/^var\(--dsw-alias-state-error-primary[,)]/u);
+    expect(getWindowColorFor()).toMatch(
+      /^var\(--dsw-alias-state-success-primary[,)]/u
+    );
+    expect(getWindowColorFor(getAffectingWindow(createMockUsage()))).toMatch(
+      /^var\(--dsw-alias-state-success-primary[,)]/u
     );
   });
 

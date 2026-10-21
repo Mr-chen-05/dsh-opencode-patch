@@ -165,7 +165,7 @@ export const STYLES = `
 }
 
 .dsh-oc-usage-trigger.dsh-oc-usage-alert {
-  color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary, #e5484d);
 }
 
 .dsh-oc-usage-ring-track {
@@ -241,7 +241,7 @@ export const STYLES = `
   /* --dsw-elevation-prominent, and this was briefly "panel" because a token by
    * that name exists. The harness's OWN floating panel — the dockkit float, the
    * same class of thing in this same dock — reads
-   *   box-shadow: var(--dsw-elevation-prominent)
+   *   box-shadow: var(--dsw-elevation-prominent, 0 8px 24px rgba(0, 0, 0, 0.18))
    * so prominent is the surface elevation, and elevation-panel is a token nobody
    * consumes. Reverted after reading the consumer instead of the name, which is
    * the mistake this file has now paid for twice. */
@@ -348,7 +348,7 @@ export const STYLES = `
    would either duplicate it or diverge from it. */
 .dsh-oc-usage-limited {
   margin-left: 6px;
-  color: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-state-error-primary, #e5484d);
 }
 
 /* The footer carries the timestamp AND every action now. The upgrade-plan link had its own
@@ -382,7 +382,7 @@ export const STYLES = `
 .dsh-oc-usage-console:focus-visible {
   outline: none;
   border-radius: var(--dsw-radius-xs, 4px);
-  box-shadow: 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  box-shadow: 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, #3b82f6));
 }
 
 .dsh-oc-usage-updated {
@@ -421,7 +421,7 @@ export const STYLES = `
 
 .dsh-oc-usage-refresh:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  box-shadow: 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, #3b82f6));
 }
 
 /* The control is busy mid-read; the glyph turns rather than disappearing. */
@@ -463,8 +463,8 @@ export const STYLES = `
 .dsh-oc-usage-warning {
   padding: 7px 9px;
   border-radius: var(--dsw-radius-sm, 8px);
-  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
-  color: var(--dsw-alias-state-error-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #e5484d) 12%, transparent);
+  color: var(--dsw-alias-state-error-primary, #e5484d);
   font-size: 11px;
   line-height: 1.45;
   margin-top: 8px;
@@ -484,7 +484,7 @@ export const STYLES = `
   line-height: 1.45;
   padding: 7px 9px;
   border-radius: var(--dsw-radius-sm, 8px);
-  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f5a524) 12%, transparent);
   color: var(--dsw-alias-label-secondary, inherit);
   margin-top: 4px;
 }
@@ -578,9 +578,9 @@ export const getWindowState = (window: UsageWindow): WindowState => {
 
 /** The state ladder as colours, for strokes and fills the kit does not ship. */
 export const WINDOW_STATE_COLOR: Record<WindowState, string> = {
-  done: "var(--dsw-alias-state-success-primary)",
-  warning: "var(--dsw-alias-state-warn-primary)",
-  error: "var(--dsw-alias-state-error-primary)",
+  done: "var(--dsw-alias-state-success-primary, #16a34a)",
+  warning: "var(--dsw-alias-state-warn-primary, #f5a524)",
+  error: "var(--dsw-alias-state-error-primary, #e5484d)",
 };
 
 export const getWindowColor = (window: UsageWindow): string =>
