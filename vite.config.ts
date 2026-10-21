@@ -230,10 +230,10 @@ export default defineConfig({
       // on". Getting there from here is real work across 25 files, so this
       // raises the floor first and the per-file work follows.
       thresholds: {
-        statements: 95.4,
-        branches: 90.4,
-        functions: 94.9,
-        lines: 95.4,
+        statements: 95.9,
+        branches: 91.5,
+        functions: 95.9,
+        lines: 95.9,
         // Floors on the load-bearing modules only, so a well-covered average
         // cannot hide one that stopped being exercised: the protocol mount is
         // the piece with four host contracts to survive, and it must stay

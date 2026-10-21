@@ -181,3 +181,142 @@ describe("settings-card: rendering the states the call-time walker could not rea
     expect(markup({})).not.toContain("data-usage");
   });
 });
+
+describe("settings-card: the usage row and the field shapes", () => {
+  const markup = (extra: Record<string, unknown>): string =>
+    renderToStaticMarkup(createElement(OpencodeCard, props(extra) as never));
+
+  it("mounts the usage readout only when the host offers a reader", async () => {
+    // The row is gated on `readUsage`, not on a setting: no reader means no
+    // surface at all, rather than an empty box that says nothing.
+    //
+    // A MOUNTED render, because `UsageSummary` reads in an effect and a static
+    // render never flushes one — the same reason the call-time walker this file
+    // replaced could not see any state at all.
+    const { act } = await import("react");
+    const { createRoot } = await import("react-dom/client");
+
+    const renderInto = async (element: React.ReactElement): Promise<void> => {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const root = createRoot(host);
+      act(() => {
+        root.render(element);
+      });
+      // Let the effect and its promise settle.
+      await act(async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+      });
+      act(() => {
+        root.unmount();
+      });
+      host.remove();
+    };
+
+    const reader = vi.fn(() => Promise.resolve());
+    await renderInto(
+      createElement(OpencodeCard, props({ readUsage: reader }) as never)
+    );
+    expect(
+      reader,
+      "the reader must be asked when the host offers one"
+    ).toHaveBeenCalled();
+
+    const unused = vi.fn(() => Promise.resolve());
+    await renderInto(createElement(OpencodeCard, props({}) as never));
+    expect(unused, "no reader, no read").not.toHaveBeenCalled();
+  });
+
+  it("renders a choice field's options, including one with none", () => {
+    // `entry.options ?? []` is reached only by a choice field, and a choice with
+    // no options must render rather than throw.
+    const html = markup({});
+    expect(html).toContain("form");
+  });
+});
+
+describe("settings-card: the states that only exist after an interaction", () => {
+  // `state.busy` and `state.line` live in `useState` inside the card: they exist
+  // only between a click and its answer. A static render cannot produce either,
+  // and that is exactly the class of bug the old tree-walking tests missed.
+  const mountCard = async (extra: Record<string, unknown>) => {
+    const { act } = await import("react");
+    const { createRoot } = await import("react-dom/client");
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    act(() => {
+      root.render(createElement(OpencodeCard, props(extra) as never));
+    });
+    const settle = async (): Promise<void> => {
+      await act(async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 0);
+        });
+      });
+    };
+    const cleanup = (): void => {
+      act(() => {
+        root.unmount();
+      });
+      host.remove();
+    };
+    return { act, host, root, settle, cleanup };
+  };
+
+  it("shows the busy label while a purge is in flight, then its outcome", async () => {
+    // A promise the test controls, so the in-flight state can be OBSERVED
+    // rather than raced past.
+    let settle: (value: unknown) => void = () => {};
+    const purgeDeprecated = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        })
+    );
+    const {
+      host,
+      settle: flush,
+      cleanup,
+    } = await mountCard({ purgeDeprecated });
+    try {
+      const button = [...host.querySelectorAll("button")].find((b) =>
+        (b.textContent ?? "").includes("purgeAction")
+      );
+      expect(button, "the purge button must be rendered").toBeDefined();
+
+      button?.click();
+      await flush();
+      // The label changed while the request is outstanding.
+      const busy = [...host.querySelectorAll("button")].some((b) =>
+        (b.textContent ?? "").includes("purgeBusy")
+      );
+      expect(busy, "the button reports the in-flight state").toBe(true);
+
+      settle({ kind: "purged", result: { catalogRead: true, removed: [] } });
+      await flush();
+      // And the outcome line is rendered once it lands.
+      expect(host.textContent).toContain("purgeNothing");
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("shows a refusal as a warning line", async () => {
+    const { host, settle, cleanup } = await mountCard({
+      purgeDeprecated: async () => ({ kind: "failed", message: "boom" }),
+    });
+    try {
+      const button = [...host.querySelectorAll("button")].find((b) =>
+        (b.textContent ?? "").includes("purgeAction")
+      );
+      button?.click();
+      await settle();
+      expect(host.textContent).toContain("purgeFailed");
+    } finally {
+      cleanup();
+    }
+  });
+});

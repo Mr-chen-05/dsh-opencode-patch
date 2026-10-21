@@ -502,3 +502,53 @@ describe("isOpenCodeRequest (endpoint differentiation)", () => {
     ).toBe(false);
   });
 });
+
+describe("config · modelRoutes", () => {
+  it("reads api and baseURL, accepting the snake_case spelling too", () => {
+    // A deployment may write `base_url`; both spellings name the same thing, and
+    // the camelCase one wins when both are present.
+    // `base_url` is the spelling a deployment may write; the TYPE names only
+    // the camelCase one, so the raw config is widened here and nowhere else.
+    const raw = {
+      modelRoutes: {
+        "claude-sonnet-4-5": { api: "anthropic", baseURL: "https://a.example" },
+        "gpt-5.4": { base_url: "https://b.example" },
+        both: {
+          baseURL: "https://camel.example",
+          base_url: "https://snake.example",
+        },
+      },
+    };
+    const config = resolveConfig(raw as never);
+    expect(config.modelRoutes["claude-sonnet-4-5"]).toEqual({
+      api: "anthropic",
+      baseURL: "https://a.example",
+    });
+    expect(config.modelRoutes["gpt-5.4"]).toEqual({
+      baseURL: "https://b.example",
+    });
+    expect(config.modelRoutes.both).toEqual({
+      baseURL: "https://camel.example",
+    });
+  });
+
+  it("drops an entry with no route rather than repairing it", () => {
+    // A typo must not silently pin a model to an endpoint nobody meant.
+    const config = resolveConfig({
+      modelRoutes: {
+        empty: {},
+        "wrong-case": { API: "anthropic" },
+        wrongType: { api: 42, baseURL: 7 },
+        notAnObject: "https://nope.example",
+        good: { api: "anthropic" },
+      } as never,
+    });
+    expect(Object.keys(config.modelRoutes)).toEqual(["good"]);
+  });
+
+  it("answers no overrides for a value that is not an object", () => {
+    for (const modelRoutes of [undefined, null, "routes", 42, []]) {
+      expect(resolveConfig({ modelRoutes } as never).modelRoutes).toEqual({});
+    }
+  });
+});
