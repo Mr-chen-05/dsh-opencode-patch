@@ -23,8 +23,6 @@ import {
   catalogPlaneForRoute,
   type CatalogPlane,
   findModelSpecOn,
-  getLiveGoCatalog,
-  getLiveZenCatalog,
   isDeprecatedModelOn,
   sanitizeModalities,
   type CatalogProvider,
@@ -139,8 +137,7 @@ export const resolveDiscoveryProvider = (
  */
 export const mergeDiscoveredModels = (
   discovered: unknown,
-  provider: CatalogProvider,
-  options: { readonly addCatalog?: boolean } = {}
+  provider: CatalogProvider
 ): DiscoveryCandidate[] => {
   const seen = new Set<string>();
   const merged: DiscoveryCandidate[] = [];
@@ -181,37 +178,18 @@ export const mergeDiscoveredModels = (
   // The cost is honest: a cold start with nothing discovered shows nothing until
   // the adapter answers. Showing models the deployment did not select is the worse
   // failure, because it looks like a working picker.
-  if (options.addCatalog !== true) {
-    return merged;
-  }
-
-  // **Except for DISCOVERY, where the caller is browsing a catalogue to pick
-  // from.** The two surfaces are not the same question:
+  // **Discovery does NOT get the catalog either.**
   //
-  //   - `listModels(route)` is what a route SERVES — the operator's decision, and
-  //     it must never be widened (that is the whole comment above).
-  //   - `discoverModels(...)` is what the endpoint OFFERS — the list a user picks
-  //     from in Settings → Models, before anything is declared. Leaving that one
-  //     to the wrapper means it answers from pi's installed snapshot, which is a
-  //     fixed vintage: measured, it did not list `glm-5.3-flash-free` while BOTH
-  //     the bundled catalog and the live `/models` endpoint did.
+  // This briefly joined the whole catalog into `discoverModels`, reasoning that
+  // "browse to pick" is a different surface from "what this route serves". The
+  // owner's instruction had been explicit — *user can select them from the list,
+  // but we shouldn't override the user's config for what is usable* — and the
+  // join violated it: Settings listed models the deployment never declared, which
+  // is the same failure the picker join was withdrawn for.
   //
-  // So the catalog is joined HERE and only here: additive, deduplicated, servable
-  // rows only, and it never touches a route's declared list.
-  const catalog = provider === "go" ? getLiveGoCatalog() : getLiveZenCatalog();
-  for (const spec of catalog) {
-    if (seen.has(spec.id) || !isServableModel(spec.id, provider)) {
-      continue;
-    }
-    seen.add(spec.id);
-    merged.push({
-      contextWindow: spec.context_window,
-      id: spec.id,
-      inputModalities: sanitizeModalities(spec.input_modalities),
-      maxTokens: spec.max_output_tokens,
-      name: spec.name,
-    });
-  }
+  // The original problem it was reaching for was narrower: pi's installed
+  // snapshot is a fixed vintage and can miss a model the ENDPOINT reports. That
+  // is answered by the adapter's own answer, not by this plugin's bundled copy.
   return merged;
 };
 
@@ -576,8 +554,7 @@ export const decorateModelDiscovery = (
     if (provider === undefined) {
       return discovered;
     }
-    // `addCatalog`: this is the browse-to-pick surface, not a route's list.
-    return mergeDiscoveredModels(discovered, provider, { addCatalog: true });
+    return mergeDiscoveredModels(discovered, provider);
   };
 
   try {
