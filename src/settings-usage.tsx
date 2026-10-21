@@ -32,6 +32,7 @@ import {
 import type { GoUsage, UsageWindow } from "./usage-contract.ts";
 import { formatRelativeReset, getWindowState, resetLabel } from "./usage-ui.ts";
 import { isRecord } from "./utils/guards.ts";
+import { retryUntilAnswered } from "./utils/retry.ts";
 
 /** The three windows, in the order the panel lists them. */
 const WINDOWS = [
@@ -107,6 +108,16 @@ export const readGoUsage = async (
     return undefined;
   }
   const result: unknown = await call({ provider: "opencode-go" });
+  if (isRecord(result) && typeof result.ok === "boolean") {
+    if (!result.ok) {
+      throw "error" in result ? result.error : new Error("usage call failed");
+    }
+    const value = "value" in result ? result.value : undefined;
+    if (!isGoUsage(value)) {
+      return undefined;
+    }
+    return value;
+  }
   const value = isRecord(result) && "value" in result ? result.value : result;
   if (!isGoUsage(value)) {
     console.warn(
@@ -122,8 +133,12 @@ export const readGoUsage = async (
 const statusText = (
   t: Translate,
   usage: GoUsage | undefined,
-  limited: boolean
+  limited: boolean,
+  refreshing = false
 ): string => {
+  if (refreshing) {
+    return t("usageRefreshing");
+  }
   if (usage === undefined) {
     return t("usageSummaryUnavailable");
   }
@@ -202,7 +217,7 @@ export const UsageSummaryView = ({
           <span
             style={{ color: "var(--dsw-alias-label-secondary)", fontSize: 11 }}
           >
-            {statusText(t, usage, limited)}
+            {statusText(t, usage, limited, refreshing)}
           </span>
           {onRefresh !== undefined && (
             <button
@@ -309,8 +324,10 @@ export const UsageSummaryView = ({
 };
 
 export interface UsageSummaryProps {
+  attempts?: number;
   getLocale: (() => string | undefined) | undefined;
   readUsage: (() => Promise<GoUsage | undefined>) | undefined;
+  sleep?: (attempt: number) => Promise<void>;
   t: Translate;
 }
 
@@ -331,49 +348,14 @@ export interface UsageSummaryProps {
  * @param live - asked before each attempt; `false` abandons the loop.
  * @returns the first defined answer, or `undefined`.
  */
-export const readUntilAnswered = async (
-  read: () => Promise<GoUsage | undefined>,
-  attempts = 5,
-  sleep: (attempt: number) => Promise<void> = (attempt) =>
-    new Promise((resolve) => {
-      setTimeout(resolve, 300 * (attempt + 1));
-    }),
-  live: () => boolean = () => true
-): Promise<GoUsage | undefined> => {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (!live()) {
-      return undefined;
-    }
-    try {
-      // Sequential on purpose: each attempt waits for the previous answer, and the
-      // wait between them is the retry.
-      // oxlint-disable-next-line no-await-in-loop -- see above.
-      const next = await read();
-      if (next !== undefined) {
-        return next;
-      }
-    } catch (error: unknown) {
-      lastError = error;
-    }
-    if (attempt < attempts - 1) {
-      // oxlint-disable-next-line no-await-in-loop -- the delay IS the retry.
-      await sleep(attempt);
-    }
-  }
-  if (lastError !== undefined) {
-    console.warn(
-      "[dsh-opencode-patch] usage read: all attempts failed",
-      lastError
-    );
-  }
-  return undefined;
-};
+export const readUntilAnswered = retryUntilAnswered;
 
 /** The container: reads once when the card appears, on window focus, or via manual refresh. */
 export const UsageSummary: React.FC<UsageSummaryProps> = ({
+  attempts = 5,
   getLocale,
   readUsage,
+  sleep,
   t,
 }) => {
   const [usage, setUsage] = React.useState<GoUsage | undefined>();
@@ -387,7 +369,7 @@ export const UsageSummary: React.FC<UsageSummaryProps> = ({
     setRefreshing(true);
     let next: GoUsage | undefined;
     try {
-      next = await readUntilAnswered(readUsage, 5, undefined, () => true);
+      next = await readUntilAnswered(readUsage, attempts, sleep, () => true);
     } catch (error) {
       // The meter's empty state is the same for every cause, so the one place
       // that knows the read failed says which it was. Without this, a failing
@@ -399,7 +381,7 @@ export const UsageSummary: React.FC<UsageSummaryProps> = ({
     }
     setUsage(next);
     setSettled(true);
-  }, [readUsage]);
+  }, [attempts, readUsage, sleep]);
 
   React.useEffect(() => {
     void fetchUsage();
