@@ -269,21 +269,47 @@ export interface LoaderHost {
 export type LoaderService = LoaderHost["loader"];
 
 /**
- * True when `ctx` exposes the loader's entry list. Iteration itself is the
- * caller's trust boundary, exactly as it was before this predicate existed.
+ * The loader's entry surface, or `undefined` when the context serves none.
+ *
+ * **Returns what it found rather than asserting a property exists.** The
+ * previous version was a type PREDICATE (`ctx is LoaderHost`) whose body read
+ * `ctx.loader` — so the guard threw `cannot get property "loader" without
+ * inject` on exactly the contexts it existed to describe, and the narrowed type
+ * pointed at a property that could throw on read. A guard has to hand back the
+ * value it verified.
+ *
+ * `ctx.get` first: it reads the store WITHOUT consulting `inject`, which is what
+ * an optional dependency needs, and this plugin declares only `llm`. The
+ * property is a guarded fallback for a context that serves only that.
  *
  * @param ctx - the plugin context, mock or real.
+ * @returns the loader service, or `undefined`.
  */
-export const isLoaderHost = (ctx: unknown): ctx is LoaderHost => {
+export const loaderOfContext = (ctx: unknown): LoaderService | undefined => {
   if (!isRecord(ctx)) {
-    return false;
+    return undefined;
   }
-  const loader: unknown = ctx.loader;
-  if (!isRecord(loader)) {
-    return false;
+  let loader: unknown;
+  const { get } = ctx as { get?: unknown };
+  if (typeof get === "function") {
+    try {
+      loader = Reflect.apply(get, ctx, ["loader"]);
+    } catch {
+      loader = undefined;
+    }
   }
-  const entries: unknown = loader.entries;
-  return typeof entries === "function";
+  if (loader === undefined) {
+    try {
+      const { loader: viaProperty } = ctx as { loader?: unknown };
+      loader = viaProperty;
+    } catch {
+      return undefined;
+    }
+  }
+  if (!isRecord(loader) || typeof loader.entries !== "function") {
+    return undefined;
+  }
+  return loader as LoaderService;
 };
 
 /** Session metadata resolved from the host SessionRegistry. */

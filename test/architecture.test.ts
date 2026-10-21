@@ -70,6 +70,111 @@ const FORBIDDEN: readonly {
   },
 ];
 
+describe("architecture · a property read is a declared dependency", () => {
+  const SRC = join(import.meta.dirname, "..", "src");
+
+  /**
+   * Cordis's own framework members, mixed onto every context. Reading these
+   * needs no declaration — they are not services.
+   */
+  const FRAMEWORK = new Set([
+    "baseUrl",
+    "effect",
+    "fiber",
+    "get",
+    "inject",
+    "logger",
+    "on",
+    "plugin",
+    "provide",
+    "root",
+  ]);
+
+  /**
+   * The CLIENT half's context, which is a different object from the host's.
+   *
+   * Every read there is optional (`ctx.remote === undefined`,
+   * `ctx.slots?.inject?.(…)`), which is the pattern the host half must use for
+   * its optional services and does. They are not `inject` declarations because
+   * the host plugin declares only `llm` — see the next test.
+   */
+  const CLIENT_OPTIONAL = new Set([
+    "configForms",
+    "locale",
+    "modelDirectories",
+    "remote",
+    "slots",
+  ]);
+
+  /** The one service the plugin DECLARES, so reading it as a property is right. */
+  const DECLARED = new Set(["llm"]);
+
+  /** Every `ctx.<name>` in a file, excluding `ctx.get("name")`. */
+  const serviceReads = (file: string): string[] => {
+    const source = stripComments(readFileSync(join(SRC, file), "utf8"));
+    const names = new Set<string>();
+    // Two shapes are the same bug: `ctx.loader` and `(ctx as {loader}).loader`.
+    // The cast form is what a "quick fix" looks like, and matching only the
+    // first let a planted regression pass.
+    for (const match of source.matchAll(
+      /\bctx\.([A-Za-z][A-Za-z0-9_]*)|\bctx as [^\n]*\}\)\.([A-Za-z][A-Za-z0-9_]*)/gu
+    )) {
+      const name = match[1] ?? match[2];
+      if (
+        name === undefined ||
+        FRAMEWORK.has(name) ||
+        CLIENT_OPTIONAL.has(name) ||
+        DECLARED.has(name)
+      ) {
+        continue;
+      }
+      names.add(name);
+    }
+    return [...names];
+  };
+
+  const sourceFiles = (): string[] => {
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+        } else if (/\.tsx?$/u.test(entry.name)) {
+          files.push(full.slice(SRC.length + 1));
+        }
+      }
+    };
+    walk(SRC);
+    return files;
+  };
+
+  it("reads no host service as a property except the declared `llm`", () => {
+    // Cordis THROWS `cannot get property "X" without inject` for an undeclared
+    // name, and its `inject` form has no required/optional split: a declared
+    // service is REQUIRED, so declaring the optional ones would stop the plugin
+    // activating on a headless host — a silent total failure.
+    //
+    // Consequence: every optional host service must be read through `ctx.get`,
+    // which reads the store without consulting `inject`. This shipped as two
+    // real bugs: `isLoaderHost` — which exists to answer "is there a loader?" —
+    // read `ctx.loader` and threw, and `loaderOf` read it before its own
+    // guarded fallback. Both failed the mount.
+    const offenders: string[] = [];
+    for (const file of sourceFiles()) {
+      for (const name of serviceReads(file)) {
+        offenders.push(`${file}: ctx.${name}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("declares `llm`, the one service the plugin cannot work without", async () => {
+    const { inject } = await import("../src/identity.ts");
+    expect(inject).toContain("llm");
+  });
+});
+
 describe("architecture · no source module imports a test library", () => {
   const SRC = join(import.meta.dirname, "..", "src");
 

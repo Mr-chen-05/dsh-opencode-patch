@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
 
 import {
-  isLoaderHost,
+  loaderOfContext,
   readCredentialsResolver,
   readEntryOptions,
   readSessionMetaResolver,
@@ -52,14 +52,42 @@ describe("cordis-context: readEntryOptions", () => {
   });
 });
 
-describe("cordis-context: isLoaderHost", () => {
-  it("requires a callable loader.entries", () => {
-    expect(isLoaderHost({ loader: { entries: () => [] } })).toBe(true);
-    expect(isLoaderHost({ loader: { entries: 1 } })).toBe(false);
-    expect(isLoaderHost({ loader: {} })).toBe(false);
-    expect(isLoaderHost({})).toBe(false);
-    expect(isLoaderHost(null)).toBe(false);
-    expect(isLoaderHost(() => 1)).toBe(false);
+describe("cordis-context: loaderOfContext", () => {
+  it("returns the loader it verified, and undefined when there is none", () => {
+    const loader = { entries: () => [] };
+    expect(loaderOfContext({ loader })).toBe(loader);
+    expect(loaderOfContext({ loader: { entries: 1 } })).toBeUndefined();
+    expect(loaderOfContext({ loader: {} })).toBeUndefined();
+    expect(loaderOfContext({})).toBeUndefined();
+    expect(loaderOfContext(null)).toBeUndefined();
+    expect(loaderOfContext(() => 1)).toBeUndefined();
+  });
+
+  it("does not throw on a context that refuses the property read", () => {
+    // Cordis answers `cannot get property "loader" without inject` for an
+    // undeclared name. The old guard WAS that read, so the function whose whole
+    // job was to answer "is there a loader?" was itself the failure — measured
+    // on a live host as `RemoteError: cannot get property "loader" without
+    // inject`. Now it answers undefined, and finds the service through
+    // `ctx.get`, which does not consult `inject`.
+    const refusing = {
+      get() {
+        return { entries: () => ["entry"] };
+      },
+      get loader(): never {
+        throw new Error('cannot get property "loader" without inject');
+      },
+    };
+    const found = loaderOfContext(refusing);
+    expect(found).toBeDefined();
+    expect([...(found?.entries() ?? [])]).toEqual(["entry"]);
+
+    const nothing = {
+      get loader(): never {
+        throw new Error('cannot get property "loader" without inject');
+      },
+    };
+    expect(loaderOfContext(nothing)).toBeUndefined();
   });
 });
 

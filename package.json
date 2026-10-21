@@ -110,10 +110,11 @@
     "vitest": "5.0.5"
   },
   "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.5-alpha.2 <4.1.0",
     "@deepseek-ai/dsh-typert-protocol": ">=0.2.1-alpha.1 <0.2.2"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/dsh-typert-protocol": {
+    "@deepseek-ai/cordis": {
       "optional": true
     }
   },

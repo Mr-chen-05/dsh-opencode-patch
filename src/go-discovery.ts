@@ -21,7 +21,7 @@ import os from "node:os";
 
 import type { KeySourcePolicy } from "./config-values.ts";
 import { DEFAULT_USAGE_BASE_URL, DEFAULT_USAGE_KEY_ENV } from "./config.ts";
-import { isLoaderHost, readCredentialsResolver } from "./cordis-context.ts";
+import { loaderOfContext, readCredentialsResolver } from "./cordis-context.ts";
 import {
   extractApiKeyFromHeaders,
   getCapturedApiKey,
@@ -113,11 +113,13 @@ export const discoverGoConfig = (
   targetProvider?: string
 ): DiscoveredGoConfig => {
   const result: DiscoveredGoConfig = {};
-  if (!isLoaderHost(ctx)) {
+  // The guard RETURNS the loader, so nothing re-reads a property that can throw.
+  const loader = loaderOfContext(ctx);
+  if (loader === undefined) {
     return result;
   }
 
-  for (const entry of ctx.loader.entries()) {
+  for (const entry of loader.entries()) {
     if (!isRecord(entry)) {
       continue;
     }
