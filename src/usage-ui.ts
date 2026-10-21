@@ -210,20 +210,20 @@ export const STYLES = `
    * --dsw-alias-bg-layer-2 and no backdrop. Different material, different radius —
    * see the note on choosing the reference. */
   border-radius: var(--dsw-radius-lg, 16px);
-  /* The host's own menu material, and the one line that decides whether this
-   * reads as part of the harness. --dsw-menu-surface-fill is TRANSLUCENT
-   * (#f8f9fa94 light, #43454a73 dark) so the blur behind it shows through.
+  /*
+   * NO background, NO backdrop-filter, and no data-menu-material here.
    *
-   * This used to stack --dsw-specific-menu (#f8f9faf0 — 94% opaque) over
-   * --dsw-alias-bg-layer-2 (--dsw-static-neutral-bluish-00: #fff, fully
-   * opaque). Two real tokens, correct-looking names, and the sum was solid
-   * white: the only popover in the composer that did not look like one. The
-   * tokens were checked and the RESULT was not — a fallback chain cannot be
-   * verified by reading the name. --dsw-specific-menu is the *specific*
-   * (higher-emphasis) menu; a plain floating surface wants the surface fill.
+   * The host's MenuSurface owns the menu material, and the panel renders
+   * THROUGH it: MenuSurface draws a separate .material layer layer at z-index -1
+   * behind the content, sets isolation: isolate on the surface so that
+   * negative index stays contained, and portals an opaque .backing layer into
+   * document.body so Chromium has something to blur on macOS.
+   *
+   * Hand-rolling the fill on the panel itself was the transparency:
+   * --dsw-menu-surface-fill is ~58% opaque, and with no backing behind it the
+   * page showed straight through. The panel supplies GEOMETRY; the host
+   * supplies the material.
    */
-  background: var(--dsw-menu-surface-fill, Canvas);
-  backdrop-filter: var(--dsw-menu-backdrop-filter, blur(40px) saturate(150%));
   /* The stroke is NOT declared here, and never needed to be. Hardcoding one
    * level broke the other theme — which is why the owner's first instinct
    * ("should we use border-l4?") was RIGHT and two rounds of reasoning talked

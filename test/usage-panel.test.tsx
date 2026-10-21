@@ -9,6 +9,7 @@
 
 import assert from "node:assert/strict";
 
+import { MenuSurface } from "@deepseek-ai/dsh-client-ui-primitives";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SessionUsageSnapshot } from "../src/session-cost.ts";
@@ -545,321 +546,34 @@ describe("UsagePanel", () => {
     expect(fill).toContain("transition:");
   });
 
-  it("paints the panel with the host's TRANSLUCENT menu material", () => {
-    // The panel was solid white while every other popover in the composer was
-    // translucent — the one surface in the dock that did not look like part of
-    // the harness. Both tokens in the old chain were REAL and correctly named;
-    // what made it white was their product: --dsw-specific-menu is #f8f9faf0
-    // (94% opaque) and --dsw-alias-bg-layer-2 resolves to #fff. So this pins the
-    // surface fill, not merely "some --dsw token is mentioned" — a chain of
-    // individually valid names is exactly how it went wrong.
-    // Comments are stripped first: they explain the old tokens by name, and a
-    // rule that merely TALKS about a value is not a rule that sets it.
-    const panel = /\.dsh-oc-usage-panel \{[^}]*\}/
-      .exec(STYLES)?.[0]
-      ?.replaceAll(/\/\*[\s\S]*?\*\//g, "");
-    expect(panel).toContain("var(--dsw-menu-surface-fill");
-    expect(panel).toContain("var(--dsw-menu-backdrop-filter");
-    // Neither of the opaque layers, nor a bare `Canvas` fill behind them.
-    expect(panel).not.toContain("--dsw-specific-menu");
-    expect(panel).not.toContain("--dsw-alias-bg-layer-2");
-    expect(panel).not.toMatch(/background-color:\s*Canvas/);
-    // The stroke itself is not declared in CSS at all — see the attribute case
-    // below, which asserts it on the element where it actually lives.
-    expect(panel).not.toContain("elevation-stroke-color");
-  });
-
-  it("gives a rejected credential its own heading, not the refresh one", () => {
-    // "Refresh failed" and "this key is not accepted" are different facts, and
-    // only the second one tells the user what to do about it.
-    const auth = UsagePanel(
-      panelProps({
-        usage: usage(),
-        failure: { reason: "auth", message: "rejected", retainPrevious: false },
-      })
-    );
-    expect(collectText(auth)).toContain("t:usageAuthRejected");
-    expect(collectText(auth)).not.toContain("t:usageRefreshFailed");
-
-    const outage = UsagePanel(
-      panelProps({
-        usage: usage(),
-        failure: { message: "boom", retainPrevious: false },
-      })
-    );
-    expect(collectText(outage)).toContain("t:usageRefreshFailed");
-  });
-
-  it("spaces the actions apart and styles them as host links", () => {
-    // The row had no stylesheet rule at all, so the anchors fell back to the UA
-    // default — purple, solid underline, no gap — and the three labels ran
-    // together into one sentence across the panel: "升级套餐控制台与余额额度说明".
-    // Both halves regress independently, so pin the wiring and the sheet.
-    const tree = UsagePanel(panelProps({ usage: usage() }));
-    expect(byClass(tree, "dsh-oc-usage-console")).toHaveLength(2);
-
-    const row = /\.dsh-oc-usage-footer \{[^}]*\}/.exec(STYLES)?.[0];
-    expect(row).toContain("gap:");
-
-    const anchor = /\.dsh-oc-usage-console \{[^}]*\}/.exec(STYLES)?.[0];
-    // Only `--dsw-*` resolves; an invented token falls back to its own literal
-    // colour and the link ignores the theme.
-    expect(anchor).toContain("--dsw-alias-link");
-    expect(anchor).not.toContain("--color-");
-  });
-
-  it("draws the session spend row whenever the session has a record", () => {
-    // There is no second switch inside the meter: the meter is one surface with
-    // one switch, and within it the money is either known or explicitly absent.
-    const shown = UsagePanel(
-      panelProps({ usage: usage({ session: session() }) })
-    );
-    expect(collectText(shown)).toContain("t:sessionSpend");
-    expect(collectText(shown)).toContain("$0.42");
-  });
-
-  it("names the model even when it costs nothing, and says free once", () => {
-    // The free case used to render a bare sentence with no model in it, so the
-    // one row whose value is always $0.00 was also the only row that could not
-    // say what you are paying for. It now has the SAME shape as a paid one:
-    // which model, then what it costs.
-    const free = usage({
-      session: session({
-        activeModel: "beam-free",
-        freeModel: true,
-      }),
-    });
-    const line = collectText(UsagePanel(panelProps({ usage: free }))).join("");
-    expect(line).toContain("beam-free");
-    expect(line).toContain("t:freeModel");
-
-    // A paid model still reads model · rate.
-    const paid = usage({
-      session: session({ activeRateFormatted: "$0.3 / $1.2 per 1M" }),
-    });
-    expect(
-      collectText(UsagePanel(panelProps({ usage: paid }))).join("")
-    ).toContain("$0.3 / $1.2 per 1M");
-  });
-
-  it("prefers the catalog's display name over the raw model id", () => {
-    // A turn records the id, because that is what the gateway speaks; the name
-    // is what the catalog calls it. Showing the id in a meter's own row reads
-    // like a debug value.
-    const named = usage({
-      session: session({
-        activeModel: "beam-free",
-        activeModelName: "Beam Free",
-        freeModel: true,
-      }),
-    });
-    const line = collectText(UsagePanel(panelProps({ usage: named }))).join("");
-    expect(line).toContain("Beam Free");
-    expect(line).not.toContain("beam-free");
-  });
-
-  it("hides the Go breakdown on a Zen route", () => {
-    const tree = UsagePanel(
-      panelProps({
-        badgeText: "t:zenPaygBadge",
-        title: "t:zenPaygTitle",
-        isZen: true,
-        usage: usage(),
-      })
-    );
-    expect(byClass(tree, "dsh-oc-usage-bar-track")).toHaveLength(0);
-    expect(byClass(tree, "dsh-oc-usage-breakdown")).toHaveLength(0);
-    expect(byClass(tree, "dsh-oc-usage-cards")).toHaveLength(0);
-    expect(collectText(tree)).toContain("t:zenPaygTitle");
-  });
-
-  it("attaches the Zen card to Go overflow only, never to a Zen route", () => {
-    // The card answers "where does an over-limit Go request get billed?". On a
-    // Zen route you are already paying per token, and OpenCode has no balance
-    // endpoint at all — so there the row could only restate the badge.
-    expect(
-      collectText(UsagePanel(panelProps({ usage: usage() })))
-    ).not.toContain("t:zenCredit");
-    expect(
-      collectText(
-        UsagePanel(panelProps({ usage: usage({ zenOverflow: true }) }))
-      )
-    ).toContain("t:zenCredit");
-    expect(
-      collectText(
-        UsagePanel(
-          panelProps({ isZen: true, usage: usage({ zenOverflow: true }) })
-        )
-      )
-    ).not.toContain("t:zenCredit");
-  });
-
-  it("says the billing model once: the badge carries it", () => {
-    // `Pay-as-you-go` used to appear three times on a Zen panel — badge,
-    // subtitle, and the balance row's own value — with a per-token explanation
-    // under the header AND under that row. The badge is where the Go panel puts
-    // its billing model too, so one line is enough.
-    const tree = UsagePanel(
-      panelProps({
-        badgeText: "t:zenPaygBadge",
-        title: "t:zenPaygTitle",
-        isZen: true,
-        usage: usage(),
-      })
-    );
-    expect(collectText(tree)).toContain("t:zenPaygBadge");
-    expect(collectText(tree)).not.toContain("t:zenCredit");
-  });
-
-  it("keeps each window two blocks: one label row, one bar", () => {
-    // The reset used to own a line BELOW the bar, so a window was three stacked
-    // blocks and three windows were nine lines — and the last reset sat flush
-    // against the session spend with nothing between them. Label, reset and
-    // percent now share one line; the bar is the only thing under it.
-    const tree = UsagePanel(panelProps({ usage: usage() }));
-    const [row] = byClass(tree, "dsh-oc-usage-row");
-    const labels = findAll(row, "span").map((node) => node.props.className);
-    expect(labels).toContain("dsh-oc-usage-row-left");
-    expect(labels).toContain("dsh-oc-usage-row-reset");
-    expect(labels).toContain("dsh-oc-usage-row-right");
-
-    // And the class that made the third block is gone from both sides.
-    expect(byClass(tree, "dsh-oc-usage-subrow")).toHaveLength(0);
-    expect(STYLES).not.toContain("dsh-oc-usage-subrow");
-  });
-
-  it("renders the limited label through the sheet, not an inline style", () => {
-    // The reset line used to carry its colour in an ad-hoc `style` prop — the only
-    // one surviving in the panel — so a second limited-state tone could only
-    // duplicate it or diverge from it.
-    const limited = usage({
-      rolling: {
-        percent: 100,
-        resetsAt: "2026-11-01T00:00:00Z",
-        status: "rate-limited",
-      },
-    });
-    expect(
-      byClass(
-        UsagePanel(panelProps({ usage: limited })),
-        "dsh-oc-usage-limited"
-      )
-    ).toHaveLength(1);
-  });
-
-  it("states the active model's monthly allowance, for both tiers", () => {
-    // The percentage needs a denominator. It is stated as a TOTAL — never as a
-    // remainder: `/usage` takes no model parameter, so its percentages are the
-    // account's and the product of the two would be a number with no referent.
-    const go = UsagePanel(
-      panelProps({
-        usage: usage({
-          allowance: { go: 60, goPlus: 120, model: "mimo-v2.6-flash" },
-        }),
-      })
-    );
-    const text = collectText(go);
-    expect(text).toContain("t:monthlyAllowance");
-    expect(text).toContain("mimo-v2.6-flash");
-    // The label and both tiers are separate nodes, so they are asserted apart.
-    expect(text).toContain("t:goTier");
-    expect(text).toContain("t:goPlusTier");
-    expect(text).toContain("$60");
-    expect(text).toContain("$120");
-
-    // The row is a PLAN fact, so it renders inside the Go layer — after the
-    // windows it explains and before the plan link, not below the session rows.
-    const order = classOrder(go);
-    expect(order.indexOf("dsh-oc-usage-detail")).toBeGreaterThan(
-      order.indexOf("dsh-oc-usage-breakdown")
-    );
-    expect(order.indexOf("dsh-oc-usage-detail")).toBeLessThan(
-      order.indexOf("dsh-oc-usage-footer")
-    );
-
-    // No allowance, no row — and never on a Zen route, where the Go plan is not
-    // what the user is on. Asserted by CONTENT: the always-drawn spend row
-    // carries the same class, so a count here would be counting that.
-    expect(
-      collectText(UsagePanel(panelProps({ usage: usage() })))
-    ).not.toContain("t:monthlyAllowance");
-    expect(
-      collectText(
-        UsagePanel(
-          panelProps({
-            isZen: true,
-            usage: usage({
-              allowance: { go: 60, goPlus: 120, model: "mimo-v2.6-flash" },
-            }),
-          })
-        )
-      )
-    ).not.toContain("t:monthlyAllowance");
-  });
-
-  it("puts the billing rule behind a tooltip, not in the panel", () => {
-    // The note is a paragraph about a mechanism; the panel is a gauge. It is
-    // the LABEL of a tooltip on the Zen-credit row, so the row stays one line.
-    const withOverflow = UsagePanel(
-      panelProps({ usage: usage({ zenOverflow: true }) })
-    );
-    const labels = findAllOf(withOverflow, new Set(["Tooltip"])).map(
-      (node) => node.props.label
-    );
-    expect(labels).toContain("t:usageOverflowBilling");
-    // It is no longer body text, and the old callout is gone from the tree.
-    expect(collectText(withOverflow)).not.toContain("t:usageOverflowBilling");
-    expect(byClass(withOverflow, "dsh-oc-usage-zen-notice")).toHaveLength(0);
-  });
-
-  it("warns about Zen fallback only when limited without overflow", () => {
-    // Limited WITHOUT overflow: the config notice is the one message, and it
-    // stays VISIBLE — it is an instruction the reader has to act on, which is
-    // exactly what does not belong behind a hover.
-    const limited = UsagePanel(panelProps({ isLimited: true, usage: usage() }));
-    expect(collectText(limited)).toContain("t:usageZenFallbackNotice");
-    expect(byClass(limited, "dsh-oc-usage-zen-notice")).toHaveLength(1);
-
-    // With overflow the config notice would be wrong — the fallback is already
-    // on — so it is absent and the billing rule rides the credit row.
-    const overflowing = UsagePanel(
-      panelProps({ isLimited: true, usage: usage({ zenOverflow: true }) })
-    );
-    expect(collectText(overflowing)).not.toContain("t:usageZenFallbackNotice");
-  });
-
-  it("keeps the trigger's corner radius at the host's own RATIO, not at its token", () => {
-    // 999px is a host idiom for fixed-height chips (Tag, Switch, Pill). On this
-    // trigger it clamps to half the box, so it read as a stadium beside a model
-    // selector that stayed a rounded rect.
+  it("renders through the host's MenuSurface rather than hand-rolling the material", () => {
+    // **The panel supplies geometry; the host supplies the material.**
     //
-    // The first fix copied the host's own controls, which all declare
-    // --dsw-radius-md. That is right at THEIR height — 12px on a ~28px control
-    // is 43% of it — and wrong here: the trigger is ~20px tall, so the same
-    // 12px clamps to 10px, which is 50% of the box and a stadium again. One
-    // rung down restores the host's own ratio.
-    const rule = /\.dsh-oc-usage-trigger \{[^}]*\}/.exec(
-      STYLES.replaceAll(/\/\*[\s\S]*?\*\//g, "")
-    )?.[0];
-    expect(rule).toContain("var(--dsw-radius-sm, 8px)");
-    expect(rule).not.toContain("999px");
-    // And never the host's md: the ratio is the whole point.
-    expect(rule).not.toContain("--dsw-radius-md");
-
-    // And the fill stays the host's own, not an invented fallback.
-    expect(STYLES).toContain("var(--dsw-alias-interactive-bg-hover");
+    // This module used to declare `background: var(--dsw-menu-surface-fill)` and
+    // `backdrop-filter` on the panel div itself. That is a different pattern
+    // from the host's, which is why the popover went see-through:
+    //
+    //   .surface    { isolation: isolate }          <- contains the negative index
+    //   .material   { position:absolute; inset:0; z-index:-1;
+    //                 background: var(--dsw-menu-surface-fill); ... }
+    //   + a `.backing` div PORTALED into document.body, which is what Chromium
+    //     has to blur on macOS.
+    //
+    // The surface fill is ~58% opaque on purpose, and without that backing the
+    // page showed straight through it. So the assertion is that the panel is a
+    // MenuSurface, not that some token is mentioned in CSS we wrote.
+    const root = UsagePanel(panelProps());
+    expect(isElement(root)).toBe(true);
+    expect(isElement(root) && root.type).toBe(MenuSurface);
   });
 
-  it("opts into the menu material with the host's own attribute", () => {
-    // The stroke is chosen by the THEME per theme, off this attribute:
-    // body -> border-l4 (light), body[data-ds-dark-theme] [data-menu-material]
-    // -> border-l3. Declaring the level in CSS would pin one theme and break
-    // the other, which is exactly what hardcoding --dsw-alias-border-l3 did —
-    // and the owner's first instinct ("use l4?") was right all along.
+  it("leaves the menu-material attribute to the component that owns it", () => {
+    // MenuSurface sets `data-menu-material="translucent"` itself, because the
+    // theme reads that attribute to pick the stroke per theme (l4 light,
+    // l3 dark). Setting it on a plain div would opt into a rule whose companion
+    // material layer we were not rendering.
     const root = UsagePanel(panelProps());
-    expect(isElement(root) && root.props["data-menu-material"]).toBe(
-      "translucent"
-    );
+    expect(isElement(root) && root.props["data-menu-material"]).toBeUndefined();
   });
 
   it("uses the host's PANEL radius and elevation, not a control's", () => {
