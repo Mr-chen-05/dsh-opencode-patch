@@ -105,3 +105,110 @@ describe("replaceRouteAdapters", () => {
     expect(warn).toHaveBeenCalled();
   });
 });
+
+describe("replaceRouteAdapters: the shapes it declines", () => {
+  const ctxWith = (llm: unknown) =>
+    ({ llm, logger: { warn: vi.fn() } }) as unknown as CordisContext;
+
+  it("declines a registry without a usable map or registerAdapter", () => {
+    // Both are read structurally off the service, so a composition that exposes
+    // one and not the other must answer "cannot take over" rather than throwing
+    // halfway through a swap.
+    expect(
+      replaceRouteAdapters(ctxWith({}), ["opencode"], () => ({}))
+    ).toBeUndefined();
+    expect(
+      replaceRouteAdapters(
+        ctxWith({ adapters: {}, registerAdapter: () => {} }),
+        ["opencode"],
+        () => ({})
+      )
+    ).toBeUndefined();
+    expect(
+      replaceRouteAdapters(
+        ctxWith({ adapters: new Map(), registerAdapter: "nope" }),
+        ["opencode"],
+        () => ({})
+      )
+    ).toBeUndefined();
+    // A context with no `llm` at all is the same answer.
+    expect(
+      replaceRouteAdapters({} as CordisContext, ["opencode"], () => ({}))
+    ).toBeUndefined();
+  });
+
+  it("declines when any route of the group is unserved", () => {
+    // All-or-nothing: replacing half a protocol group would leave the other
+    // half on the host's adapter, and the two would disagree about the route.
+    const { llm } = registryWith("opencode");
+    expect(
+      replaceRouteAdapters(ctxWith(llm), ["opencode", "opencode-go"], () => ({
+        name: "ours",
+      }))
+    ).toBeUndefined();
+  });
+
+  it("declines an empty route list", () => {
+    const { llm } = registryWith("opencode");
+    expect(replaceRouteAdapters(ctxWith(llm), [], () => ({}))).toBeUndefined();
+  });
+
+  it("gives the routes back when the host returns no disposer", () => {
+    // `registerAdapter` answers a callable or nothing. A composition that
+    // answers nothing still has to be reversible, or the route is stranded on
+    // our adapter with no way back.
+    const original = {
+      adapter: { name: "builtin" } as Record<string, unknown>,
+    };
+    const adapters = new Map([["opencode", original]]);
+    const llm = {
+      adapters,
+      registerAdapter: (providers: readonly string[], adapter: unknown) => {
+        for (const provider of providers) {
+          adapters.set(provider, {
+            adapter: adapter as Record<string, unknown>,
+          });
+        }
+        // Falls off the end: one of the two shapes the host answers with is no
+        // disposer at all, and a composition that answers that still has to be
+        // reversible.
+      },
+    };
+    const dispose = replaceRouteAdapters(ctxWith(llm), ["opencode"], () => ({
+      name: "ours",
+    }));
+    expect(dispose).toBeDefined();
+    // Ours is in place...
+    expect(adapters.get("opencode")?.adapter.name).toBe("ours");
+    dispose?.();
+    // ...and the original is back even though the host gave us no disposer.
+    expect(adapters.get("opencode")).toBe(original);
+  });
+
+  it("restores the original even if its own disposer throws", () => {
+    // Disposal runs inside a `finally`, so a throwing disposer cannot leave the
+    // route without its adapter.
+    const original = {
+      adapter: { name: "builtin" } as Record<string, unknown>,
+    };
+    const adapters = new Map([["opencode", original]]);
+    const llm = {
+      adapters,
+      registerAdapter: (providers: readonly string[], adapter: unknown) => {
+        for (const provider of providers) {
+          adapters.set(provider, {
+            adapter: adapter as Record<string, unknown>,
+          });
+        }
+        return () => {
+          throw new Error("dispose exploded");
+        };
+      },
+    };
+    const dispose = replaceRouteAdapters(ctxWith(llm), ["opencode"], () => ({
+      name: "ours",
+    }));
+    expect(() => dispose?.()).toThrow("dispose exploded");
+    expect(adapters.get("opencode")).toBe(original);
+  });
+});

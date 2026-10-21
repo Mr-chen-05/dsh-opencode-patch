@@ -489,3 +489,43 @@ describe("google-bridge · the pi copy it loads", () => {
     expect(models.length).toBe(geminiSpecs.length);
   });
 });
+
+describe("google-bridge · the credential reference", () => {
+  it("fails loud rather than falling back to ambient auth", async () => {
+    // The security rule: handing pi `undefined` for a NAMED reference would let
+    // it pick up an unrelated ambient key and bill another tenant. A miss must
+    // throw, not return undefined.
+    await expect(
+      resolveGatewayKey({}, "BRIDGE_ABSENT_REF_XYZ", "opencode-google")
+    ).rejects.toThrow(/MISSING_CREDENTIAL/u);
+  });
+
+  it("answers nothing for a reference that is not a name", async () => {
+    // A route whose `apiKeyEnv` is absent/empty has no reference to resolve —
+    // that is the adapter's cue to try the stored login, not a credential miss.
+    for (const ref of [undefined, null, "", 42, {}]) {
+      await expect(
+        resolveGatewayKey({}, ref, "opencode-google")
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it("prefers the credentials service over the environment", async () => {
+    process.env.BRIDGE_BOTH_SOURCES = "from-env";
+    try {
+      const ctx = {
+        get: (name: string) =>
+          name === "credentials"
+            ? {
+                resolve: async () => ({ value: "from-service" }),
+              }
+            : undefined,
+      };
+      await expect(
+        resolveGatewayKey(ctx, "BRIDGE_BOTH_SOURCES", "opencode-google")
+      ).resolves.toBe("from-service");
+    } finally {
+      delete process.env.BRIDGE_BOTH_SOURCES;
+    }
+  });
+});
