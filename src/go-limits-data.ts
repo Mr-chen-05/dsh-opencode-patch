@@ -138,8 +138,8 @@ export const GO_MODEL_LIMITS: Readonly<Record<string, ModelAllowance>> = {
     name: "Qwen3.8 Max",
   },
   "step-5-preview": {
-    go: Number.NaN,
-    goPlus: Number.NaN,
+    go: 15,
+    goPlus: 60,
     name: "Step 5 Preview",
   },
 };

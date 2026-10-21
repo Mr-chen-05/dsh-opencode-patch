@@ -9,6 +9,7 @@
 import {
   IconInfoOutlineRegular,
   IconRefreshOutlineRegular,
+  MenuSurface,
   StateDot,
   Tag,
   Tooltip,
@@ -243,13 +244,9 @@ export const UsagePanel = ({
   usage,
   zenCardCredit,
 }: UsagePanelProps): React.ReactElement => (
-  <div
+  <MenuSurface
     aria-busy={refreshing}
     aria-label={isZen ? t("zenPaygTitle") : t("usageTitle")}
-    /* The host's own Menu opts into the menu material by rendering exactly this
-     * attribute, and the theme reads it to choose the stroke PER THEME — l4 in
-     * light, l3 in dark. Declaring the stroke by hand would pin one theme. */
-    data-menu-material="translucent"
     className="dsh-oc-usage-panel"
     onMouseEnter={onMouseEnter}
     onMouseLeave={onMouseLeave}
@@ -506,5 +503,5 @@ export const UsagePanel = ({
         {t(isZen ? "usageTopUp" : "usageConsole")}
       </a>
     </div>
-  </div>
+  </MenuSurface>
 );

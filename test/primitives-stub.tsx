@@ -15,6 +15,9 @@
 import {
   Children,
   cloneElement,
+  forwardRef,
+  type HTMLAttributes,
+  type Ref,
   isValidElement,
   type ReactElement,
   type ReactNode,
@@ -389,3 +392,38 @@ export function Tooltip({
     </>
   );
 }
+
+/**
+ * The host's menu material, as a faithful stand-in.
+ *
+ * The REAL `MenuSurface` is a two-element pattern: it renders the content with a
+ * separate `.material` layer at `z-index: -1` behind it, and portals an opaque
+ * `.backing` into `document.body` so Chromium has something to blur on macOS.
+ * That structure is the whole reason the panel no longer hand-rolls its
+ * background, so this stand-in keeps it: an unstyled div would let a future
+ * regression toward hand-rolled material pass.
+ */
+export const MenuSurface = forwardRef(
+  (
+    props: HTMLAttributes<HTMLDivElement> & { compact?: boolean },
+    ref: Ref<HTMLDivElement>
+  ) => {
+    const { children, compact = false, ...rest } = props;
+    return (
+      <div
+        {...rest}
+        data-menu-material="translucent"
+        data-stub="menu-surface"
+        ref={ref}
+      >
+        <div aria-hidden="true" data-stub="menu-material" />
+        {children}
+        <div
+          aria-hidden="true"
+          data-stub="menu-backing"
+          data-compact={String(compact)}
+        />
+      </div>
+    );
+  }
+);
