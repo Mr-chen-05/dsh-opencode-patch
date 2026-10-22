@@ -20,6 +20,8 @@ import { SettingsBooleanField } from "./settings-boolean-field.tsx";
 import { SettingsChoiceField } from "./settings-choice-field.tsx";
 import type { Translate } from "./settings-copy.ts";
 import { CARD_FIELDS, FIELD, type CardFieldSpec } from "./settings-fields.ts";
+import { GapRow } from "./settings-gap-row.tsx";
+import type { DeclareOutcome, GapOutcome } from "./settings-gap.ts";
 import type { PurgeOutcome } from "./settings-purge.ts";
 import { StoreInspectRow } from "./settings-store-inspect.tsx";
 import type { StoreInspectOutcome } from "./settings-store.ts";
@@ -188,6 +190,15 @@ export interface CardProps {
    */
   inspectStore?: () => Promise<StoreInspectOutcome>;
   /**
+   * The catalog gap: what the vendor offers that this deployment does not declare,
+   * and the one write that closes it. Absent when no gap service is mounted.
+   */
+  declareModels?: (
+    route: string,
+    ids: readonly string[]
+  ) => Promise<DeclareOutcome>;
+  readGap?: () => Promise<GapOutcome>;
+  /**
    * The Host's sign-in remote. Never absent: the page always hands over the three
    * calls, and each resolves the service when it is invoked, so a remote that mounts
    * late is still reached and a host that mounts none shows a row that says so.
@@ -321,6 +332,9 @@ export const OpencodeCard: React.FC<CardProps> = (props: CardProps) => {
       )}
       {props.purgeDeprecated !== undefined && (
         <PurgeRow onPurge={props.purgeDeprecated} t={t} />
+      )}
+      {props.readGap !== undefined && props.declareModels !== undefined && (
+        <GapRow onDeclare={props.declareModels} onRead={props.readGap} t={t} />
       )}
       <SettingsForm
         labels={formLabels(t)}

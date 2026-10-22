@@ -31,6 +31,8 @@ import { patchFetch } from "./fetch-patch.ts";
 import { resolveGoBaseURL } from "./go-discovery.ts";
 import { LEGACY_NAME, LEGACY_PKG, name } from "./identity.ts";
 import { getCapturedApiKey, isPlaceholderApiKey } from "./key-capture.ts";
+import { GAP_NAMESPACE } from "./model-gap-contract.ts";
+import { ModelGapService } from "./model-gap-service.ts";
 import {
   type CatalogModelSpec,
   getLiveGoCatalog,
@@ -336,6 +338,29 @@ const installStoreService = (ctx: CordisContext): void => {
   }
 };
 
+const gapMountedOn = new WeakSet<object>();
+
+const installGapService = (ctx: CordisContext): void => {
+  const root: CordisContext = ctx.root ?? ctx;
+  if (gapMountedOn.has(root)) {
+    return;
+  }
+  gapMountedOn.add(root);
+  if (typeof ctx.plugin !== "function") {
+    mountByProvide(ctx, GAP_NAMESPACE, ModelGapService);
+    return;
+  }
+  try {
+    root.plugin?.(ModelGapService);
+  } catch (error) {
+    gapMountedOn.delete(root);
+    console.warn(
+      "[dsh-opencode-patch] the catalog gap service did not mount; the card will say so",
+      error
+    );
+  }
+};
+
 const installFetchPatch = (
   ctx: CordisContext,
   config: ResolvedPluginConfig,
@@ -557,6 +582,7 @@ export const apply = (
   installUsageService(ctx, config);
   installPurgeService(ctx);
   installStoreService(ctx);
+  installGapService(ctx);
 
   if (!installFetchPatch(ctx, config, als)) {
     return;
