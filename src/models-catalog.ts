@@ -356,7 +356,10 @@ export type CatalogPlane = "go" | "zen";
  * about (`opencode`, and the internal routes derived from it) is Zen.
  */
 export const catalogPlaneForRoute = (route: unknown): CatalogPlane =>
-  route === "opencode-go" ? "go" : "zen";
+  route === "opencode-go" ||
+  (typeof route === "string" && route.startsWith("opencode-go-"))
+    ? "go"
+    : "zen";
 
 /**
  * The spec a given PLANE declares for a model.

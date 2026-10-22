@@ -114,11 +114,9 @@ describe("responses-routes: the SDK mapping", () => {
     expect(internalRouteFor("opencode", "gemini-3-pro", GOOGLE_SDK)).toBe(
       GOOGLE_INTERNAL_ROUTE
     );
-    // The Go plane carries no Google models, so its table has no Google row
-    // and the dispatch honestly declines rather than guessing.
     expect(
-      internalRouteFor("opencode-go", "grok-4.7", GOOGLE_SDK)
-    ).toBeUndefined();
+      internalRouteFor("opencode-go", "gemini-4-argon-contributor", GOOGLE_SDK)
+    ).toBe("opencode-go-google");
   });
 
   it("leaves an SDK with no protocol anywhere on its own route", () => {

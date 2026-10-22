@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { MenuSurface } from "@deepseek-ai/dsh-client-ui-primitives";
 import { describe, expect, it, vi } from "vitest";
 
+import { GO_MODEL_LIMITS } from "../src/go-limits-data.ts";
 import type { SessionUsageSnapshot } from "../src/session-cost.ts";
 import { en as copyEn, zh as copyZh } from "../src/settings-copy.ts";
 import type { GoUsage } from "../src/usage-contract.ts";
@@ -49,6 +50,32 @@ const usage = (overrides: Partial<GoUsage> = {}): GoUsage => ({
   rolling: { percent: 20, resetsAt: isoAt(3_600_000), status: "ok" },
   weekly: { percent: 30, resetsAt: isoAt(3 * 86_400_000), status: "ok" },
   ...overrides,
+});
+
+it("renders unknown Gemini allowances before and after the JSON transport", () => {
+  const model = "gemini-4-argon-contributor";
+  const limits = GO_MODEL_LIMITS[model]!;
+  const raw = usage({
+    allowance: { model, go: limits.go, goPlus: limits.goPlus },
+  });
+  // JSON turns the catalog's NaN into null across the host/client boundary.
+  // oxlint-disable-next-line unicorn/prefer-structured-clone -- exercise the host's JSON transport
+  const transported = JSON.parse(JSON.stringify(raw)) as GoUsage;
+  expect(transported.allowance?.go).toBeNull();
+  for (const state of [raw, transported]) {
+    const tree = UsagePanel(panelProps({ usage: state }));
+    const text = collectText(tree);
+    expect(text).toContain("t:monthlyAllowance");
+    expect(text).toContain(model);
+    expect(
+      byClass(tree, "dsh-oc-usage-detail-value").some(
+        (element) =>
+          collectText(element).filter((part) => part === "—").length === 2
+      )
+    ).toBe(true);
+    expect(text).not.toContain("$NaN");
+    expect(text).not.toContain("$0");
+  }
 });
 
 const session = (

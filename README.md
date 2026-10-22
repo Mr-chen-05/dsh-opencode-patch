@@ -146,7 +146,9 @@ DSH speaks three of the four families itself. The fourth — Google Generative A
 
 ### 2. OpenCode Go (`provider: opencode-go`) — subscription quota
 
-- **OpenAI Chat Completions** (`https://opencode.ai/zen/go/v1/chat/completions`): `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `deepseek-v4-pro`, `deepseek-v4.1-flash`, `glm-5.2`, `glm-5.3`, `glm-5.3-flash`, `hy3`, `hy4-preview`, `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`, `longcat-2.0`, `longcat-2.5-preview-free`, `mimo-v2.5`, `mimo-v2.5-pro`, `mimo-v2.6-flash`, `mimo-v2.6-pro`, `qwen3.6-plus`, `qwen3.7-max`, `space-bunny`, `space-bunny-free`, `step-5-preview-free`
+- **Google Generative AI** (`https://opencode.ai/inference/go/google/v1beta/models/*:streamGenerateContent`): `gemini-4-argon-contributor`, served by the internal `opencode-go-google` adapter. Add the model under your existing `opencode-go` provider; the bridge inherits that provider's API key reference (default `OPENCODE_GO_API_KEY`). It supports image attachments and signed tool-call replay. Only configured models are mounted; access still depends on your Go plan. This endpoint is also used with `endpoint: legacy`, because Go has no legacy Google endpoint.
+
+- **OpenAI Chat Completions** (`https://opencode.ai/zen/go/v1/chat/completions`): `deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `deepseek-v4-pro`, `deepseek-v4.1-flash`, `glm-5.2`, `glm-5.3`, `glm-5.3-flash`, `hy3`, `hy4-preview`, `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`, `longcat-2.0`, `mimo-v2.5`, `mimo-v2.5-pro`, `mimo-v2.6-flash`, `mimo-v2.6-pro`, `qwen3.6-plus`, `qwen3.7-max`, `space-bunny`, `space-bunny-free`, `step-5-preview-free`
 - **OpenAI Responses** (`https://opencode.ai/zen/go/v1/responses`): `gpt-5.6-luna`, `gpt-6-luna`, `grok-4.5`, `grok-4.6`, `grok-4.7`, `muse-spark-1.2-contributor`, `muse-spark-1.3-contributor`
 - **Anthropic Messages** (`https://opencode.ai/zen/go/v1/messages`): `claude-haiku-5-5`, `minimax-m2.7`, `minimax-m3`, `qwen3.7-plus`, `qwen3.8-flash`, `qwen3.8-max`
 - Monitored by the live 3-window quota meter (5-hour rolling, weekly, monthly). The full set ships in the bundled catalog — see [Authoritative Model Catalogs](#7-authoritative-model-catalogs-dual-local-shims--real-time-swr-updates).
@@ -157,13 +159,13 @@ Zen's provider-level SDK is `@ai-sdk/openai-compatible`. models.dev names a **di
 
 | models.dev `provider.npm` | models | protocol | served from |
 | :-- | --: | :-- | :-- |
-| _(absent)_ | 27 | OpenAI Chat Completions | the route you configured |
+| _(absent)_ | 26 | OpenAI Chat Completions | the route you configured |
 | `@ai-sdk/openai` | 31 | OpenAI Responses | `opencode-responses` |
 | `@ai-sdk/anthropic` | 17 | Anthropic Messages | `opencode-anthropic` |
 | `@ai-sdk/google` | 8 | Google Generative AI | `opencode-google` |
 | `@ai-sdk/mistral` | 1 | _(a dialect this plugin does not serve)_ | **not offered** |
 
-Counts are the **84** active `opencode` models in `models.opencode.ai` as of 2026-10-21 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 84 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
+Counts are the **83** active `opencode` models in `models.opencode.ai` as of 2026-10-21 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 83 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
 
 The patch **keeps those two routes out of both the model picker and _Settings → Models_**. Three properties hold today, and one does not yet:
 

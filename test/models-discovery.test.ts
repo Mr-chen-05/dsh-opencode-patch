@@ -522,9 +522,8 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
     // `undefined` is the completions default, which is right for a model that
     // omits its SDK and wrong for one nobody has described. So the id is asked:
     // a family whose protocol this plane has no route for is not offered.
-    // Measured: gemini-3.8-flash answers 400 on the Go plane's completions
-    // endpoint, and that plane carries no google route.
-    expect(isServableModel("gemini-3.8-flash", "opencode-go")).toBe(false);
+    // Google models now have a native bridge on both planes.
+    expect(isServableModel("gemini-3.8-flash", "opencode-go")).toBe(true);
     // The same model on the plane that DOES carry the route stays offered.
     expect(isServableModel("gemini-3.1-pro", "opencode")).toBe(true);
     // And a family the rule does not name is left alone, because a missing
@@ -550,12 +549,10 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
     expect(isServableModel("deepseek-v4.1-flash", "opencode-go")).toBe(true);
   });
 
-  it("refuses a model whose plane + SDK combination is declared unserved", () => {
-    // gemini-4-argon-contributor is in the Go catalog with @ai-sdk/google,
-    // but the Google bridge only mounts on Zen. UNSERVED_PLANE_SDKS marks
-    // 'opencode-go + @ai-sdk/google' so it is not offered on Go.
+  it("offers Go Gemini through its native bridge", () => {
+    // The Go catalog names the Google protocol, served by the Go bridge.
     expect(isServableModel("gemini-4-argon-contributor", "opencode-go")).toBe(
-      false
+      true
     );
   });
 

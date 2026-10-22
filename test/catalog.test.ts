@@ -91,7 +91,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
   });
 
   it("ships only active, priced models in the bundled Go shim", () => {
-    expect(OPENCODE_GO_CATALOG.length).toBe(29);
+    expect(OPENCODE_GO_CATALOG.length).toBe(28);
     for (const model of OPENCODE_GO_CATALOG) {
       expect(model.id.length).toBeGreaterThan(0);
       expect(model.name.length).toBeGreaterThan(0);
@@ -182,12 +182,12 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // replacing the whole set — so these counts are the cold-start picker, and a
     // silent drop here is a model nobody can pick. Regenerate with
     // `scripts/regenerate-catalog-shim.ts` rather than editing by hand.
-    expect(OPENCODE_ZEN_CATALOG.length).toBe(84);
+    expect(OPENCODE_ZEN_CATALOG.length).toBe(83);
     const freeModels = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free === true);
     // Only the free tiers the registry still lists as active. The count is the
     // `is_free` flag the shim carries, NOT the `-free` suffix: `big-pickle` is
     // flagged and is not suffixed, so a suffix rule would have missed it.
-    expect(freeModels.length).toBe(11);
+    expect(freeModels.length).toBe(10);
 
     const ids = new Set(OPENCODE_ZEN_CATALOG.map((m) => m.id));
     expect(ids.has("beam-free")).toBe(true);
@@ -1104,8 +1104,12 @@ describe("routing · the plane half of the decision", () => {
 
   it("leaves a model with no protocol alone", () => {
     expect(
-      internalRouteFor("opencode-go", "grok-4.7", "@ai-sdk/google")
-    ).toBeUndefined();
+      internalRouteFor(
+        "opencode-go",
+        "gemini-4-argon-contributor",
+        "@ai-sdk/google"
+      )
+    ).toBe("opencode-go-google");
     expect(internalRouteFor("opencode-go", "grok-4.7")).toBeUndefined();
   });
 });

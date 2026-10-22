@@ -22,7 +22,11 @@ import {
   findModelSpecOn,
 } from "./models-catalog.ts";
 import { isRouteRegistered, isServableModel } from "./models-discovery.ts";
-import { internalRouteFor, UNSERVED_PLANE_SDKS } from "./responses-routes.ts";
+import {
+  internalRouteFor,
+  UNSERVED_PLANE_SDKS,
+  GO_GOOGLE_INTERNAL_ROUTE,
+} from "./responses-routes.ts";
 import { recordTurnUsage } from "./session-cost.ts";
 import {
   fallbackSessionId,
@@ -32,9 +36,12 @@ import {
 } from "./session.ts";
 import type { ActiveTurnState } from "./turn-store.ts";
 import { withStore } from "./turn-store.ts";
+import { googleHistoryFor, googleReplayStream } from "./utils/google-replay.ts";
 import { isAsyncIterableLike, isRecord } from "./utils/guards.ts";
 
 interface StreamOptions {
+  messages?: unknown;
+  prepared?: unknown;
   model?: unknown;
   parentId?: unknown;
   parentSession?: unknown;
@@ -245,6 +252,17 @@ export const createStreamHook = (
       typeof ctx.llm?.stream === "function" &&
       isAvailable(redirect)
     ) {
+      if (redirect === GO_GOOGLE_INTERNAL_ROUTE) {
+        const stream = ctx.llm.stream({
+          ...options,
+          prepared: undefined,
+          provider: redirect,
+          messages: googleHistoryFor(options.messages, providerKey, redirect),
+        });
+        return isAsyncIterableLike(stream)
+          ? googleReplayStream(stream, redirect, providerKey)
+          : stream;
+      }
       return ctx.llm.stream({ ...options, provider: redirect });
     }
     const sessionProp: unknown = options.sessionId;

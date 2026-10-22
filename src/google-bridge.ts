@@ -61,15 +61,19 @@
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { attachmentResolvers } from "./attachment-services.ts";
 import type { CatalogModelSpec } from "./catalog-data.ts";
 import type { EndpointFamily } from "./config-values.ts";
 import { readCredentialsResolver } from "./cordis-context.ts";
 import { resolveOpencodeStoreKey } from "./go-discovery.ts";
 import { type Plane, piModelFor } from "./pi-provider.ts";
-import { GOOGLE_INTERNAL_ROUTE } from "./responses-routes.ts";
-import { isRecord } from "./utils/guards.ts";
+import {
+  GO_GOOGLE_INTERNAL_ROUTE,
+  GOOGLE_INTERNAL_ROUTE,
+} from "./responses-routes.ts";
+import { isFunctionLike, isRecord } from "./utils/guards.ts";
 
 /**
  * pi's installed catalog entry for one model on one plane, or undefined when
@@ -147,7 +151,7 @@ const installedPiRoot = (): string | undefined => {
   if (wrapperEntry === undefined) {
     return undefined;
   }
-  let dir = path.dirname(realpathSync(new URL(wrapperEntry).pathname));
+  let dir = path.dirname(realpathSync(fileURLToPath(wrapperEntry)));
   // The entry is `<wrapper>/lib/index.js`; its `node_modules` walk starts at the
   // package root, which the hosting directory above it also covers, so walking
   // up from the entry's own directory reaches the same install either way.
@@ -228,11 +232,14 @@ export const loadHostPi = async (): Promise<PiRuntime | undefined> => {
   }
 };
 
-/**
- * The stream-idle interval a route defaults to, read from the wrapper's own
- * `DEFAULT_STREAM_IDLE_TIMEOUT_MS`: five minutes without a chunk before the
- * watchdog reports the provider idle.
- */
+/** Go's Google protocol has no endpoint on the legacy Zen API. */
+export const GO_GOOGLE_BASE_URL =
+  "https://opencode.ai/inference/go/google/v1beta";
+
+const googleRouteFor = (plane: Plane): string =>
+  plane === "opencode-go" ? GO_GOOGLE_INTERNAL_ROUTE : GOOGLE_INTERNAL_ROUTE;
+
+/** The host adapter's default: five minutes without a chunk. */
 const STREAM_IDLE_TIMEOUT_MS = 300_000;
 
 /**
@@ -366,18 +373,21 @@ const installedEntryFor = (
 export const googleProviderFor = (
   pi: PiRuntime,
   specs: readonly CatalogModelSpec[],
-  family: EndpointFamily = "auto"
+  family: EndpointFamily = "auto",
+  plane: Plane = "opencode"
 ): Record<string, unknown> => {
+  const route = googleRouteFor(plane);
   const api = pi.googleGenerativeAIApi();
   const models = specs.map((spec) => ({
     ...piModelFor(
-      "opencode",
+      plane,
       spec,
       "google-generative-ai",
-      installedEntryFor(pi, "opencode", spec.id),
+      installedEntryFor(pi, plane, spec.id),
       family
     ),
-    provider: GOOGLE_INTERNAL_ROUTE,
+    ...(plane === "opencode-go" ? { baseUrl: GO_GOOGLE_BASE_URL } : {}),
+    provider: route,
   }));
   return {
     auth: {
@@ -411,7 +421,7 @@ export const googleProviderFor = (
           const key = input.credential?.key;
           if (key === undefined || key.length === 0) {
             throw new Error(
-              `${GOOGLE_INTERNAL_ROUTE} reached pi's auth resolver without a key`
+              `${route} reached pi's auth resolver without a key`
             );
           }
           return { auth: { apiKey: key }, source: "the plugin's resolved key" };
@@ -419,8 +429,9 @@ export const googleProviderFor = (
       },
     },
     getModels: () => models,
-    id: GOOGLE_INTERNAL_ROUTE,
-    name: "OpenCode (Google)",
+    id: route,
+    name:
+      plane === "opencode-go" ? "OpenCode Go (Google)" : "OpenCode (Google)",
     stream: (model: never, context: never, options?: never) =>
       api.stream(model, context, options),
     streamSimple: (model: never, context: never, options?: never) =>
@@ -468,6 +479,8 @@ export const resolveGatewayKey = async (
 
 /** What {@link registerGoogleBridge} needs from its caller. */
 export interface GoogleBridgeInputs {
+  /** The billing plane whose catalog, endpoint and credential this route uses. */
+  readonly plane?: Plane;
   /** Host context, for resolving the credential reference. */
   readonly ctx: unknown;
   /** The real `llm` service — the bridge registers on it directly. */
@@ -527,11 +540,13 @@ export interface GoogleBridgeInputs {
  */
 export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
   const { ctx, host, llm, specs } = inputs;
+  const plane = inputs.plane ?? "opencode";
+  const routeId = googleRouteFor(plane);
   const adapter = host?.PiAiAdapter;
   if (typeof adapter !== "function" || specs.length === 0) {
     return undefined;
   }
-  const provider = googleProviderFor(inputs.pi, specs, inputs.endpoint);
+  const provider = googleProviderFor(inputs.pi, specs, inputs.endpoint, plane);
 
   // One profile, built once: the adapter memoizes its snapshot by the identity
   // of the profiles map, so a fresh map per call would rebuild the collection
@@ -539,19 +554,19 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
   const profile: Record<string, unknown> = {
     apiKeyEnv: inputs.apiKeyRef,
     configuredMaxTokens: new Map<string, number>(),
-    displayName: "OpenCode (Google)",
+    displayName: provider.name,
     maxRequestImageBytes: MAX_REQUEST_IMAGE_BYTES,
     modelErrors: new Map<string, string>(),
     piProvider: provider,
-    provider: GOOGLE_INTERNAL_ROUTE,
+    provider: routeId,
     requestImageMaxBytes: REQUEST_IMAGE_MAX_BYTES,
     requestImagePixelBudget: REQUEST_IMAGE_PIXEL_BUDGET,
     retryPolicy: gatewayRetryPolicy(),
     streamIdleTimeoutMs: STREAM_IDLE_TIMEOUT_MS,
   };
-  const profiles = new Map([[GOOGLE_INTERNAL_ROUTE, profile]]);
+  const profiles = new Map([[routeId, profile]]);
 
-  const resolveApiKey = async (
+  const resolveApiKey = (
     route: unknown,
     resolved: { apiKeyEnv?: unknown }
   ): Promise<string | undefined> => {
@@ -561,39 +576,37 @@ export const registerGoogleBridge = (inputs: GoogleBridgeInputs): unknown => {
     if (typeof named === "string" && named.length > 0) {
       return resolveGatewayKey(ctx, named, String(route));
     }
-    // No reference at all: the stored login, which is the credential the user
-    // already has, then the installation's own login when the deployment opted
-    // in, then the key that installation stores. `undefined` when none of them
-    // has anything, which is the adapter's cue to resolve ambient auth -
-    // exactly what happened before this.
-    //
-    // The order is the rule. A DSH grant is what the user asked for here, so it
-    // is always first. The installation's account is a DIFFERENT credential -
-    // another program's store, another owner, possibly another account - so it
-    // never displaces a grant, and it is read, used and left alone: nothing here
-    // writes it into the DSH seam.
-    //
-    // The plane is an EXACT route id, not a prefix: this bridge serves the Zen
-    // models on the Zen base, and `"opencode-google".startsWith("opencode-go")`
-    // is true — the prefix test this replaces read the Zen route as the Go one.
-    // `loginTokenReader` masked that by falling back to the other plane; a store
-    // lookup keyed by integration id does not, and would have found nothing.
-    const plane = String(route) === "opencode-go" ? "opencode-go" : "opencode";
-    // **API key only.** The installation's own store is the last source, behind
-    // the route's declared reference; a login (device flow, session, credential
-    // pool) is v2 work and is not read here.
-    return resolveOpencodeStoreKey(plane, inputs.readOpencodeStore === true);
+    // With no named reference, optionally read the owning plane's stored API key.
+    return Promise.resolve(
+      resolveOpencodeStoreKey(plane, inputs.readOpencodeStore === true)
+    );
   };
 
-  const built: unknown = Reflect.construct(adapter, [
-    {
-      auth: {
-        authContext: ambientAuthContext(),
-        credentials: emptyCredentialStore(),
+  const images = attachmentResolvers(ctx);
+  try {
+    const built: unknown = Reflect.construct(adapter, [
+      {
+        auth: {
+          authContext: ambientAuthContext(),
+          credentials: emptyCredentialStore(),
+        },
+        profiles: () => profiles,
+        resolveApiKey,
+        resolveAttachments: images.resolveAttachments,
+        resolveImageAccess: images.resolveImageAccess,
       },
-      profiles: () => profiles,
-      resolveApiKey,
-    },
-  ]);
-  return llm.registerAdapter([GOOGLE_INTERNAL_ROUTE], built);
+    ]);
+    const registration = llm.registerAdapter([routeId], built);
+    return () => {
+      try {
+        if (isFunctionLike(registration))
+          Reflect.apply(registration, undefined, []);
+      } finally {
+        images.dispose();
+      }
+    };
+  } catch (error) {
+    images.dispose();
+    throw error;
+  }
 };

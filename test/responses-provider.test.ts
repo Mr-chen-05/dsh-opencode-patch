@@ -965,10 +965,9 @@ describe("responses-provider: the mount survives the host's own instance", () =>
     });
     // Pre-declared so the Gemini bridge stays out of this case's way: the
     // route's own registration, not the mount's, and unrelated here.
-    host.adapters.set(GOOGLE_INTERNAL_ROUTE, {
-      id: GOOGLE_INTERNAL_ROUTE,
-      name: GOOGLE_INTERNAL_ROUTE,
-    });
+    for (const route of SELF_MOUNTED_ROUTES) {
+      host.adapters.set(route, { id: route, name: route });
+    }
 
     const stop = await registerResponsesProvider(host.ctx);
 
@@ -1011,10 +1010,9 @@ describe("responses-provider: the mount survives the host's own instance", () =>
     });
     // Pre-declared so the Gemini bridge stays out of this case's way: its
     // registration is its own, and this case is about the wrapper's.
-    host.adapters.set(GOOGLE_INTERNAL_ROUTE, {
-      id: GOOGLE_INTERNAL_ROUTE,
-      name: GOOGLE_INTERNAL_ROUTE,
-    });
+    for (const route of SELF_MOUNTED_ROUTES) {
+      host.adapters.set(route, { id: route, name: route });
+    }
 
     const stop = await registerResponsesProvider(host.ctx);
 
@@ -1771,5 +1769,58 @@ describe("responses-provider · an empty declaration mounts nothing", () => {
     } finally {
       info.mockRestore();
     }
+  });
+});
+
+describe("Go Google bridge mounting", () => {
+  it("inherits a custom Go key independently of Zen", () => {
+    const ctx = {
+      loader: {
+        entries: () => [
+          {
+            options: {
+              id: "llm-pi-ai",
+              config: {
+                providers: {
+                  opencode: { apiKeyEnv: "ZEN_REF" },
+                  "opencode-go": { apiKeyEnv: "GO_REF" },
+                },
+              },
+            },
+          },
+        ],
+      },
+    };
+    expect(inheritedCredentialRef(ctx, "opencode-go")).toBe("GO_REF");
+    expect(inheritedCredentialRef(ctx)).toBe("ZEN_REF");
+    expect(inheritedCredentialRef({}, "opencode-go")).toBe(
+      "OPENCODE_GO_API_KEY"
+    );
+  });
+
+  it("mounts and withdraws both Google routes", async () => {
+    const host = createHost();
+    const stop = await registerResponsesProvider(host.ctx);
+    expect(host.adapters.has("opencode-google")).toBe(true);
+    expect(host.adapters.has("opencode-go-google")).toBe(true);
+    stop?.();
+    expect(host.adapters.has("opencode-google")).toBe(false);
+    expect(host.adapters.has("opencode-go-google")).toBe(false);
+  });
+
+  it("withdraws the first bridge if mounting the second fails", async () => {
+    const host = createHost();
+    const llm = host.ctx.llm!;
+    const original = llm.registerAdapter!;
+    llm.registerAdapter = (routes, adapter) => {
+      if (routes.includes("opencode-go-google"))
+        throw new Error("Go registration failed");
+      return original.call(llm, routes, adapter);
+    };
+    await expect(registerResponsesProvider(host.ctx)).rejects.toThrow(
+      "Go registration failed"
+    );
+    expect(host.adapters.has("opencode-google")).toBe(false);
+    expect(host.adapters.has("opencode-go-google")).toBe(false);
   });
 });

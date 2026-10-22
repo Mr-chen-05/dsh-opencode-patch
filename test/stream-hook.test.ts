@@ -14,7 +14,7 @@
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -50,7 +50,7 @@ describe("stream-hook · projectNameFrom names the repository", () => {
     mkdirSync(join(repo, ".git"));
     const deep = join(repo, "packages", "foo");
     mkdirSync(deep, { recursive: true });
-    const expected = repo.split("/").pop();
+    const expected = basename(repo);
     expect(projectNameFrom(deep)).toBe(expected);
     expect(projectNameFrom(repo)).toBe(expected);
   });
@@ -61,7 +61,7 @@ describe("stream-hook · projectNameFrom names the repository", () => {
     mkdirSync(join(repo, ".hg"));
     const sub = join(repo, "src");
     mkdirSync(sub);
-    expect(projectNameFrom(sub)).toBe(repo.split("/").pop());
+    expect(projectNameFrom(sub)).toBe(basename(repo));
   });
 
   it("splits on BOTH separators, so a Windows path is named correctly", () => {
@@ -101,7 +101,7 @@ describe("stream-hook · projectNameFrom names the repository", () => {
     const repo = tree();
     writeFileSync(join(repo, ".git"), "gitdir: /elsewhere\n");
     mkdirSync(join(repo, "src"));
-    expect(projectNameFrom(join(repo, "src"))).toBe(repo.split("/").pop());
+    expect(projectNameFrom(join(repo, "src"))).toBe(basename(repo));
   });
 });
 

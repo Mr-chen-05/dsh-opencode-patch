@@ -37,6 +37,7 @@ describe("config-values: shared defaults", () => {
       "opencode-google",
       "opencode-go-responses",
       "opencode-go-anthropic",
+      "opencode-go-google",
     ]);
   });
 });

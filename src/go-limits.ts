@@ -77,9 +77,13 @@ export const allowanceFor = (
   model: string
 ): ModelAllowance | undefined => limits.get(model.trim().toLowerCase());
 
-/** A dollar figure with no cents when it is whole — `$60`, not `$60.00`. */
-export const formatUsd = (value: number): string =>
-  Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
+/** Unknown allowances (including NaN serialized as null) are never dollar values. */
+export const formatUsd = (value: unknown): string => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return "—";
+  }
+  return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
+};
 
 /**
  * Normalize a doc-table row label to a model id.
