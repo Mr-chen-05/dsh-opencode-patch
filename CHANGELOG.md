@@ -6,6 +6,24 @@ This project is an evolution of [**`nobu121/dsh-opencode-session`**](https://git
 
 ---
 
+## [1.4.0](https://github.com/viztor/dsh-opencode-patch/compare/v1.3.0...v1.4.0) (2026-10-22)
+
+
+### Features
+
+* bridge OpenCode Go Gemini with signed tool replay and images ([bc310a6](https://github.com/viztor/dsh-opencode-patch/commit/bc310a6105d15f9f3fc6b4d08e738bc69b94f7f4))
+* Go Gemini bridge + robust Go allowances (lands [#81](https://github.com/viztor/dsh-opencode-patch/issues/81), [#82](https://github.com/viztor/dsh-opencode-patch/issues/82) rebased) ([0220cef](https://github.com/viztor/dsh-opencode-patch/commit/0220cef7e8d0b3aeaad5421ab0fbd7096a221ea0))
+
+
+### Fixes
+
+* card copy falls back to the bundle dictionary; Go plane adopts the current endpoint family ([716a783](https://github.com/viztor/dsh-opencode-patch/commit/716a783af1e924af3bd36f9a8a13276f58c5f356))
+* **catalog:** the family map's key order is ours, not the vendor's ([206f789](https://github.com/viztor/dsh-opencode-patch/commit/206f789092c63355eb8532e7e0015f049d67ff24))
+* **catalog:** the family map's key order is ours; regenerate for the minimax rotation ([f4d0014](https://github.com/viztor/dsh-opencode-patch/commit/f4d0014773c2b60853f17075b2f69d7f0a797a12))
+* **copy:** the settings card falls back to this bundle's dictionary ([8a36321](https://github.com/viztor/dsh-opencode-patch/commit/8a3632123f4e2c66dc527232f490b4842913a988))
+* **discovery:** repair the Go plane's retired base too ([48465ed](https://github.com/viztor/dsh-opencode-patch/commit/48465ed8931dc7d8027d268a4c6477fdd5abfc96))
+* render unknown Go allowances without crashing the quota panel ([24a30b4](https://github.com/viztor/dsh-opencode-patch/commit/24a30b4d2d965470381ec15b52d754938ce60abb))
+
 ## [1.3.0](https://github.com/viztor/dsh-opencode-patch/compare/v1.2.3...v1.3.0) (2026-10-22)
 
 
