@@ -170,6 +170,9 @@ export default defineConfig({
     env: {
       NODE_PATH: "",
     },
+    // Stops the run on a Node below `engines.node`, before any file is
+    // collected. Inherited by the mock and e2e configs, which spread this one.
+    globalSetup: ["test/support/node-engine.ts"],
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
     /**
      * Coverage over `src/` only.

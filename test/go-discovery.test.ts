@@ -52,11 +52,11 @@ import {
   recordCapturedApiKey,
 } from "../src/key-capture.ts";
 import {
-  createMockContext,
   createOpencodeStore,
   type FixtureCredential,
   type FixtureStore,
-} from "./test-helpers.ts";
+} from "./support/opencode-store-fixture.ts";
+import { createMockContext } from "./test-helpers.ts";
 
 /** The Zen plane, which discovery rewrites onto the Go plane. */
 const ZEN_BASE = "https://opencode.ai/zen/v1";

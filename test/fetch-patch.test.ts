@@ -24,9 +24,9 @@ import {
   resolveConfig,
   type ActiveTurnState,
 } from "../src/index.ts";
+import { createOpencodeStore } from "./support/opencode-store-fixture.ts";
 import {
   createCaptureFetch,
-  createOpencodeStore,
   headerOf,
   parseJsonBody,
   toolNamesOf,
