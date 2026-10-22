@@ -34,10 +34,26 @@ export {
 
 export type CatalogProvider = "go" | "zen";
 
-/** Canonical OpenCode model registry URL. */
+/**
+ * The registry this plugin actually fetches: the OpenCode catalog, served from
+ * OpenCode's own host.
+ *
+ * Measured: this and `https://models.dev/api.json` return the SAME object today —
+ * byte-identical body, identical ETag — so the two names are one registry, not two
+ * sources. The OpenCode host is the one that is called, and a test pins it: a
+ * silent re-point would still return valid data, which is precisely why the
+ * assertion is on the request rather than on the answer.
+ */
 export const MODELS_OPENCODE_URL = "https://models.opencode.ai/api.json";
 
-/** Public OpenCode model registry mirror URL. */
+/**
+ * The same registry under its public name, `models.dev`.
+ *
+ * Exported for callers that want the human-facing URL (documentation links, a
+ * health probe). It is NOT what {@link refreshCatalog} fetches, and it need not
+ * stay in step with {@link MODELS_OPENCODE_URL}: if the two ever diverge, the
+ * OpenCode host wins, because that is the one the plugin reads.
+ */
 export const MODELS_DEV_URL = "https://models.dev/api.json";
 
 /**
@@ -78,7 +94,7 @@ const FALLBACK_CONTEXT_WINDOW = 1_000_000;
 const FALLBACK_MAX_OUTPUT_TOKENS = 131_072;
 
 /**
- * Timeout for models.dev revalidation requests.
+ * Timeout for catalog revalidation requests.
  *
  * 8s was measured against the endpoint when it answered in ~200ms, and the
  * vendor has since slowed to 7-12s for the same payload. The budget was tighter
@@ -455,7 +471,8 @@ export const isCatalogFresh = (): boolean => lastRefreshedAt > 0;
 export const didCatalogRefreshSucceed = (): boolean => lastRefreshSucceeded;
 
 /**
- * Fetch and merge the latest live model specifications from `models.dev`.
+ * Fetch and merge the latest live model specifications from the OpenCode
+ * catalog (`models.opencode.ai`).
  *
  * Never throws: on network failure, timeout, or invalid reply, gracefully falls
  * back to the current active catalog. Concurrent calls coalesce into one in-flight promise.

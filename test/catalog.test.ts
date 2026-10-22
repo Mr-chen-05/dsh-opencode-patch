@@ -662,6 +662,27 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     expect(updated.zen.some((m) => m.id === "muse-spark-1.2")).toBe(true);
   });
 
+  it("refreshes from the OpenCode registry host, not a third-party mirror", async () => {
+    // Pinned because nothing else would notice a silent re-point: the two hosts
+    // serve the SAME object today (identical ETag), so a wrong URL still returns
+    // valid data — which is exactly why the assertion is on the request, not on
+    // the answer.
+    const seen: string[] = [];
+    const recordingFetch = vi.fn((input: unknown) => {
+      seen.push(String(input));
+      return Promise.resolve({
+        json: async () => ({ opencode: { models: {} } }),
+        ok: true,
+      });
+    });
+
+    await refreshCatalog(recordingFetch as unknown as typeof fetch, true);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBe("https://models.opencode.ai/api.json");
+    expect(seen[0]).not.toContain("models.dev");
+  });
+
   it("refreshCatalog degrades gracefully on network errors without throwing", async () => {
     const before = {
       go: getLiveGoCatalog().length,
