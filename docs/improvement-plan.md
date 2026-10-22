@@ -1,212 +1,270 @@
 # Improvement plan
 
-An architecture review of the tree at 1.4.1, and the order in which to act on it. Each phase is one pull request with a Conventional Commit title, and each one lands behind tests that pin today's behaviour before anything moves. The first phase is already done; it is listed so the rest reads against what the suite now guarantees.
+## Context
 
-**How the findings were checked.** Every finding below was traced to the code. The ones marked _measured_ were also reproduced: a probe script, or a test that fails before the fix. The rest are _traced_, and the phase that addresses each one begins by writing the failing test. A finding that turns out wrong at that step is dropped, not forced.
+The result of an architecture audit of the tree at 1.4.1, and the order in which to act on it. It rests on:
 
-## The shape of the problems
+- six audits: routing, catalog, credentials, config/UI, tests/CI/docs, and the stream path;
+- an adversarial review of the plan itself;
+- the host's own source (`deepseek-ai/deepseek-harness`): `packages/llm/llm`, `llm-pi-ai`, `api/session-controller`, `api/gateway`, and `client/ui-settings-models`. File references into the host are relative to that repository's `packages/`.
 
-Most findings share one of four causes, and the phases are grouped by cause rather than by file:
+**Outcome:** a plugin that only uses host extension points the host supports; one source of truth per decision; a suite that pins behaviour before it moves; and the owner's product rules below.
 
-| Cause | What it produces | Phases |
+**Each phase is one pull request**, and it updates this document: its row in the status table moves to "merged", and its section is trimmed to what is left. A finding that does not survive its phase's first failing test is struck from here rather than forced.
+
+## Status
+
+| Phase | Title | State |
 | :-- | :-- | :-- |
-| **One decision written in several places** | copies that already disagree: credentials, protocol tables, reasoning levels, model metadata | 1, 2 |
-| **Host patches without a lifecycle** | patches that stack or get stripped on reload, registrations that outlive their activation | 3, 4 |
-| **Module state with process lifetime** | captured keys and catalog maps that survive a reload, and leaked between tests until phase 0 | 0, 1, 5 |
-| **Modules that grew past one subject** | five files over 700 lines, each holding three to five jobs | 6 |
+| P0 | suite hardening, 11 defect fixes, this plan | in review |
+| P1a | `fix:` shipped breakage | planned |
+| P1b | `chore:` hygiene | planned |
+| P2 | `feat!:` the 2.0.0 major | planned |
+| P-T1 | `refactor:` fake host and patch lifecycle | planned |
+| P3 | `feat:` Settings offers the catalog | planned |
+| P4 | `feat:` follow the user's configuration; on/off on internal routes | planned |
+| P-T2 | `test:` suite structure | planned |
+| P-T3 | `ci:` CI and scripts | planned |
+| P5 | `refactor:` installers | planned |
+| P6 | `refactor:` one credential resolver | planned |
+| P7 | `refactor:` one source per table | planned |
+| P8 | `refactor:` settings table | planned |
+| P9 | `refactor:` remote seam | planned |
+| P10a | `refactor:` pure module moves | planned |
+| P10b | `fix:` catalog state | planned |
+| P11 | `refactor:` UI on the primitives | planned |
+| P12 | `ci:` lint warnings gating | planned |
 
-## Phase 0 — the suite and the confirmed defects (this pull request)
+## Owner decisions
 
-The suite now:
-
-- refuses to start below `engines.node`. Below Node 24 it used to fail for engine reasons that looked like regressions.
-- runs offline. It used to send 54 requests per run to `models.opencode.ai`, so a networked runner could swap the catalog mid-test.
-- resets module state after every test. Shuffled runs used to fail on seeds 42 and 1234.
-- runs in random order on Node 24 in CI. Node 24 is the declared floor, which no job ran before.
-- walks the client bundle's import graph and fails on anything host-only.
-- checks every Remote method a host service declares against a client descriptor.
-
-The defects fixed, each with a test that fails without its fix:
-
-| Defect | Status |
+| # | Decision |
 | :-- | :-- |
-| a rejected internal-route mount escaped as an unhandled rejection, which can exit the host | measured |
-| three early exits leaked the Gemini bridge registrations, and the next reload failed with `DUPLICATE_ADAPTER` | measured |
-| a mount that failed to start kept its fiber and every route it had registered | measured |
-| model discovery answered from the first activation's settings for the life of the process | measured |
-| Zen turns on two models were priced at the Go rate (`deepseek-v4-pro`: 0.66 instead of 1.74 per million input tokens) | measured |
-| the listing and model-info patches rewrote providers this plugin does not claim | measured |
-| a relay's Go `/models` was answered with the Zen catalog | measured |
-| the free-model check never read a `Request` body, which is how DSH sends a turn | measured |
-| the meter's session fallback picked the newest session, not the one that just ran | measured |
-| a key's tier was read from its prefix; `oc_sk_` keys are issued for Go too | measured |
-| the store-inspection row called a namespace the client never mounted | measured |
-| the credential reader's legacy-row fallback was not per integration, so it hid the Zen key | measured |
+| D1 | A model whose reasoning is only on/off is offered as **Off / On**. Old saved Minimal/Xhigh/Max selections on such models **break, and the break is documented**. |
+| D2 | **Delete `internalRoutes`** |
+| D3 | **Composer = declared models only. Settings = the whole catalog to pick from.** |
+| D4 | Delete `resolveRoutedKey`. It was exported in dde9d6e and nothing in `src/` has ever called it. |
+| D5 | Keep the per-protocol hidden routes, done the way the host supports |
+| D6 | Shrink the public API in a major release (2.0.0) |
+| D7 | Merge P0 first, then one PR per phase, each from `main` |
+| D8 | **The plugin never writes the user's profile and never overrides the user's configuration at dispatch.** It complements what pi's provider list is missing and shows that in Settings when the user configures models. After that, dispatch follows the user's configuration. |
+| D9 | Retire the deprecated `@viztor/dsh-opencode` wrapper in 2.0.0, after fixing its broken re-export in P1 |
+| D10 | This document is the plan of record; each phase PR updates its status row |
+| D11 | **The adapter patch exists to merge provider modes into the user's provider, nothing else.** It stays, and is generalized to every mode; anything in it that is not merging goes. |
 
-## Phase 1 — one credential resolver
+## What the host supports (read from source)
 
-**Problem.** Six places decide "which key for which plane", with different rules:
+- **Routes.**
+  - `registerAdapter` is all-or-nothing against a `private adapters` map (`llm/src/index.ts:399-460`). Only a registration's owner moves its routes, through `handle.replace`.
+  - `adapter-replacement.ts` deletes another plugin's entry, which is unsupported. Delete it.
+- **Dispatch.**
+  - The `llm/stream` waterfall allows a short-circuit (`index.ts:62-75`). `next()` takes no arguments, and loop requests are frozen.
+  - The redirect `llm.stream({ ...options, provider: hiddenRoute })` (`src/stream-hook.ts:251-266`) is the supported shape. It keeps `adapterStream`'s validation, projection, replay filtering and failure normalization (`index.ts:1064-1150`).
+- **Effort validation goes through the ADAPTER, not the public `resolveModelInfo`.**
+  - The paths are `resolveCallConfig` → `resolveModelInfoFor` → `adapter.resolveModel`, `adapter.prepareCall`, and pi's private `modelOf` (`index.ts:769,894-905,964,1076`; `llm-pi-ai/src/adapter.ts:369-375`).
+  - **The adapter patch exists to merge provider modes, nothing else.** A declared model whose mode (Responses, Anthropic, Google) differs from the route's must resolve and dispatch as part of the user's own `opencode`/`opencode-go` provider. The plane route's adapter therefore answers `resolveModel`/`prepareCall`/`modelOf` for that model from the hidden route's adapter. Today that is done only for Go→Gemini (`models-discovery.ts:735-760`).
+  - Its catalog fill of context and levels for same-mode models (`:790-1010`) is not merging. Under D8 it goes: for a same-mode model, the picker and dispatch both follow the user's row, or pi's data where the user set nothing.
+- **Hiding.**
+  - There is no visibility flag (`LlmProviderInfo = {id, name}`).
+  - `listProviders()` is read by:
+    - the composer (`session-controller/src/catalog.ts:24`) and `modelAvailable` (`:81`);
+    - the Settings directory (`ui-settings-models/src/client/store.ts:233`);
+    - the subagent tool (`tool-subagent/src/list-models.ts:20,50`);
+    - ACP (`acp/acp/src/model-control.ts:158`);
+    - the SDK server (`sdk/server/src/server.ts:423`);
+    - the translator (`experimental/translator/src/deepseek.ts:69`).
+  - One listing patch stays. Instance patches reach Remote calls, because the gateway resolves methods with `Reflect.get` at call time (`api/gateway/src/index.ts:841-843`).
+- **Settings discovery is keyed by the pi-ai entry id** (`llm-pi-ai/src/index.ts:138,156`; `ProviderEditor.tsx:254`; `ModelListEditor.tsx:167,244`). The plugin's own `registerModelDiscovery` namespaces are never asked.
+  - The host's normalization runs inside the original `discoverModels` (`index.ts:618-631`), so the wrapper must dedupe and whitelist the fields itself.
+  - `LlmDiscoveredModel` carries only id, name, contextWindow, maxTokens and inputModalities, with no reasoning field.
+- **D1 representation.** Effort ids must be pi levels (`adapter.ts:170-181`), and two vocabularies mean opposite things by `null`:
+  - pi `thinkingLevelMap`: `{ minimal: null, low: null, medium: null, high: "high" }`, with **no `off` key**. `off: null` hides Off and suppresses the explicit disable (`openai-completions.js:674,690,712`; `anthropic-messages.js:917`).
+  - profile `reasoningEfforts` dict: `{ off: null, high: "high" }`. Here null means "offered, send nothing" (`llm-pi-ai/src/catalog.ts:705-712`).
+  - Picker: `{ efforts: [{ id: "off", name: "Off" }, { id: "high", name: "On" }] }`.
+  - Offer Off only where the protocol can disable reasoning (`adapter.ts:184-196`).
+  - Verify that `"high"` is what each protocol sends for "on" before relying on it. Today `"on"` goes out verbatim (`openai-completions.js:718`, `anthropic-messages.js:733-735`).
 
-| Site | How it differs |
+## Defects found in this audit, not yet fixed (all verified in code)
+
+| Defect | Where |
 | :-- | :-- |
-| `fetch-patch.ts` | ignores `KEY_SOURCE_ORDER` except for `configured`; hard-codes the env names; never reads the row's `apiKeyEnv` or literal key |
-| `lifecycle.ts` `hasPlaneCredential` | reads `process.env` directly; asks for a captured key with no tier, so a Zen key satisfies Go |
-| `go-discovery.ts` `resolveGoApiKey` | follows the policy order and filters placeholders — the reference behaviour |
-| `go-discovery.ts` `resolveZenCreditInfo` | goes through `resolveRef`, which has no placeholder filter, so `OPENCODE_API_KEY=unused` counts as configured |
-| `go-discovery.ts` `resolveRoutedKey` | exported, but no `src/` caller (_traced_) |
-| `google-bridge.ts` `resolveGatewayKey` | no placeholder filter; throws on a miss; never reaches the installation store, because the caller always passes a reference (_traced_) |
+| The deprecated wrapper re-exports a `default` that does not exist, an ESM link error. It is published every release. | `scripts/publish-scoped.ts:137`, `release.yml:124` |
+| Settings shows pi's snapshot, not the catalog | `models-discovery.ts:142-198,532-539` |
+| Mode merging is done only for Go→Gemini. For the other modes the picker shows catalog levels while dispatch validates against a different profile: toggle models show Minimal…Max with no Off, and Go `minimax-m3` + Xhigh/Max is refused on the internal Anthropic route. | `models-discovery.ts:607-616,735-760,1063-1203`; `pi-provider.ts:351-386`; `responses-provider.ts:111-150` |
+| `isZenProvider("opencode-google")` is false | `utils/request-shape.ts:265-271` |
+| `enrichModelsResponse` turns a 401/403/5xx into a 200 catalog. It must still fill the Go plane's 404. | `models-catalog.ts:800-804` |
+| The warning token doesn't exist, so warnings render as caption text. The host's text token is `--dsw-alias-state-warn-label`. | `settings-card.tsx:159`, `settings-store-inspect.tsx:250` |
+| The Settings spinner animates only if the meter is mounted | `settings-usage.tsx:248` → `usage-ui.ts:440` |
+| The stream hook writes `debugFile` with `debug` off | `stream-hook.ts:327-340` vs `lifecycle.ts:361` |
+| `settings-purge` reports `{ ok: false }` as "not a purge result" and casts instead of using the parser | `settings-purge.ts:47-55` |
+| The stream hook's `prepared` handling is dead. The host never reads `options.prepared`. | `stream-hook.ts:44,200-203,258` |
+| The partition test misses `debugFile` | `test/settings-page.test.tsx:1223` |
+| `cordis.patch.yml`: phantom `showUsagePrice`, wrong `freeModelMarker: ''` text, incomplete field lists | `cordis.patch.yml:23,36,61` |
+| `utils/retry.ts` uses `console` and global timers, against the purity gate | `utils/retry.ts:31,55` |
+| `tool-fallback`: the Anthropic branch can't be reached, and the lookup is Go-first | `tool-fallback.ts:204,237-242` |
+| Hard-coded catalog counts in tests, which the nightly refresh PR breaks by construction | `test/catalog.test.ts:94,200,208` |
+| `.freebuff/project-id` is tracked | repo root |
 
-**Plan.**
-
-1. Write a **parity test first**: one table of inputs (policy × which sources hold a key × plane), asserted against every site above. Its failures are the real list of differences; record each as either "intended" or "bug".
-2. Add `src/utils/credential-policy.ts`, which is pure: `chooseCredential({ plane, policy, sources })`, where `sources` holds values (request key, captured, declared env value, literal, store) rather than readers. It returns `{ key, source }` and applies the placeholder filter once.
-3. Add `src/credentials.ts`, the effect half. It gathers the source values for a plane from the context, `process.env` and the capture store, then asks the utility.
-4. Move each caller onto it, one per commit, with the parity test green after each. `hasPlaneCredential` becomes a thin wrapper that is still synchronous (it skips the async store).
-5. Replace the module-level capture maps with a `CaptureStore` instance owned per root. Clear a key on a `401` answer, so a rotated key stops being sent.
-6. `resolveRoutedKey` is a public export, so removing it is a breaking change. Mark it `@deprecated` in this phase and remove it in the next major.
-
-**Done when** the parity test has one row per policy × source combination and every site answers it identically, and `grep process.env src/fetch-patch.ts src/lifecycle.ts src/google-bridge.ts` is empty.
-
-## Phase 2 — one source per table
-
-**Problem.** These tables are written more than once, and the copies drift:
-
-- `PROTOCOL_FOR_SDK` (`responses-routes.ts`) and `GATEWAY_PROTOCOL_FOR_SDK` (`pi-provider.ts`) are identical. A comment says one has an extra entry; it does not.
-- `PLANES` (`responses-routes.ts`) is a literal copy of `LEGACY_PLANE_API` (`pi-provider.ts`). A comment says they are the same table.
-- There are four route-to-plane maps: `catalogPlaneForRoute`, `isPlaneRoute`, `responses-routes` `PLANES`, and `purge-service` `PLANES`.
-- `ALL_THINKING_LEVELS` is defined twice. There are two `formatUsd` functions, with different contracts.
-- **The picker and dispatch derive reasoning levels differently** (_measured_: 9 of 95 catalog models conflict). For a model with an on/off reasoning switch (`glm-5`, `minimax-m3`, `qwen3.7-plus`, …), the picker offers low, medium and high as separate levels, while dispatch sends all three as `on`. A comment in `models-discovery.ts` says the two never disagree.
-- The model-metadata rule (overrides, context window, efforts, endpoint repair) is written four times: `toDiscovered` in `lifecycle.ts`, and `resolveModel`, `modelOf` and `decorateModelInfo` in `models-discovery.ts`. For the context window, the picker shows the catalog's value while dispatch keeps the adapter's.
-
-**Plan.**
-
-1. Add `src/utils/protocols.ts`: the SDK constants, the one protocol map, the plane table and the one `planeForRoute`. Derive `ROUTE_FOR_PROTOCOL` from it. `pi-provider` and `responses-routes` import from it, which also removes the import cycle that kept `PLANES` from being an alias.
-2. Add `src/utils/model-metadata.ts`, pure: the override merge, the effective window, efforts and the reasoning map. The picker's levels and dispatch's map come from one function, so they cannot disagree.
-3. Tests:
-   - a property test over the **whole bundled catalog**, asserting picker levels ⇔ dispatch map for every model. It fails today on the 9 models above.
-   - the same for the context window across `toDiscovered`, `decorateModelInfo` and `modelOf`.
-4. **Decision needed:** what a toggle model's picker should offer. Either just "on/off", or the three levels with a note that they are equivalent. The first is closer to the vendor's own client.
-
-**Done when** each table has one definition (a grep for each name finds one `export const`), and the catalog-wide property test passes.
-
-## Phase 3 — a lifecycle for host patches
-
-**Problem.**
-
-- A live reload applies the new activation before it disposes the old one (`lifecycle.ts` documents this).
-- Under that ordering, the identity-checked restores (`hideResponsesRoute`, `decorateModelDiscovery`, `decorateModelInfo`) never restore, so each reload leaves another wrapper in the chain.
-- `decoratePlaneAdapters` restores unconditionally. The old activation's disposer strips the new one's wrappers, and the new disposer later puts back the old closures.
-- `registeredRoutes` in `models-discovery.ts` is never cleared.
-- The three root-scoped services each copy the same mount-once logic, with different logging (`console.warn` in two places, `ctx.logger` in one). `installUsageService` also captures the first activation's config for the life of the process.
-
-**Plan.**
-
-1. Build the test harness before any fix. Extract the faithful fake cordis from `test/responses-provider.test.ts` (`createHost`) into `test/support/fake-cordis.ts`. Add `test/reload.test.ts`, which runs:
-
-   ```
-   apply A → apply B → dispose A → assert B fully patched
-                     → dispose B → assert every host method is the original
-   ```
-
-   for every patched method. It fails today.
-
-2. Add one `patchMethod(target, key, impl)` that returns a disposer which restores **only if its own wrapper is still the current value**, and splices itself out of a chain otherwise. Use it at all four patch sites.
-3. Add one `mountOncePerRoot(ctx, name, Service, options)` for the three services, reporting through `ctx.logger` with a console fallback. Each service reads its settings from the latest activation, as model discovery now does.
-
-**Done when** the reload test passes for every host method this plugin replaces.
-
-## Phase 4 — the protocol mount and the Gemini bridge
-
-**Problem (traced).**
-
-- `google-bridge.ts` finds the host's `dsh-llm-pi-ai` from the plugin's own location, while `responses-provider.ts` finds it from `ctx.baseUrl`. Under a `link:` install, pi can come from this repository's dev tree while the adapter class comes from the host's copy. That is the version skew the module header says it prevents.
-- `internalRoutes: false` does not stop the bridge. The gap report then warns that every Gemini model "speaks a protocol no route serves", because bridge routes are never added to `served`.
-- The bridge registers through `llm.registerAdapter.bind(llm)`, after awaits, and does not re-check the routes it saw at the start. An in-flight mount from the old activation can collide with the new one.
-- `adapter-replacement.ts` is not wired. It also calls `registerAdapter` detached, without `this`, and its restore writes the map directly, so no `llm/adapters-updated` event fires.
-
-**Plan.**
-
-1. One `resolveHostPackage(ctx)` from `ctx.baseUrl`; pi is resolved from that wrapper's own location.
-2. Move the bridge loop into `google-bridge.ts` as `mountGoogleBridges`, as its own installer, with its own disposer and the existing containment.
-3. Add bridge routes to `served`. **Decision needed:** whether `internalRoutes: false` turns the bridge off. The config docs suggest it should.
-4. Re-read the registered routes immediately before each register.
-5. `adapter-replacement.ts`: either wire it, with a test against a class-based registry that reads `this`, or delete it. A module that is "the next step" for several releases is a module to delete.
-
-## Phase 5 — catalog state
-
-**Problem.**
-
-- `parseModelsDevCatalog` clears module-level sets as a side effect, and it is a public export.
-- `refreshCatalog` merges into the old maps and never removes anything, so a model retired after the shim was generated stays offered.
-- The shim carries no deprecated ids, so `isDeprecatedModelOn` is always false before the first refresh.
-- `lastRefreshSucceeded` is global. A background success can mask a failed forced refresh, which the purge then reports as `catalogRead: true`.
-- The shim staleness check compares only the model arrays, so a move of the plane endpoints reads as "current".
-
-**Plan.**
-
-1. Make the parse pure: it returns `deprecated` and touches nothing.
-2. Make refresh replace the maps rather than merge into them.
-3. The refresh promise resolves `{ ok, deprecated }`, and the purge reads that rather than a global.
-4. The generator emits the deprecated sets, and the staleness check compares the generator's whole output.
-5. **Decision needed.** `toDiscovered` publishes the whole plane catalog under `opencode` and `opencode-go`, while `mergeDiscoveredModels` documents that discovery must never be widened past what the deployment declared. Both are active. Pick one and delete the other.
-6. Purge: make one `edit` per entry that does both passes and skips entries with no change. Today every entry is rewritten, in two separate edits.
-
-## Phase 6 — modules named after one subject
-
-After phases 1–3 pin the behaviour, split these. Each split is a move with no behaviour change, verified by the unchanged suite.
-
-| Module | Lines | Becomes |
-| :-- | --: | :-- |
-| `models-discovery.ts` | 1191 | `discovery-merge.ts`, `listing-policy.ts` (with a `route-registry.ts`), `plane-adapters.ts`, `model-info.ts`, and `utils/model-metadata.ts` from phase 2 |
-| `responses-provider.ts` | 1213 | the loader and host-package lookups move to `cordis-context.ts`, which removes the third copy of `loaderOfContext`; `reasoningEffortsFor`, `modelsForSdk` and the declared-model diffs move to `utils/`, taking the catalog as a parameter |
-| `go-discovery.ts` | 724 | `declaredProviderModels` moves next to discovery, on a shared `providerRows(ctx)`; credential parts go to phase 1's module |
-| `usage-ui.ts` | 974 | `usage-styles.ts` (the 445-line stylesheet), `usage-time.ts`, `usage-copy.ts`, `usage-failure.ts` |
-| `fetch-patch.ts` | 500 | a staged pipeline: claim → credential → headers → body, each stage a pure function in `utils/` over values. The body is parsed once, not up to three times per request. |
-
-## Phase 7 — the remote seam
-
-**Problem.**
-
-- `"opencodeGoUsage"` is spelled as a literal 11 times across 5 files (_measured_).
-- The `Object.defineProperty` remote marker block is copied three times.
-- Result unwrapping is hand-written four times. `settings-purge.ts` still reports an `{ ok: false, error }` answer as "not a purge result" rather than the host's reason (_traced_); phase 0 fixed `settings-store.ts` only.
-- `isGoUsage` in `settings-usage.tsx` is a third, looser validator next to `parseGoUsage`.
-
-**Plan.** Each contract exports `{ namespace, methods, descriptors }`. Add one host helper, `markRemote(prototype, contract)`, and one client helper, `callRemote(scope, contract, method, argument)`, which unwraps the envelope and parses with the contract's codec. `remote-contract.test.ts` then reads the contracts directly instead of grepping.
-
-## Phase 8 — test infrastructure
-
-1. Make `architecture.test.ts`'s `utils/` walk recursive. It reads only the top level today.
-2. `client-bundle.test.ts` runs against whatever is in `lib/`, which can be stale. Build first, or fail with "lib/ is older than src/" rather than testing an old artifact.
-3. Bring the 23 lint warnings in `src/` to zero, then make warnings gating for `src/`.
-4. Add per-file coverage floors for `fetch-patch.ts`, `lifecycle.ts` and `models-discovery.ts`, the three modules every request crosses.
-5. Optionally, run mutation testing (Stryker) on `src/utils/`. That folder is pure by construction, so it is cheap there, and it measures whether the assertions would notice a changed branch, which line coverage does not.
-6. Session spend: the store is never evicted, and `history` is copied on every turn but never read. Cap the store with LRU eviction, and drop `history` or give it a reader.
-
-## Phase 9 — UI, against the house rules
-
-- `usage-pill.tsx` re-implements outside-pointer dismissal and the hover grace that `@deepseek-ai/dsh-client-ui-primitives` ships. The house rule is to start from the host's built-ins.
-- `settings-choice-field.tsx` hard-codes a stroke colour, which the house rule ("opt into the theme; do not re-declare it") forbids.
-
-## Order, and why
+## Target architecture
 
 ```
-0 ──► 1 ──► 3 ──► 6
-      │     │
-      ▼     ▼
-      2     4 ──► 5
-                  7, 8, 9 at any point
+src/
+  index.ts             apply, Config, inject, name + config types (D6)
+  lifecycle.ts         apply(): installers only
+  host/
+    patch-method.ts    patch a host method: restore only if still current; delete when the original
+                       was inherited; read "unpatched" from the prototype; re-wrap on llm/adapters-updated
+    listing.ts         the ONE listing patch: hide internal routes (every listProviders reader)
+    discovery.ts       discoverModels: pi's answer + the catalog's missing models (D3, D8)
+    merge-modes.ts     the adapter patch: a declared model in another mode answers from that
+                       mode's hidden-route adapter, so the modes merge into one provider (D11)
+    internal-routes.ts the hidden routes + Gemini bridge: one installer, one disposer
+    remote.ts          installRemoteService, markRemote
+  request/             fetch patch stages: claim → credential → headers → body (body parsed once)
+  credentials.ts       gathers values; utils/credential-policy decides; CaptureStore per root
+  utils/               pure: protocols, model-metadata (reasoning, both vocabularies), credential-policy,
+                       request-shape, session-id, google-replay, catalog-parse
+  contracts/           defineRemote(namespace, methods) for usage, purge, store (client-safe)
+  settings-table.ts    one field table → schema, resolver, types, card specs, copy, manifest
+  ui/                  card, one ActionRow, meter, on the primitives
 ```
 
-- **1 before 6.** Splitting `go-discovery.ts` before there is one resolver would split six rules into more files.
-- **3 before 4.** The bridge's reload collision is one case of the general patch lifecycle.
-- **2 is independent** of 1 and can land in parallel. Its property test is the cheapest high-value test in the plan.
-- **6 last of the structural work.** A move is safe only when the suite pins the behaviour being moved, and phases 1–3 add the missing pins.
+`host/merge-modes.ts` is the adapter patch, and it **merges provider modes and nothing else**. For a declared model in another mode, the plane route's adapter (and the public `resolveModelInfo` the picker reads) answers from that mode's hidden-route adapter, so the picker and dispatch see one provider. Same-mode models are not touched (D8).
 
-## Decisions the plan needs from the owner
+Two private seams remain, documented and feature-detected, each with an upstream ask that deletes it: the listing patch, and the adapter map that `merge-modes` reaches.
 
-1. What a toggle-reasoning model's picker offers (phase 2).
-2. Whether `internalRoutes: false` turns off the Gemini bridge (phase 4).
-3. Whether to wire or delete `adapter-replacement.ts` (phase 4).
-4. Which discovery policy holds: publish the plane catalog, or never widen past the declaration (phase 5).
-5. When to remove the deprecated `resolveRoutedKey` export, which is breaking (phase 1).
+## Phases
+
+One PR each, from `main`, after P0 merges. The first commit of each phase is a test that fails on `main`.
+
+1. **P1a `fix:` shipped breakage.**
+   - Drop `export { default }` from the wrapper. The import test resolves `dsh-opencode-patch` from the dry-run scratch directory.
+   - `isZenProvider`.
+   - Status pass-through in `enrichModelsResponse`, keeping the Go 404 fill.
+   - The warning colour uses `--dsw-alias-state-warn-label`.
+   - Spinner keyframes in the settings styles.
+   - One debug gate.
+   - `settings-purge` uses `parsePurgeResult` and reads the envelope.
+2. **P1b `chore:` hygiene.**
+   - Delete `adapter-replacement.ts` and its test, which nothing imports. Extend `docs/engineering-notes.md`'s plane-route override section (≈`:535-549`) with why the approach is unsupported.
+   - Delete the dead `prepared` code, and `.freebuff/`.
+   - The partition test walks `Config.dict`, and a manifest test checks `cordis.patch.yml` against `Config.dict`.
+   - `retry.ts` takes its timer and logger as parameters; the architecture test bans `console`/`setTimeout`/`setInterval` in `utils/` and walks recursively.
+   - `tool-fallback` dead branches and plane lookup.
+   - Replace `docs/improvement-plan.md` with this plan (D10).
+3. **P2 `feat!:` the major.**
+   - `index.ts` → `apply`, `Config`, `inject`, `name` and the config types.
+   - All 30 importing test files (including e2e and mock) go through one `test/support/src.ts`, so later moves touch one file.
+   - Delete `resolveRoutedKey` (D4) and `internalRoutes` (D2; breaking for anyone who set it to false). Retarget P0's bridge-disposer test to the "every route declared" exit.
+   - Stop publishing `@viztor/dsh-opencode` (D9) and set its final deprecation message.
+   - Document the D1 effort break here, so every breaking change ships in one 2.0.0. The `BREAKING CHANGE:` footer lists all of them.
+4. **P-T1 `refactor:` fake host and patch lifecycle.**
+   - `test/support/fake-cordis.ts` on the real `Context` (one import path), plus `fakeLlm()` and `fakeLogger()`. Retire the ~60 ad-hoc contexts (21 with no-op `effect`), `createMockContext` and `HarnessSimulator`.
+   - `test/reload.test.ts` (apply A → apply B → dispose A → B intact → dispose B → originals) fails today.
+   - `host/patch-method.ts` applied to every patch site, which makes it pass. It reads `listProviders` "unpatched" from the prototype, so the private `llm.adapters` reads in `stream-hook.ts:238-249` and `responses-provider.ts` go. The adapter patch keeps its read: merging modes needs the adapter map until upstream offers a seam. It re-wraps on `llm/adapters-updated`.
+5. **P3 `feat:` Settings offers the catalog (D3, D8).**
+   - The `discoverModels` wrapper returns pi's answer plus the plane's **servable, non-deprecated** catalog models that are missing from it. It dedupes, and whitelists to `LlmDiscoveredModel`'s fields.
+   - The composer's `listModels` stays declared-only.
+   - Delete `installModelDiscovery`/`toDiscovered` and P0's two discovery-reload tests; the mount facade keeps answering the child's `registerModelDiscovery` (`responses-provider.ts:649`).
+   - Rewrite the "adds nothing" tests (`test/models-discovery.test.ts:207-210,307-319`) and the contradicting docs (`README.md:220`, `deep-dive.md:174-175`, `redirect-planes.md:102`).
+6. **P4 `feat:` merge every provider mode; follow the user's configuration (D1, D5, D8).**
+   - **Keep the adapter patch and narrow it to its purpose: merging modes.** Generalize the Go→Gemini case (`models-discovery.ts:735-760`) to every mode on both planes. For a declared model whose catalog SDK maps to another protocol (`internalRouteFor`), the plane adapter's `resolveModel`, `prepareCall` and `modelOf`, and the public `resolveModelInfo`, answer from that mode's hidden-route adapter, re-labelled with the user's provider. So the picker's levels and dispatch's validation come from the same adapter.
+   - **Remove what is not merging:** the catalog fill of context, name, modalities and levels for same-mode models (`:790-1010`) and the matching overrides in `decorateModelInfo`. Same-mode models follow the user's row, or pi's data where the user set nothing.
+   - **Hidden-route profiles follow the user, complemented by the catalog.** Each declared model's profile on its hidden route takes the user's row settings first (name, context, max tokens, modalities, `reasoningEfforts`) and the catalog only where the user set nothing.
+   - **D1 on the hidden routes.** `utils/model-metadata.ts` `reasoningFor(spec)` emits both vocabularies, with the representation above. A toggle model offers Off/On there, unless the user's row says otherwise. Delete the duplicate `ALL_THINKING_LEVELS` and the three capitalisation copies.
+   - **The Go→Gemini lookup and the rest use one helper** that finds the target mode's adapter, re-wrapped on `llm/adapters-updated`.
+   - **Tests:**
+     - for every catalog model reachable through another mode on each plane, picker efforts = the levels dispatch accepts (both from the hidden-route adapter);
+     - a user-configured same-mode row's efforts and context reach both picker and dispatch unchanged;
+     - a user row for an other-mode model is carried onto its hidden route.
+   - **Verify** the "on" wire value per protocol with an e2e probe.
+7. **P-T2 `test:` suite structure.**
+   - Move the 9 mock-booting unit files into `test/mock/`, de-duplicated against `request-shapes.mock.ts`, and the 3 offline e2e files into mock.
+   - Delete the self-testing harness and mock-gateway tests.
+   - Turn constants into invariants.
+   - Split the 7 big test files.
+   - One shared e2e environment helper; remove duplicated helpers, device-login mock routes and the hard-coded `ses_`.
+   - Coverage tests for `session-id` and `opencode-store-contract`, plus per-file floors for `lifecycle`/`stream-hook`/`fetch-patch`.
+8. **P-T3 `ci:` CI and scripts.**
+   - One unit run (`test:coverage`), with build before tests that read `lib/`, and type-check `test/**/*.tsx`.
+   - One composite setup action; the catalog fork `if:` and the pnpm comments.
+   - Paid e2e runs only on schedule or dispatch.
+   - `check.ts` keeps lib freshness (once), the consumer install (loading the client half too) and the size tripwire; its pure file checks move to vitest.
+   - The generators share helpers and one staleness rule; `verify-*` scripts exit non-zero; `capture-ui.sh` has no machine paths; `no-local-paths` covers every published file plus `.github/` and `*.sh`.
+9. **P5 `refactor:` installers.** `installRemoteService(ctx, Service, contract, options)` replaces the three mount-once copies. Each reads the latest activation's settings and reports through `ctx.logger`. Update `scripts/check.ts:320-334`'s probe in the same PR.
+10. **P6 `refactor:` one credential resolver.**
+    - Parity test over the six deciders.
+    - `utils/credential-policy.ts` + `credentials.ts`; the placeholder filter applied once.
+    - The Gemini key gets the store fallback.
+    - `CaptureStore` per root, evicting a key on 401.
+    - No `process.env` in `fetch-patch`, `lifecycle` or `google-bridge`.
+11. **P7 `refactor:` one source per table.**
+    - `utils/protocols.ts`: SDKs, one protocol map, one plane table, one `planeForRoute` (four copies today); `ROUTE_FOR_PROTOCOL` derived from it.
+    - One `formatUsd`.
+    - One `specFor(route, id)`.
+12. **P8 `refactor:` settings table.**
+    - First, a snapshot test of the derived `Config`.
+    - Then `settings-table.ts` drives the schema (schemastery `union`/`const`/`loose`, checking that `loose` and `volatile` compose), the resolver, the types, the card, the copy and the manifest.
+    - Delete the 14 dead copy keys and `modelMarkers`; fix the zh `title`.
+13. **P9 `refactor:` remote seam.**
+    - `defineRemote` contracts, `markRemote`, `callRemote` (one unwrap, parsed by the contract).
+    - Delete `isGoUsage` and the four hand-written unwraps; add the `opencodeGoUsage` constant.
+    - The parity test reads the contracts.
+14. **P10a `refactor:` pure module moves, no behaviour change.**
+    - `models-discovery` → `host/*`.
+    - `responses-provider` → `host/internal-routes.ts`, with the loader lookups moved into `cordis-context.ts`.
+    - `go-discovery` → `credentials.ts`.
+    - `usage-ui` → css/time/state/copy; `parseFailure` → the usage contract.
+    - `fetch-patch` → `request/`.
+15. **P10b `fix:` catalog state.**
+    - The parse is pure and returns `deprecated`; refresh replaces the maps.
+    - The refresh promise returns `{ ok, deprecated }` for the purge.
+    - The shim carries deprecated ids, and the staleness check compares the whole output.
+    - The purge makes one edit per entry and skips no-op entries.
+16. **P11 `refactor:` UI on the primitives.**
+    - `SegmentedControl`, `Button` with `icon`, `useDismissOnOutsidePointer`, one `ActionRow`.
+    - Theme tokens only; inline styles moved to CSS.
+    - Re-measure the bundle budget.
+17. **P12 `ci:`** make lint warnings gating once `src/` is at zero.
+
+**Upstream asks (deepseek-harness)**, each unlocking a deletion here:
+
+- a `registerAdapter(…, { listed: false })` option → delete the listing patch;
+- a `resolveProfiles` export from `llm-pi-ai` → replace the `llmFacade` Proxy mount (`responses-provider.ts:610-722`) with `new PiAiAdapter(…)` + `registerAdapter`;
+- a `reasoning` field on `LlmDiscoveredModel` → Settings can offer Off/On when the user adopts a model;
+- a supported way for one provider to serve models in several modes (an adapter delegation seam, or one registration answering per model) → `merge-modes` stops reading the adapter map, and the hidden routes can go.
+
+## Order
+
+```
+P0 → P1a → P1b → P2 (2.0.0) → P-T1 → P3 → P4 → P-T2 → P-T3 → P5 → P6 → P7 → P8 → P9 → P10a → P10b → P11 → P12
+```
+
+- **P1a first:** shipped breakage.
+- **P2 bundles every breaking change into one major:** D2, D4, D6, D9 and the D1 note.
+- **P-T1 before P3/P4:** they rewrite the same patch sites, and need the reload test and `patchMethod`.
+- **P3/P4 deliver the product rules.** P4 generalizes mode merging and removes the catalog fill.
+- **P10a only after P5–P9:** a move is safe once tests pin what moves.
+
+## Verification (every phase)
+
+Run on Node 26 (`.node-version`):
+
+- `pnpm run check`: 0 errors, and no more warnings than before;
+- `pnpm run test`, `test:shuffle` on 3+ seeds, and `test:mock`;
+- `pnpm run build` + `node --experimental-strip-types scripts/check.ts`;
+- `pnpm run test:coverage` at or above the ratchet.
+
+Then on Node 24: `test:shuffle` + `test:mock`.
+
+Before each commit, grep the diff and `lib/` for local paths.
+
+Also:
+
+- The phase's first test fails on `main`.
+- For P3/P4, a host-level test against the cloned harness logic (`buildModelCatalog`, `discoverModels`, `resolveCallWithInfo`) over the fake host shows:
+  - the composer is declared-only;
+  - Settings is pi's list plus the missing catalog models;
+  - a user-configured row's efforts and context reach both picker and dispatch unchanged;
+  - an internal-route toggle model offers Off/On.
+- P4's e2e probe confirms the "on" wire value per protocol against the live gateway (opt-in job).
+- Push, open the PR with a Conventional title, and watch CI to green before starting the next phase.
