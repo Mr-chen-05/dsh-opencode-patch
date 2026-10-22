@@ -318,6 +318,44 @@ export const zh: Record<keyof typeof en, string> = {
 export type Translate = (key: keyof typeof en) => string;
 
 /**
+ * A `t` that asks the seat's dictionary first and THIS bundle's second.
+ *
+ * The locale service keeps one dictionary per (namespace, locale) and throws on a
+ * second registration, so whichever copy of this bundle registered first owns the
+ * namespace. A page that outlived a rebuild therefore serves the older dictionary:
+ * every key that existed then translates, and every key added since renders
+ * verbatim — `goPlanTitle` reached the screen that way, and then `storeInspectTitle`
+ * did, on the settings card, because that card still trusted the seat alone.
+ *
+ * The seat still wins when it HAS the key: a host-side translation, or a locale
+ * this bundle does not ship, must keep working. The bundle is the fallback, which
+ * is the case that was missing — a seat's miss is indistinguishable from "this
+ * dictionary predates the key", and the second is what happens here.
+ *
+ * Pure: the locale arrives as a getter, so a language switch lands on the next
+ * call rather than the next mount.
+ *
+ * @param base - the seat's translator, whose misses fall through.
+ * @param active - the active locale id, read per call; absent means English.
+ * @returns a translator that cannot render a key this bundle defines.
+ */
+export const withBundleCopy =
+  <K extends string>(
+    base: (key: K) => string,
+    active?: () => string | undefined
+  ): ((key: K) => string) =>
+  (key: K): string => {
+    const fromSeat = base(key);
+    if (fromSeat !== key) {
+      return fromSeat;
+    }
+    // Widened on purpose: the dictionary is a closed type and the key is whatever
+    // the caller asked for, so a miss is `?? key` rather than a compile error.
+    const dict: Record<string, string> = active?.() === "zh" ? zh : en;
+    return dict[key] ?? key;
+  };
+
+/**
  * Every copy key the dictionaries define.
  *
  * Exported so the field register (`settings-fields.ts`) can type its

@@ -7,6 +7,7 @@ import {
   KEY_SOURCE_POLICIES,
 } from "../src/config-values.ts";
 import { Config } from "../src/index.ts";
+import { en } from "../src/settings-copy.ts";
 import { CARD_FIELDS, CONFIG_ONLY_FIELDS } from "../src/settings-fields.ts";
 import {
   apply,
@@ -1092,9 +1093,12 @@ describe("settings-page: OpencodeCard rendering", () => {
     expect(controls.map((f) => elementName(f.type))).toEqual(
       CARD_FIELDS.map((entry) => COMPONENT_BY_KIND[entry.kind])
     );
-    // Labels come from the register's copy keys, so the two cannot disagree.
+    // Labels come from the register's copy keys, through the card's translator,
+    // so the two cannot disagree. The mock seat translates nothing (it returns
+    // the key), which is why this also pins the bundle fallback: a control whose
+    // copy the seat cannot render must still reach the screen as words.
     expect(controls.map((f) => f.props.label)).toEqual(
-      CARD_FIELDS.map((entry) => entry.labelKey)
+      CARD_FIELDS.map((entry) => en[entry.labelKey])
     );
   });
 
@@ -1122,7 +1126,9 @@ describe("settings-page: OpencodeCard rendering", () => {
     const headings = findAll(renderPage(mountCard()), "GroupHeading");
     const groups = [...new Set(CARD_FIELDS.map((entry) => entry.group))];
     expect(headings).toHaveLength(groups.length);
-    expect(headings.map((heading) => heading.props.label)).toEqual(groups);
+    expect(headings.map((heading) => heading.props.label)).toEqual(
+      groups.map((group) => en[group])
+    );
     // Only the first heading drops the separator rule.
     expect(headings.map((heading) => heading.props.first)).toEqual(
       groups.map((_, index) => index === 0)

@@ -18,7 +18,7 @@ import React from "react";
 
 import { SettingsBooleanField } from "./settings-boolean-field.tsx";
 import { SettingsChoiceField } from "./settings-choice-field.tsx";
-import type { Translate } from "./settings-copy.ts";
+import { withBundleCopy, type Translate } from "./settings-copy.ts";
 import { CARD_FIELDS, FIELD, type CardFieldSpec } from "./settings-fields.ts";
 import type { PurgeOutcome } from "./settings-purge.ts";
 import { StoreInspectRow } from "./settings-store-inspect.tsx";
@@ -210,7 +210,12 @@ const formLabels = (t: Translate) => ({
 });
 
 export const OpencodeCard: React.FC<CardProps> = (props: CardProps) => {
-  const { t } = props;
+  // The seat's dictionary first, this bundle's second. Not a belt-and-braces
+  // measure: the locale service keeps one dictionary per namespace, so a page
+  // that outlived a rebuild serves the older one and renders every newer key
+  // verbatim — `storeInspectTitle` reached the screen exactly that way. The meter
+  // already stopped trusting the seat; the card is the same surface, one row up.
+  const t = withBundleCopy(props.t, props.getLocale);
   if (props.view === "summary") {
     return <>{t("description")}</>;
   }
