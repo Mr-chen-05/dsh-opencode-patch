@@ -45,6 +45,22 @@ export const en = {
   readOpencodeStore: "Read the OpenCode installation's key (default off)",
   readOpencodeStoreHint:
     "Uses the credential OpenCode itself stored, as the LAST resort: a key you declared here or exported always wins. Off by default — turn it on to let this plugin read another tool's credential store.",
+  gapTitle: "Models the catalog offers",
+  gapHint:
+    "Lists the models the live catalog serves that this deployment has not declared. Nothing is added until you say so — the picker shows only what is declared.",
+  gapCheck: "Check catalog",
+  gapBusy: "Checking…",
+  gapAddFree: "Add free models",
+  gapAddBusy: "Adding…",
+  gapAdded: "model(s) added to the declaration",
+  gapNothingAdded: "Nothing to add — those models are already declared.",
+  gapNone:
+    "Nothing undeclared — every catalog model is already in your configuration.",
+  gapCatalogUnread:
+    "The catalog could not be read, so there was nothing to compare against.",
+  gapUnavailable: "This host mounted no catalog service.",
+  gapFailed: "The catalog check failed",
+  gapPaidOnly: "undeclared paid model(s), left alone",
   storeInspect: "Check this machine",
   storeInspectBusy: "Checking…",
   storeInspectTitle: "Local OpenCode installation",
@@ -215,6 +231,20 @@ export const zh: Record<keyof typeof en, string> = {
   readOpencodeStore: "读取 OpenCode 安装的密钥（默认关闭）",
   readOpencodeStoreHint:
     "使用 OpenCode 自己保存的凭据，且仅作为最后兜底：你在此声明或导出的密钥始终优先。默认关闭——开启后本插件才会读取另一个工具的凭据库。",
+  gapTitle: "目录中可用的模型",
+  gapHint:
+    "列出线上目录提供、但当前配置尚未声明的模型。你不点就不会添加——选择器只显示已声明的内容。",
+  gapCheck: "检查目录",
+  gapBusy: "检查中…",
+  gapAddFree: "添加免费模型",
+  gapAddBusy: "添加中…",
+  gapAdded: "个模型已写入声明",
+  gapNothingAdded: "无需添加——这些模型都已声明。",
+  gapNone: "没有未声明的模型——目录里的模型都已写进配置。",
+  gapCatalogUnread: "目录读取失败，因此没有可比较的对象。",
+  gapUnavailable: "当前宿主未挂载目录服务。",
+  gapFailed: "目录检查失败",
+  gapPaidOnly: "个未声明的付费模型（未处理）",
   storeInspect: "检测本机",
   storeInspectBusy: "检测中…",
   storeInspectTitle: "本机 OpenCode 安装",
