@@ -19,7 +19,6 @@ import { purgeRemote } from "./purge-contract.ts";
 import { OpencodeCard } from "./settings-card.tsx";
 import { en, zh } from "./settings-copy.ts";
 import { SPECS } from "./settings-fields.ts";
-import { declareModels, readGap } from "./settings-gap.ts";
 import { purgeDeprecatedModels } from "./settings-purge.ts";
 import { remoteNamespace, remoteNamespaceOf } from "./settings-remote.ts";
 import { inspectStore } from "./settings-store.ts";
@@ -668,11 +667,6 @@ export const apply = (ctx: ClientContext): void => {
                 // host inspects its own OpenCode store and answers a sanitized
                 // summary, so the card can show the account without the secret.
                 inspectStore: () => inspectStore(ctx),
-                // The vendor's catalog against this deployment's declaration: a
-                // read, and the one write that closes the difference.
-                readGap: () => readGap(ctx),
-                declareModels: (route: string, ids: readonly string[]) =>
-                  declareModels(ctx, route, ids),
                 // The sign-in remote, when the host mounted one. Same shape as
                 // the meter's: the card calls, the host holds the credential.
                 ...model.actions(),
