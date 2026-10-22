@@ -57,7 +57,7 @@
 - 🔑 Deterministic `ses_<12hex><14base62>` session hashing with KV-cache affinity across turns, subagents and forks
 - 🌐 Gateway origin restoration — `User-Agent`, `x-opencode-client`, `x-opencode-project`, parent-session lineage
 - 🧰 Free-tier `read` + `bash` tool-schema fallback, so a free-tier body carries the tool definitions its endpoint requires — one cause of a `403` removed, and not the whole of it: the gateway's gate is not in the request, measured
-- 📇 models.dev-backed catalog with offline shims and background SWR refresh — names, context windows, prices
+- 📇 OpenCode-catalog-backed (`models.opencode.ai`, the registry models.dev publishes) with offline shims and background SWR refresh — names, context windows, prices
 - ⭕ Live dual-mode composer meter — Go quota ring (5-hour / weekly / monthly) or Zen pay-as-you-go pill, plus session spend and model rate
 - 🕵️ Strict credential isolation — Zen keys (`oc_sk_…`) never query the Go quota endpoint
 
@@ -123,7 +123,7 @@ Done — the **OpenCode Patch** card appears under _Settings → Plugins_, and t
 | Quotas and balances are invisible | **Live dual-mode composer meter** showing Go quota or Zen pay-as-you-go |
 | Zen keys cause `403 EntitlementError` on Go usage | **Strict credential isolation** keeping Zen keys away from the Go endpoint |
 | Projects share a single `"global"` telemetry bucket | **Dynamic workspace attribution** resolved from the active `session.header.cwd` |
-| Gateway `/models` returns a truncated, unnamed list | **models.dev enrichment** with display names, context windows and prices |
+| Gateway `/models` returns a truncated, unnamed list | **Catalog enrichment** (`models.opencode.ai`) with display names, context windows and prices |
 
 ---
 
@@ -211,15 +211,15 @@ The model list is assembled from four sources, each answering a different questi
 | Source | Answers |
 | :-- | :-- |
 | Bundled shim | what can be offered before any network call — cold start, offline |
-| models.dev | the canonical spec, price and display name |
+| `models.opencode.ai` | the canonical spec, price and display name |
 | The gateway's `/models` | what **this account** actually has |
 | Discovery decoration | what `discoverModels` should answer |
 
-Merging is **additive**: adapter rows are kept, canonical rows are appended when a model is missing, and a row is dropped only when the registry marks it `status: "deprecated"` — a fact, not a guess. Display names and prices come from models.dev, because a gateway listing carries ids and little else.
+Merging is **additive**: adapter rows are kept, canonical rows are appended when a model is missing, and a row is dropped only when the registry marks it `status: "deprecated"` — a fact, not a guess. Display names and prices come from the catalog (`models.opencode.ai`), because a gateway listing carries ids and little else.
 
-Two things follow that you will notice in use. **Cold start is never empty** — the bundled shim answers before the first refresh, so the picker has models immediately. And **a model models.dev has no row for still appears**, with `—` where its rate would be: never a guess, and never the previous model's name.
+Two things follow that you will notice in use. **Cold start is never empty** — the bundled shim answers before the first refresh, so the picker has models immediately. And **a model the catalog has no row for still appears**, with `—` where its rate would be: never a guess, and never the previous model's name.
 
-Both generated files are checked in CI (`catalog:shim`, `limits:shim`); they exit non-zero when the vendor's data moved, which is the only way to notice models.dev changing under you.
+Both generated files are checked in CI (`catalog:shim`, `limits:shim`); they exit non-zero when the vendor's data moved, which is the only way to notice the vendor's registry changing under you.
 
 → Protocol routing, the merge and the UI in technical detail: [`docs/protocol-routing-and-merge.md`](./docs/protocol-routing-and-merge.md) · [中文](./docs/protocol-routing-and-merge.md)
 
@@ -244,7 +244,7 @@ Nine controls in four sections — the decisions a user actually makes. Everythi
 | **Gateway Requests** | Inject User-Agent | `on` | Restores the official OpenCode CLI `User-Agent` so Cloudflare WAF checks pass |
 | **Gateway Requests** | Inject Origin Headers | `on` | Injects `x-opencode-client` (and the origin header set) on gateway traffic |
 | **Gateway Requests** | Attach Workspace Project | `on` | Tags `x-opencode-project` with the active folder name; off omits the header |
-| **Models & Free Tier** | Enrich model metadata from models.dev | `on` | Fills catalog context limits, modalities and thinking levels into model info, and lets the gateway `/models` listing carry the full catalog. Does **not** add models to the picker — the picker shows declared models only; use the card's **Check catalog** row to declare more |
+| **Models & Free Tier** | Enrich model metadata from the OpenCode catalog | `on` | Fills catalog context limits, modalities and thinking levels into model info, and lets the gateway `/models` listing carry the full catalog. Does **not** add models to the picker — the picker shows declared models only; use the card's **Check catalog** row to declare more |
 | **Models & Free Tier** | Inject Core Tools | `on` | Adds the `read` + `bash` schemas free-tier `/responses` bodies require |
 | **Quota Meter** | Enable Composer Usage Meter | `on` | Mounts the live meter in the composer dock — the Go quota ring, or the Zen session spend |
 | **Account & Endpoint** | API Endpoint | `auto` | Which endpoint family requests go to: **Automatic** (follow the catalog) · **Legacy** (`zen/v1`) · **Modern** (`inference/v1`) |
@@ -300,7 +300,7 @@ Per-state behaviour — the trigger's three states, both panels, what every row 
 - **Adaptive ring**: a real-time SVG ring for the window that answers the question. A window that is **out** — rate-limited, or at its cap — is shown, widest first (monthly → weekly → 5-hour), because a monthly cap explains a refusal the 5-hour window does not. Otherwise it shows the **5-hour** window, which resets soonest and so is the one you can still act on. On a **free model** the ring renders hollow in the muted track colour — the plan's limit says nothing about a bill that cannot be charged, and red against `$0.00` would read as "you are out of money".
 - **Semantic colors**: green below 80% (`--dsw-alias-state-success-primary`), amber at ≥80% (`--dsw-alias-state-warn-primary`), red at the cap (`--dsw-alias-state-error-primary`).
 - **Click panel**: three window rows with live reset countdowns and a bar per window, a session-spend row naming the **currently selected** model, a Zen-overflow row, a rate-limited alert, and act-on-it links. Hovering the trigger shows a `Tooltip` listing **every** window (`5 hours 11% · Weekly 33% · Monthly 16%`), because the trigger can print only one of them and the next question is always "and the other two?".
-- **A model the catalog has no price for reads `—`, not `Free`.** The panel names whatever the picker has selected, even when models.dev has no entry for it yet (it syncs on a schedule), because showing the previous model's name is worse than showing no price.
+- **A model the catalog has no price for reads `—`, not `Free`.** The panel names whatever the picker has selected, even when the catalog has no entry for it yet (it syncs on a schedule), because showing the previous model's name is worse than showing no price.
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -396,7 +396,7 @@ These exist in the schema but render no control — each is a literal, a marker,
         originClient: "cli"
         injectProject: true # attach workspace folder (or 'global'); false omits the header
         injectCoreTools: true
-        enrichModels: true # merge models.dev specs + active free models into listings
+        enrichModels: true # merge catalog specs into model info + gateway /models listings
         usageEnabled: true # off = no meter and no price row
         # File-level only debug options:
         debug: false

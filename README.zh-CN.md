@@ -55,7 +55,7 @@
 - 🔑 确定性的 `ses_<12hex><14base62>` 会话哈希，跨轮次、子代理与分叉保持 KV 缓存亲和
 - 🌐 网关来源恢复——`User-Agent`、`x-opencode-client`、`x-opencode-project`、父会话谱系
 - 🧰 免费层 `read` + `bash` 工具 schema 回退，让免费层的请求体带上它的端点所要求的工具定义——这去掉的是 `403` 的一个成因，而不是全部：网关的那道闸不在请求里，实测如此
-- 📇 基于 models.dev 的模型目录，带离线预置与后台 SWR 刷新——名称、上下文窗口、价格
+- 📇 基于 OpenCode 官方目录（`models.opencode.ai`，即 models.dev 发布的那份注册表）的模型目录，带离线预置与后台 SWR 刷新——名称、上下文窗口、价格
 - ⭕ 实时双模式停靠栏计量——Go 额度环（5 小时 / 每周 / 每月）或 Zen 按量计费胶囊，外加会话消耗与模型费率
 - 🕵️ 严格凭据隔离——Zen 密钥（`oc_sk_…`）绝不查询 Go 额度端点
 
@@ -121,7 +121,7 @@ npm install dsh-opencode-patch
 | 额度与余额不可见 | **实时双模式停靠栏计量**，显示 Go 额度或 Zen 按量计费 |
 | Zen 密钥在 Go 用量上触发 `403 EntitlementError` | **严格凭据隔离**，让 Zen 密钥不接触 Go 端点 |
 | 所有项目共用一个 `"global"` 遥测桶 | **动态工作区归属**，由当前 `session.header.cwd` 解析 |
-| 网关 `/models` 返回截断且无名称的列表 | **models.dev 补全**：显示名、上下文窗口与价格 |
+| 网关 `/models` 返回截断且无名称的列表 | **目录补全**（`models.opencode.ai`）：显示名、上下文窗口与价格 |
 
 ---
 
@@ -206,18 +206,18 @@ opencode-responses:
 
 模型清单由四个来源拼成，每个来源回答的是不同的问题：
 
-| 来源             | 回答                                           |
-| :--------------- | :--------------------------------------------- |
-| 内置 shim        | 一次网络请求都还没有时能提供什么——冷启动、离线 |
-| models.dev       | 规范参数、价格与显示名                         |
-| 网关的 `/models` | **这个账号**实际能用什么                       |
-| 发现装饰         | `discoverModels` 该回答什么                    |
+| 来源                 | 回答                                           |
+| :------------------- | :--------------------------------------------- |
+| 内置 shim            | 一次网络请求都还没有时能提供什么——冷启动、离线 |
+| `models.opencode.ai` | 规范参数、价格与显示名                         |
+| 网关的 `/models`     | **这个账号**实际能用什么                       |
+| 发现装饰             | `discoverModels` 该回答什么                    |
 
-合并是**增量式**的：适配器给的行保留，规范行只在缺失时追加，只有当按 provider 记录的退役名单点名某个模型时才省略它——那是事实，不是猜测。显示名与价格取自 models.dev，因为网关列表只给 id，别的几乎没有。
+合并是**增量式**的：适配器给的行保留，规范行只在缺失时追加，只有当按 provider 记录的退役名单点名某个模型时才省略它——那是事实，不是猜测。显示名与价格取自目录（`models.opencode.ai`），因为网关列表只给 id，别的几乎没有。
 
-有两点你在使用中会注意到。**冷启动永远不为空**——内置 shim 在第一次刷新前就能回答，选择器立刻有模型可选。而且**models.dev 里没有条目的模型照样出现**，费率位置显示 `—`：既不猜，也不会退回去显示上一个模型的名字。
+有两点你在使用中会注意到。**冷启动永远不为空**——内置 shim 在第一次刷新前就能回答，选择器立刻有模型可选。而且**目录里没有条目的模型照样出现**，费率位置显示 `—`：既不猜，也不会退回去显示上一个模型的名字。
 
-两个生成文件都在 CI 里校验（`catalog:shim`、`limits:shim`）；厂商数据变动时它们以非零码退出——这是唯一能发现 models.dev 在你背后变了的办法。
+两个生成文件都在 CI 里校验（`catalog:shim`、`limits:shim`）；厂商数据变动时它们以非零码退出——这是唯一能发现厂商注册表在你背后变了的办法。
 
 → 协议路由、合并与界面的技术细节： [`docs/protocol-routing-and-merge.md`](./docs/protocol-routing-and-merge.md) · [English](./docs/protocol-routing-and-merge.md)
 
@@ -242,7 +242,7 @@ opencode-responses:
 | **网关请求** | 恢复 User-Agent（默认开启） | `on` | 恢复官方 OpenCode CLI 的 `User-Agent`，使 Cloudflare WAF 校验通过 |
 | **网关请求** | 注入客户端来源头（默认开启） | `on` | 在网关流量上注入 `x-opencode-client`（以及来源请求头集合） |
 | **网关请求** | 附带工作区项目标识（默认开启） | `on` | 用当前文件夹名标记 `x-opencode-project`；关闭则省略该请求头 |
-| **模型与免费额度** | 用 models.dev 目录补全模型信息（默认开启） | `on` | 把目录的上下文上限、模态与思考档位补进模型信息，并让网关 `/models` 列表带上完整目录。**不会**往选择器里添加模型——选择器只显示已声明的；要添加请用卡片的**检查目录** |
+| **模型与免费额度** | 用 OpenCode 官方目录补全模型信息（默认开启） | `on` | 把目录的上下文上限、模态与思考档位补进模型信息，并让网关 `/models` 列表带上完整目录。**不会**往选择器里添加模型——选择器只显示已声明的；要添加请用卡片的**检查目录** |
 | **模型与免费额度** | 自动补全核心工具（默认开启） | `on` | 补上免费层 `/responses` 请求体所需的 `read` + `bash` schema |
 | **配额计量** | 开启输入区用量计量（默认开启） | `on` | 在输入框停靠栏挂载实时计量表——Go 额度环，或 Zen 会话消耗 |
 | **配额计量** | 显示会话消耗与模型费率（默认开启） | `on` | 追加显示本会话累计花费与当前模型每百万 Token 费率 |
@@ -291,7 +291,7 @@ Go 用量                                             状态正常
 - **自适应环**：实时 SVG 环，显示能回答问题的那个窗口。**已经用尽**的窗口——受限或到达上限——优先显示，从宽到窄（每月 → 每周 → 5 小时），因为月上限能解释一次拒绝，而 5 小时窗口解释不了。否则显示 **5 小时**窗口：它最早重置，是还能行动的那个。**免费模型**上环形以灰色空心显示——套餐上限与一笔无法产生的账单无关，对着 `$0.00` 亮红色会被读成"你的钱用完了"。
 - **语义色**：低于 80% 为绿色（`--dsw-alias-state-success-primary`），≥80% 为琥珀色（`--dsw-alias-state-warn-primary`），达到上限为红色（`--dsw-alias-state-error-primary`）。
 - **点击面板**：三行窗口，各带实时重置倒计时与一条进度条；一行会话消耗，写的是**当前选中的**模型；一行 Zen 余额；一条受限告警；以及可直接处理的链接。悬停触发器显示 `Tooltip`，**列出全部三个窗口**（`5 小时 11% · 每周 33% · 每月 16%`）——触发器只能印一个数字，而下一个问题永远是"另外两个呢？"。
-- **目录里没有价格的模型显示 `—`，不是 `Free`。** 面板始终显示选择器上的模型名，即使 models.dev 还没有它的条目（目录按计划同步）——显示上一个模型的名字比显示没有价格更糟。
+- **目录里没有价格的模型显示 `—`，不是 `Free`。** 面板始终显示选择器上的模型名，即使目录里还没有它的条目（目录按计划同步）——显示上一个模型的名字比显示没有价格更糟。
 
 ```
 ┌──────────────────────────────────────────────┐
@@ -385,7 +385,7 @@ Zen 路线上不出现任何 Go 的数字：根本不画圆环（没有可量的
         originClient: "cli"
         injectProject: true # attach workspace folder (or 'global'); false omits the header
         injectCoreTools: true
-        enrichModels: true # merge models.dev specs + active free models into listings
+        enrichModels: true # merge catalog specs into model info + gateway /models listings
         usageEnabled: true # off = no meter and no price row
         # File-level only debug options:
         debug: false
@@ -404,7 +404,7 @@ Zen 路线上不出现任何 Go 的数字：根本不画圆环（没有可量的
 | `400 MissingSessionID` | 未附带会话请求头 | 确认 `dsh-opencode-patch` 已列入 profile 的 `dsh.profile.bundles` |
 | Auto Review 报 `TRANSPORT: Connection error` | 更新后宿主进程未重启 | 停止并重启 `dsh web`，让新的 `lib/index.mjs` 加载 |
 | Go 模型始终不显示额度环 | 解析不到 Go 凭据，或当前激活的网关不是 `opencode-go` | 在 DSH Credentials 中存储 `OPENCODE_GO_API_KEY`，并经 `opencode-go` 路由 |
-| 目录中的模型在 Settings → Fetch 里缺失，或已下线的模型仍然存在 | 宿主模块过期、补全关闭，或适配器用自带目录作答 | `pnpm run build`、重启 `dsh web`、保持**用 models.dev 目录补全模型信息**开启、从匹配的路由获取、搜索精确 id（如 `space-bunny-free`） |
+| 目录中的模型在 Settings → Fetch 里缺失，或已下线的模型仍然存在 | 宿主模块过期、补全关闭，或适配器用自带目录作答 | `pnpm run build`、重启 `dsh web`、保持**用 OpenCode 官方目录补全模型信息**开启、从匹配的路由获取、搜索精确 id（如 `space-bunny-free`） |
 | 弹出面板以红色显示“已达限额” | 滚动 / 每月窗口已用到 100% | 打开 [OpenCode 控制台](https://opencode.ai/console)并启用 _使用余额（Use balance）_，以溢出到 Zen 额度 |
 | 非 OpenCode 模型行为异常 | 与本补丁无关 | 发往其他网关的流量原样通过 |
 
