@@ -532,14 +532,14 @@ if (releaseYml.includes("scripts/publish-scoped.ts")) {
  * That is the same kind of growth as the last raise — UI, not a dependency — and
  * the client measured 127048 bytes against the old line.
  *
- * Raised 128 -> 140 KB when the catalog-gap row landed. This is the largest
- * single raise so far, and the reason is not one widget: the row brings a
- * contract, a client caller, its own pure report and a per-plane list, plus
- * twenty localized strings in two languages. Nothing in it is a dependency that
- * should have stayed external — the bundle was checked for `node:` and for the
- * pi runtime, and carries neither — so the ceiling moves rather than the content.
+ * The 140 KB raise that the catalog-gap row once justified is REVERTED, together
+ * with the row: the owner's call was that the card should not offer to declare
+ * catalog models at all, so the contract, the caller, the report, the per-plane
+ * list and twenty localized strings left with it. A ceiling that stayed at 140
+ * would have quietly stopped being a tripwire — 12 KB of slack is more than this
+ * guard exists to tolerate.
  */
-const CLIENT_BUDGET = 140 * 1024;
+const CLIENT_BUDGET = 128 * 1024;
 const clientPath = join(ROOT, "lib/client.js");
 if (existsSync(clientPath)) {
   const clientStat = statSync(clientPath);
