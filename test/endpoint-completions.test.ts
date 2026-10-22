@@ -67,7 +67,7 @@ describe("OpenAI v1 Chat Completions Endpoint (/chat/completions)", () => {
       {
         body: {
           messages: [{ content: "hi", role: "user" }],
-          model: "minimax-m3.1-flash-free",
+          model: "beam-free",
           stream: true,
         },
       }
@@ -83,7 +83,7 @@ describe("OpenAI v1 Chat Completions Endpoint (/chat/completions)", () => {
     const req = result.request!;
     expect(req.kind).toBe("completions");
     expect(req.protocol).toBe("openai-completions");
-    expect(req.model).toBe("minimax-m3.1-flash-free");
+    expect(req.model).toBe("beam-free");
     expect(req.headers.authorization).toBe(`Bearer ${ZEN_KEY}`);
     expect(req.headers["x-opencode-session-id"]).toBe(MOCK_SESSION);
   });
@@ -95,7 +95,7 @@ describe("OpenAI v1 Chat Completions Endpoint (/chat/completions)", () => {
       {
         body: {
           messages: [{ content: "hi", role: "user" }],
-          model: "minimax-m3.1-flash-free",
+          model: "beam-free",
           stream: false,
         },
       }

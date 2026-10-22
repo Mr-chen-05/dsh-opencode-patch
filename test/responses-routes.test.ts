@@ -102,9 +102,7 @@ describe("responses-routes: the SDK mapping", () => {
   it("leaves a model naming no SDK on its own route", () => {
     // 53 models carry no override and speak the provider default. Omitting the
     // SDK is how the catalog expresses that — absent, never a placeholder.
-    expect(
-      internalRouteFor("opencode", "minimax-m3.1-flash-free")
-    ).toBeUndefined();
+    expect(internalRouteFor("opencode", "beam-free")).toBeUndefined();
   });
 
   it("redirects a Google model to the route the plugin mounts itself", () => {

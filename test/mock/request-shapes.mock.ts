@@ -447,7 +447,7 @@ describe("the gateway's rules, as measured", () => {
   const freeBody = (tools?: unknown): Record<string, unknown> => ({
     max_tokens: 32,
     messages: [{ content: "hi", role: "user" }],
-    model: "minimax-m3.1-flash-free",
+    model: "beam-free",
     ...(tools === undefined ? {} : { tools }),
   });
 
@@ -586,7 +586,7 @@ describe("keyless: free models still answer", () => {
         `${gateway.origin}/zen/v1/chat/completions`,
         {
           messages: [{ content: "hi", role: "user" }],
-          model: "minimax-m3.1-flash-free",
+          model: "beam-free",
           stream: true,
           tools: [
             {

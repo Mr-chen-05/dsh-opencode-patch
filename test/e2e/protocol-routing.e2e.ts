@@ -18,7 +18,7 @@
  * | model class | its own endpoint | a wrong endpoint |
  * | --- | --- | --- |
  * | free-tier gated (`muse-spark-…-free`) | `403 FreeTierError` | `500 Internal server error` |
- * | unmetered (`minimax-m3.1-flash-free`) | `200`, a real completion | `401 ModelError: not supported for format …` |
+ * | unmetered (`beam-free`) | `200`, a real completion | `401 ModelError: not supported for format …` |
  * | **paid** (`claude-*`, `gpt-*`) | `401 AuthError` | `401 AuthError` — **identical** |
  *
  * That last row is why the paid cases are keyed and skip without a secret: for a
@@ -246,7 +246,7 @@ const otherProtocols = (expected: string) =>
  *
  * Measured, one request each, on `step-5-preview-free` — which was the canonical
  * free-tier id when those runs were made and has since been retired, so the
- * cases below now sample `minimax-m3.1-flash-free`: the deployment's `oc_…` key answers
+ * cases below now sample `beam-free`: the deployment's `oc_…` key answers
  * `403 FreeTierError` on both `…/zen/v1` and the new `…/inference/openai/v1`,
  * with and without `x-opencode-org-id`; the literal `public` answers the same;
  * and the real client — whose captured request carries an `st_…` session token —

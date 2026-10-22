@@ -147,7 +147,7 @@ describe("mergeDiscoveredModels", () => {
     );
 
     // **Exactly what the adapter reported.** The catalog supplies metadata, not
-    // rows: a refresh must not widen the deployment's list, so `minimax-m3.1-flash-free`
+    // rows: a refresh must not widen the deployment's list, so `beam-free`
     // — catalogued, servable, and NOT declared here — stays out.
     expect(merged.map((model) => model.id)).toEqual([
       "adapter-model",
@@ -311,8 +311,10 @@ describe("decorateModelDiscovery", () => {
     // list, but we shouldn't override the user's config for what is usable*. The
     // join made Settings list models the deployment never declared.
     //
-    // The refresh adds nothing the adapter did not answer.
-    expect(ids).not.toContain("minimax-m3.1-flash-free");
+    // The refresh adds nothing the adapter did not answer. The free model the
+    // catalog knows is `mimo-v2.6-flash-free` — a DIFFERENT one from the row the
+    // adapter answered, so the assertion is about the join and not about a name.
+    expect(ids).not.toContain("mimo-v2.6-flash-free");
     expect(ids).toHaveLength(1);
     // Kept, not removed: it answers on zen, so it is not retired.
     expect(ids).toContain("beam-free");
@@ -557,15 +559,13 @@ describe("models-discovery: I1's second clause, for a model no catalog describes
   });
 
   it("offers Zen's free tier models normally", () => {
-    expect(isServableModel("minimax-m3.1-flash-free", "opencode")).toBe(true);
-    expect(isServableModel("minimax-m3.1-flash-free", "opencode")).toBe(true);
+    expect(isServableModel("beam-free", "opencode")).toBe(true);
+    expect(isServableModel("beam-free", "opencode")).toBe(true);
     expect(isServableModel("beam-free", "opencode")).toBe(true);
   });
 
   it("still offers the Go plane's free models, because Go has no free tier", () => {
-    expect(isServableModel("minimax-m3.1-flash-free", "opencode-go")).toBe(
-      true
-    );
+    expect(isServableModel("beam-free", "opencode-go")).toBe(true);
     expect(isServableModel("beam-free", "opencode-go")).toBe(true);
     // And a paid Zen model is untouched by the free-tier rule.
     expect(isServableModel("deepseek-v4.1-flash", "opencode")).toBe(true);
@@ -726,7 +726,7 @@ describe("models-discovery: the adapter behind a plane route", () => {
     const own = {
       context: { contextWindow: 999 },
       defaultMaxTokens: 12345,
-      id: "minimax-m3.1-flash-free",
+      id: "beam-free",
       inputModalities: ["text"],
       name: "Its Own Name",
       provider: "opencode",
@@ -739,7 +739,7 @@ describe("models-discovery: the adapter behind a plane route", () => {
     );
     const resolved = (await resolveOn(llm, "opencode")(
       "opencode",
-      "minimax-m3.1-flash-free"
+      "beam-free"
     )) as Record<string, unknown>;
     // Every field the adapter answered is kept: it is what dispatch honours.
     expect(resolved).toMatchObject(own);
@@ -908,10 +908,10 @@ describe("models-discovery: the adapter behind a plane route", () => {
 
   it("hands back the adapter's own object when it already takes every offered level", () => {
     // The no-op branch: nothing is filled, so dispatch keeps the object the
-    // adapter made rather than an equal copy - `minimax-m3.1-flash-free` ships a
+    // adapter made rather than an equal copy - `beam-free` ships a
     // complete map, so there is nothing to add.
     const own = {
-      id: "minimax-m3.1-flash-free",
+      id: "beam-free",
       reasoning: true,
       thinkingLevelMap: {
         high: "high",
@@ -931,13 +931,9 @@ describe("models-discovery: the adapter behind a plane route", () => {
       resolveConfig({ enrichModels: true })
     );
 
-    expect(
-      modelOfOn(llm, "opencode")(
-        undefined,
-        "opencode",
-        "minimax-m3.1-flash-free"
-      )
-    ).toBe(own);
+    expect(modelOfOn(llm, "opencode")(undefined, "opencode", "beam-free")).toBe(
+      own
+    );
 
     stop?.();
   });
@@ -1434,27 +1430,25 @@ describe("models-discovery: a keyless deployment is offered only what it can cal
 
   it("drops the priced model when no credential resolves", async () => {
     const ids = await listedFor(
-      hostListing(["gpt-5.4", "minimax-m3.1-flash-free"]),
+      hostListing(["gpt-5.4", "beam-free"]),
       () => false
     );
-    expect(ids).toEqual(["minimax-m3.1-flash-free"]);
+    expect(ids).toEqual(["beam-free"]);
   });
 
   it("keeps every model when the plane does hold a credential", async () => {
     const ids = await listedFor(
-      hostListing(["gpt-5.4", "minimax-m3.1-flash-free"]),
+      hostListing(["gpt-5.4", "beam-free"]),
       () => true
     );
-    expect(ids).toEqual(["gpt-5.4", "minimax-m3.1-flash-free"]);
+    expect(ids).toEqual(["gpt-5.4", "beam-free"]);
   });
 
   it("leaves the list untouched when the caller does not ask", async () => {
     // The default is "do not narrow": a caller that cannot tell must not hide
     // models a deployment can actually use.
-    const ids = await listedFor(
-      hostListing(["gpt-5.4", "minimax-m3.1-flash-free"])
-    );
-    expect(ids).toEqual(["gpt-5.4", "minimax-m3.1-flash-free"]);
+    const ids = await listedFor(hostListing(["gpt-5.4", "beam-free"]));
+    expect(ids).toEqual(["gpt-5.4", "beam-free"]);
   });
 });
 
@@ -1465,7 +1459,7 @@ describe("models-discovery · the endpoint a model is dispatched to", () => {
     plan: { model?: string; route?: string } = {}
   ): Promise<unknown> => {
     const route = plan.route ?? "opencode";
-    const model = plan.model ?? "minimax-m3.1-flash-free";
+    const model = plan.model ?? "beam-free";
     const answer = () => ({
       context: { contextWindow: 999 },
       id: model,
