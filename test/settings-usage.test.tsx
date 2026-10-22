@@ -88,6 +88,16 @@ describe("settings: Go usage summary", () => {
     expect(body).not.toContain("%");
   });
 
+  it("says refreshing when a refresh is actively running", () => {
+    const refreshing = UsageSummaryView({
+      locale: "zh",
+      refreshing: true,
+      t,
+      usage: undefined,
+    });
+    expect(text(refreshing)).toContain(t("usageRefreshing"));
+  });
+
   it("states the monthly allowance as a total, for both tiers", () => {
     const view = UsageSummaryView({
       locale: "zh",
@@ -141,6 +151,13 @@ describe("settings: reading the quota through the Host", () => {
     await expect(readGoUsage(scopeWith(async () => valid))).resolves.toEqual(
       valid
     );
+  });
+
+  it("propagates an error from an unfulfilled result envelope", async () => {
+    const error = new Error("quota service unavailable");
+    await expect(
+      readGoUsage(scopeWith(async () => ({ ok: false, error })))
+    ).rejects.toBe(error);
   });
 
   it("rejects a payload that is not a reading", async () => {
@@ -210,8 +227,10 @@ describe("settings: the summary container", () => {
   it("shows the unavailable state when the read rejects", async () => {
     const view = render(
       <UsageSummary
+        attempts={1}
         getLocale={() => "zh"}
         readUsage={() => Promise.reject(new Error("no key"))}
+        sleep={() => Promise.resolve()}
         t={t}
       />
     );

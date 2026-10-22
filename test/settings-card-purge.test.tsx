@@ -11,6 +11,10 @@ import React, { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
+(
+  globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
 import { OpencodeCard, purgeLine } from "../src/settings-card.tsx";
 
 /**
@@ -277,6 +281,7 @@ describe("settings-card: the states that only exist after an interaction", () =>
         })
     );
     const {
+      act,
       host,
       settle: flush,
       cleanup,
@@ -287,7 +292,9 @@ describe("settings-card: the states that only exist after an interaction", () =>
       );
       expect(button, "the purge button must be rendered").toBeDefined();
 
-      button?.click();
+      act(() => {
+        button?.click();
+      });
       await flush();
       // The label changed while the request is outstanding.
       const busy = [...host.querySelectorAll("button")].some((b) =>
@@ -295,7 +302,9 @@ describe("settings-card: the states that only exist after an interaction", () =>
       );
       expect(busy, "the button reports the in-flight state").toBe(true);
 
-      settle({ kind: "purged", result: { catalogRead: true, removed: [] } });
+      act(() => {
+        settle({ kind: "purged", result: { catalogRead: true, removed: [] } });
+      });
       await flush();
       // And the outcome line is rendered once it lands.
       expect(host.textContent).toContain("purgeNothing");
@@ -305,14 +314,16 @@ describe("settings-card: the states that only exist after an interaction", () =>
   });
 
   it("shows a refusal as a warning line", async () => {
-    const { host, settle, cleanup } = await mountCard({
+    const { act, host, settle, cleanup } = await mountCard({
       purgeDeprecated: async () => ({ kind: "failed", message: "boom" }),
     });
     try {
       const button = [...host.querySelectorAll("button")].find((b) =>
         (b.textContent ?? "").includes("purgeAction")
       );
-      button?.click();
+      act(() => {
+        button?.click();
+      });
       await settle();
       expect(host.textContent).toContain("purgeFailed");
     } finally {
