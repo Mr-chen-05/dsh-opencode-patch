@@ -329,7 +329,7 @@ export const patchFetch = (
         ];
         console.warn(
           `[dsh-opencode-patch] no credential resolved for ${plane}; sending the adapter's placeholder, which the gateway answers with 401. Consulted: ${sources.join("; ")}.`,
-          "set a key on the route or its env var, or sign in through the settings card"
+          "set a key on the route or its env var, or turn on readOpencodeStore to use the key an OpenCode installation already holds"
         );
       }
     }

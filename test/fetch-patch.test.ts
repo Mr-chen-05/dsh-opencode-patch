@@ -92,6 +92,9 @@ describe("patchFetch", () => {
       "a key captured from a live request (policy auto): none"
     );
     expect(line).toContain("not enabled");
+    // The advice names a path this build has: there is no sign-in row here.
+    expect(line).not.toContain("sign in");
+    expect(line).toContain("readOpencodeStore");
   });
 
   it("does NOT report a missing key on a plane that offers free models", async () => {
