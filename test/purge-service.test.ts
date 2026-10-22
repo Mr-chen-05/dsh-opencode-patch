@@ -9,7 +9,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { parseModelsDevCatalog } from "../src/models-catalog.ts";
-import { ModelPurgeService } from "../src/purge-service.ts";
+import {
+  ModelPurgeService,
+  stripRetiredReferences,
+} from "../src/purge-service.ts";
 import { createMockContext } from "./test-helpers.ts";
 
 /** A registry reply with one retired id per plane and one live id beside it. */
@@ -364,5 +367,194 @@ describe("purge: the shapes a config editor can take", () => {
     ).purge();
     // A retired bare-string row is removable; a live object row is kept.
     expect(result.removed.map((r) => r.id)).toContain("fledge-alpha-free");
+  });
+});
+
+describe("purge: references that are not provider declarations", () => {
+  /** A catalog where `retired-free` is deprecated on zen and `live-free` is not. */
+  /** A fetch that answers with THIS describe's registry, not the file's default. */
+  const answers = (payload: unknown) => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve({ json: async () => payload, ok: true })
+    );
+  };
+
+  const twoModelRegistry = () => ({
+    opencode: {
+      models: {
+        "live-free": { name: "Live", limit: { context: 1_000 } },
+        "retired-free": { status: "deprecated" },
+      },
+    },
+  });
+
+  it("drops a subagent entry that names a retired model, and keeps the rest", async () => {
+    // The shape that made the button lie: `allowedModels` declares no provider,
+    // so the provider sweep never looked at it.
+    parseModelsDevCatalog(twoModelRegistry());
+    answers(twoModelRegistry());
+    const providerEntry = {
+      options: {
+        config: {
+          providers: {
+            opencode: { models: [{ id: "retired-free" }, { id: "live-free" }] },
+          },
+        },
+      },
+    };
+    const subagentEntry = {
+      options: {
+        config: {
+          allowedModels: [
+            { model: "retired-free", provider: "opencode" },
+            { model: "live-free", provider: "opencode" },
+            { model: "something-else", provider: "nvidia" },
+          ],
+        },
+      },
+    };
+    const edit = vi.fn(
+      async (
+        entry: unknown,
+        change: (current: Record<string, unknown>) => Record<string, unknown>
+      ) => {
+        const holder = entry as {
+          options: { config: Record<string, unknown> };
+        };
+        holder.options.config = change(holder.options.config);
+      }
+    );
+    const editor = {
+      edit,
+      entries: () => [providerEntry, subagentEntry],
+    };
+
+    const result = await new ModelPurgeService(ctxWith(editor)).purge();
+
+    expect(result.removed).toEqual([
+      { id: "retired-free", provider: "opencode" },
+      { id: "retired-free", provider: "opencode", site: "subagent" },
+    ]);
+    const allowed = subagentEntry.options.config.allowedModels as unknown[];
+    expect(allowed).toEqual([
+      { model: "live-free", provider: "opencode" },
+      { model: "something-else", provider: "nvidia" },
+    ]);
+  });
+
+  it("clears the compaction summariser PAIR when its model was retired", async () => {
+    // Leaving `summarizationProvider` behind would ask for a default model on a
+    // named route; both keys go so the entry falls back to its own defaults.
+    parseModelsDevCatalog(twoModelRegistry());
+    answers(twoModelRegistry());
+    const providerEntry = {
+      options: {
+        config: {
+          providers: { opencode: { models: [{ id: "live-free" }] } },
+        },
+      },
+    };
+    const compactionEntry = {
+      options: {
+        config: {
+          summarizationModel: "retired-free",
+          summarizationProvider: "opencode",
+          thresholdRatio: 0.8,
+        },
+      },
+    };
+    const edit = vi.fn(
+      async (
+        entry: unknown,
+        change: (current: Record<string, unknown>) => Record<string, unknown>
+      ) => {
+        const holder = entry as {
+          options: { config: Record<string, unknown> };
+        };
+        holder.options.config = change(holder.options.config);
+      }
+    );
+    const editor = { edit, entries: () => [providerEntry, compactionEntry] };
+
+    const result = await new ModelPurgeService(ctxWith(editor)).purge();
+
+    expect(result.removed).toEqual([
+      { id: "retired-free", provider: "opencode", site: "summarizer" },
+    ]);
+    expect(compactionEntry.options.config).toEqual({ thresholdRatio: 0.8 });
+  });
+
+  it("does not rewrite an entry with nothing to strip", async () => {
+    // An unconditional edit would mark every entry dirty on every click.
+    parseModelsDevCatalog(twoModelRegistry());
+    answers(twoModelRegistry());
+    const providerEntry = {
+      options: {
+        config: { providers: { opencode: { models: [{ id: "live-free" }] } } },
+      },
+    };
+    const untouched = {
+      options: {
+        config: {
+          allowedModels: [{ model: "live-free", provider: "opencode" }],
+          summarizationModel: "live-free",
+          summarizationProvider: "opencode",
+        },
+      },
+    };
+    const edit = vi.fn(async () => null);
+    const editor = { edit, entries: () => [providerEntry, untouched] };
+
+    const before = JSON.stringify(untouched.options.config);
+
+    await new ModelPurgeService(ctxWith(editor)).purge();
+
+    // The provider entry is edited once by the provider sweep (it decides inside
+    // the edit). The REFERENCE entry must not be touched at all — an
+    // unconditional edit would mark every entry dirty on every click.
+    expect(edit).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(untouched.options.config)).toBe(before);
+  });
+});
+
+describe("purge: the pure reference stripper", () => {
+  const retired = (provider: string, id: string): boolean =>
+    provider === "opencode" && id === "retired-free";
+
+  it("leaves a config with no references untouched, by identity", () => {
+    const config = { other: 1 };
+    const { next, removed } = stripRetiredReferences(config, retired);
+    expect(next).toBe(config);
+    expect(removed).toEqual([]);
+  });
+
+  it("ignores malformed allowedModels rows rather than dropping them", () => {
+    const config = {
+      allowedModels: [null, "x", { model: 42 }, { provider: "opencode" }],
+    };
+    const { next, removed } = stripRetiredReferences(config, retired);
+    expect(next).toBe(config);
+    expect(removed).toEqual([]);
+  });
+
+  it("strips a retired row and reports where it was", () => {
+    const { next, removed } = stripRetiredReferences(
+      { allowedModels: [{ model: "retired-free", provider: "opencode" }] },
+      retired
+    );
+    expect(next.allowedModels).toEqual([]);
+    expect(removed).toEqual([
+      { id: "retired-free", provider: "opencode", site: "subagent" },
+    ]);
+  });
+
+  it("keeps a summariser whose model is still live", () => {
+    const config = {
+      summarizationModel: "live-free",
+      summarizationProvider: "opencode",
+    };
+    const { next, removed } = stripRetiredReferences(config, retired);
+    expect(next).toBe(config);
+    expect(removed).toEqual([]);
   });
 });

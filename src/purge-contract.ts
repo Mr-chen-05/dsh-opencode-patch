@@ -13,12 +13,24 @@ import type {
   TypertRemoteContribution,
 } from "@deepseek-ai/dsh-typert-protocol";
 
-/** One model removed from the deployment's own provider declaration. */
+/**
+ * Where a retired model id was found.
+ *
+ * `provider` is a declaration (the list the picker reads). The other two are
+ * REFERENCES to a model by id, in a surface that does not list models at all —
+ * and they are the ones a purge used to miss, which made the button report
+ * success while a retired id was still the compaction summariser.
+ */
+export type PurgedSite = "provider" | "subagent" | "summarizer";
+
+/** One retired model reference removed from the deployment's profile. */
 export interface PurgedModel {
   /** The provider route it was declared on, e.g. `opencode-go`. */
   readonly provider: string;
   /** The model id, as the profile spelled it. */
   readonly id: string;
+  /** Where it was found. Absent is read as `provider`, for older callers. */
+  readonly site?: PurgedSite;
 }
 
 /** The outcome of one purge. */
@@ -70,7 +82,13 @@ export const parsePurgeResult = (value: unknown): PurgeResult | undefined => {
     if (!isPurgedModel(row)) {
       return undefined;
     }
-    rows.push({ id: row.id, provider: row.provider });
+    rows.push({
+      id: row.id,
+      provider: row.provider,
+      ...(typeof (row as { site?: unknown }).site === "string"
+        ? { site: (row as { site: PurgedSite }).site }
+        : {}),
+    });
   }
   return { catalogRead, removed: rows };
 };
