@@ -77,7 +77,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run test
+      # Shuffled here, and in order in the main job: the two runs together show a
+      # case that passes only because of what an earlier case left behind. The
+      # seed is printed, so a failure reproduces with `--sequence.seed=<n>`.
+      - run: pnpm run test:shuffle
       - run: pnpm run test:mock
 
   # The bundled catalog is generated from models.dev, and the one field that went

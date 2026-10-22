@@ -60,3 +60,19 @@ describe("node-engine guard", () => {
     expect(ci).toContain(`node-version: ${pinned}`);
   });
 });
+
+describe("offline guard", () => {
+  it("is installed, refuses a public host and admits loopback", async () => {
+    const { hostOf, offlineFetch } = await import("./support/offline.ts");
+    // Installed for this file, the way the config promises.
+    expect(globalThis.fetch).toBe(offlineFetch);
+    await expect(
+      offlineFetch("https://models.opencode.ai/api.json")
+    ).rejects.toThrow(
+      /offline test suite: refused a request to models\.opencode\.ai/u
+    );
+    expect(hostOf(new URL("http://127.0.0.1:1/x"))).toBe("127.0.0.1");
+    expect(hostOf(new Request("http://localhost/x"))).toBe("localhost");
+    expect(hostOf("not a url")).toBe("");
+  });
+});

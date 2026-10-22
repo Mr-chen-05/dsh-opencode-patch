@@ -173,6 +173,14 @@ export default defineConfig({
     // Stops the run on a Node below `engines.node`, before any file is
     // collected. Inherited by the mock and e2e configs, which spread this one.
     globalSetup: ["test/support/node-engine.ts"],
+    // `offline` refuses non-loopback requests, so no case depends on what the
+    // vendor's catalog says today. `reset-process-state` clears the plugin's
+    // module-level stores after every test, so a case cannot pass or fail on
+    // what an earlier case in the same file left. The e2e config drops the first.
+    setupFiles: [
+      "test/support/offline.ts",
+      "test/support/reset-process-state.ts",
+    ],
     include: ["test/**/*.test.ts", "test/**/*.test.tsx"],
     /**
      * Coverage over `src/` only.

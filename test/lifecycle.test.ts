@@ -21,6 +21,7 @@ import {
   RESPONSES_ROUTE,
 } from "../src/index.ts";
 import { mountInternalRoutes } from "../src/lifecycle.ts";
+import { findModelSpecOn } from "../src/models-catalog.ts";
 import {
   collectUnknown,
   createMockStream,
@@ -851,6 +852,58 @@ describe("apply (plugin lifecycle)", () => {
     expect(recorded?.activeModel).toBe("deepseek-v4.1-flash");
     // Priced from the catalog's Go rate rather than a hardcoded number.
     expect(recorded?.costUsd).toBeGreaterThan(0);
+  });
+
+  it("prices a turn at the rate of the plane its route belongs to", async () => {
+    // The planes price some shared ids differently. A Go-first lookup billed
+    // every Zen turn on those at the Go rate, so each plane is checked here
+    // against its own catalog row rather than against a hardcoded number.
+    clearSessionUsageStore();
+    let streamHandler:
+      | ((options: unknown, next: () => unknown) => unknown)
+      | undefined;
+    const ctx: CordisContext = {
+      effect: () => {},
+      on: (
+        _event: string,
+        handler: (options: unknown, next: () => unknown) => unknown
+      ) => {
+        streamHandler = handler;
+      },
+    };
+    apply(ctx);
+    const model = "deepseek-v4-pro";
+    const go = findModelSpecOn("go", model)?.cost?.input;
+    const zen = findModelSpecOn("zen", model)?.cost?.input;
+    // The case only means something while the planes disagree.
+    expect(go).toBeTypeOf("number");
+    expect(zen).toBeTypeOf("number");
+    expect(go).not.toBe(zen);
+
+    const runTurn = async (provider: string, sessionId: string) => {
+      const down = async function* down() {
+        yield {
+          type: "usage",
+          usage: {
+            inputTokens: 1_000_000,
+            outputTokens: 0,
+            totalTokens: 1_000_000,
+          },
+        };
+      };
+      const result: unknown = streamHandler?.(
+        { model, provider, sessionId },
+        () => down()
+      );
+      if (!isAsyncIterableLike(result)) {
+        throw new Error("expected async iterable downstream");
+      }
+      await collectUnknown(result);
+      return getSessionUsage(sessionId)?.costUsd;
+    };
+
+    expect(await runTurn("opencode-go", "plane-go")).toBeCloseTo(go ?? 0, 6);
+    expect(await runTurn("opencode", "plane-zen")).toBeCloseTo(zen ?? 0, 6);
   });
 
   it("ignores non-opencode providers and invalid session IDs", () => {
