@@ -97,11 +97,12 @@ const literal = (spec: CatalogModelSpec): string => {
 const render = (specs: readonly CatalogModelSpec[]): string =>
   `[\n${specs.map((spec) => `${literal(spec)},`).join("\n")}\n]`;
 
-/** The models one provider contributes. */
+/** The models one provider contributes, sorted deterministically by id. */
 const forProvider = (
   parsed: ReturnType<typeof parseModelsDevCatalog>,
   provider: "go" | "zen"
-): CatalogModelSpec[] => parsed[provider];
+): CatalogModelSpec[] =>
+  parsed[provider].toSorted((a, b) => a.id.localeCompare(b.id));
 
 /**
  * Replace one exported object literal, by its `export const NAME` anchor.
