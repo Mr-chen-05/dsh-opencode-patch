@@ -9,9 +9,9 @@
 export const en = {
   description:
     "OpenCode Zen gateway origin headers, session affinity, free-tier compatibility, and live Go quota display.",
-  enrichModels: "Enrich Models from Models.dev (default on)",
+  enrichModels: "Enrich model metadata from models.dev (default on)",
   enrichModelsHint:
-    "Merges canonical specifications, active free models, and accurate context limits from models.dev into OpenCode model listings. Turn off to keep raw gateway listings.",
+    "Fills the catalog's context limits, modalities and thinking levels into OpenCode's model info, and lets the gateway's /models listing carry the full catalog. It does NOT add models to the picker — the picker shows only what you declared; use \"Check catalog\" above for that. Off leaves both the listing and the model info as the gateway sent them.",
   endpoint: "API Endpoint",
   endpointAuto: "Automatic (follow the catalog)",
   endpointHint:
@@ -195,9 +195,9 @@ export const en = {
 export const zh: Record<keyof typeof en, string> = {
   description:
     "OpenCode Zen 网关来源头恢复、会话保持、免费模型兼容与 Go 实时额度显示。",
-  enrichModels: "使用 models.dev 补全模型列表（默认开启）",
+  enrichModels: "用 models.dev 目录补全模型信息（默认开启）",
   enrichModelsHint:
-    "将 models.dev 的规范参数、当前免费模型与准确的上下文上限合并进 OpenCode 模型列表。关闭后保留网关原始列表。",
+    "把目录里的上下文上限、模态与思考档位补进 OpenCode 的模型信息，并让网关 /models 列表带上完整目录。它不会往选择器里添加模型——选择器只显示你声明的那些，要添加请用上面的「检查目录」。关闭后网关列表与模型信息都保持原样。",
   injectCoreTools: "自动补全核心工具（默认开启）",
   injectCoreToolsHint:
     "在免费模型请求中自动注入 read 和 bash 工具声明以满足网关校验。留空沿用默认值。",
