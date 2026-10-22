@@ -526,8 +526,13 @@ if (releaseYml.includes("scripts/publish-scoped.ts")) {
  * and settings surfaces, hundreds of bytes at a time. Nothing in the curve is a
  * dependency that should have stayed external, which is the case this tripwire
  * exists to catch.
+ *
+ * Raised 124 -> 128 KB when the local-store inspection row landed: a heading, a
+ * hint, one button and the report it renders, plus their two localized copies.
+ * That is the same kind of growth as the last raise — UI, not a dependency — and
+ * the client measured 127048 bytes against the old line.
  */
-const CLIENT_BUDGET = 124 * 1024;
+const CLIENT_BUDGET = 128 * 1024;
 const clientPath = join(ROOT, "lib/client.js");
 if (existsSync(clientPath)) {
   const clientStat = statSync(clientPath);

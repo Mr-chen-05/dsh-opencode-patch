@@ -19,8 +19,10 @@ import React from "react";
 import { SettingsBooleanField } from "./settings-boolean-field.tsx";
 import { SettingsChoiceField } from "./settings-choice-field.tsx";
 import type { Translate } from "./settings-copy.ts";
-import { CARD_FIELDS, type CardFieldSpec } from "./settings-fields.ts";
+import { CARD_FIELDS, FIELD, type CardFieldSpec } from "./settings-fields.ts";
 import type { PurgeOutcome } from "./settings-purge.ts";
+import { StoreInspectRow } from "./settings-store-inspect.tsx";
+import type { StoreInspectOutcome } from "./settings-store.ts";
 import { UsageSummary } from "./settings-usage.tsx";
 import type { GoUsage } from "./usage-contract.ts";
 
@@ -180,6 +182,12 @@ export interface CardProps {
    */
   purgeDeprecated?: () => Promise<PurgeOutcome>;
   /**
+   * The Host's local-store inspection, absent when no store service is mounted.
+   * Rendered only when present, for the same reason the purge row is: a button
+   * that cannot act invites a click that explains nothing.
+   */
+  inspectStore?: () => Promise<StoreInspectOutcome>;
+  /**
    * The Host's sign-in remote. Never absent: the page always hands over the three
    * calls, and each resolves the service when it is invoked, so a remote that mounts
    * late is still reached and a host that mounts none shows a row that says so.
@@ -322,6 +330,21 @@ export const OpencodeCard: React.FC<CardProps> = (props: CardProps) => {
       >
         {CARD_FIELDS.flatMap((entry, index) => {
           const control = controlFor(entry);
+          // The permission and the evidence for it travel together: the switch
+          // says what MAY be read, the row says what IS there. Splitting them
+          // across the card is what left "turn this on" as a blind choice.
+          const beside =
+            entry.field === FIELD.readOpencodeStore &&
+            props.inspectStore !== undefined
+              ? [
+                  <StoreInspectRow
+                    getLocale={props.getLocale}
+                    key="store-inspect"
+                    onInspect={props.inspectStore}
+                    t={t}
+                  />,
+                ]
+              : [];
           // The register keeps each group's entries contiguous, so a heading is
           // inserted exactly where the group changes — no second list of sections
           // to drift out of step with the fields.
@@ -335,8 +358,9 @@ export const OpencodeCard: React.FC<CardProps> = (props: CardProps) => {
                   label={t(entry.group)}
                 />,
                 control,
+                ...beside,
               ]
-            : [control];
+            : [control, ...beside];
         })}
       </SettingsForm>
     </div>

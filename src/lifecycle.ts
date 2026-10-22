@@ -43,6 +43,8 @@ import {
   decoratePlaneAdapters,
   hideResponsesRoute,
 } from "./models-discovery.ts";
+import { STORE_NAMESPACE } from "./opencode-store-contract.ts";
+import { OpencodeStoreService } from "./opencode-store-service.ts";
 import { ModelPurgeService } from "./purge-service.ts";
 import { registerResponsesProvider } from "./responses-provider.ts";
 import { isServableSdk } from "./responses-routes.ts";
@@ -311,6 +313,29 @@ const installPurgeService = (ctx: CordisContext): void => {
   }
 };
 
+const storeMountedOn = new WeakSet<object>();
+
+const installStoreService = (ctx: CordisContext): void => {
+  const root: CordisContext = ctx.root ?? ctx;
+  if (storeMountedOn.has(root)) {
+    return;
+  }
+  storeMountedOn.add(root);
+  if (typeof ctx.plugin !== "function") {
+    mountByProvide(ctx, STORE_NAMESPACE, OpencodeStoreService);
+    return;
+  }
+  try {
+    root.plugin?.(OpencodeStoreService);
+  } catch (error) {
+    storeMountedOn.delete(root);
+    console.warn(
+      "[dsh-opencode-patch] the opencode store inspection service did not mount",
+      error
+    );
+  }
+};
+
 const installFetchPatch = (
   ctx: CordisContext,
   config: ResolvedPluginConfig,
@@ -531,6 +556,7 @@ export const apply = (
   logRenameNotice(ctx);
   installUsageService(ctx, config);
   installPurgeService(ctx);
+  installStoreService(ctx);
 
   if (!installFetchPatch(ctx, config, als)) {
     return;

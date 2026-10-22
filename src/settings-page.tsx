@@ -21,6 +21,7 @@ import { en, zh } from "./settings-copy.ts";
 import { SPECS } from "./settings-fields.ts";
 import { purgeDeprecatedModels } from "./settings-purge.ts";
 import { remoteNamespace, remoteNamespaceOf } from "./settings-remote.ts";
+import { inspectStore } from "./settings-store.ts";
 import { readGoUsage } from "./settings-usage.tsx";
 import { usageRemote } from "./usage-contract.ts";
 import { UsagePill } from "./usage-pill.tsx";
@@ -662,6 +663,10 @@ export const apply = (ctx: ClientContext): void => {
                 // The profile rewrite: needs the host's config editor, so it is a
                 // Remote, and the card shows its outcome rather than assuming one.
                 purgeDeprecated: () => purgeDeprecatedModels(ctx),
+                // What the readOpencodeStore switch would actually read: the
+                // host inspects its own OpenCode store and answers a sanitized
+                // summary, so the card can show the account without the secret.
+                inspectStore: () => inspectStore(ctx),
                 // The sign-in remote, when the host mounted one. Same shape as
                 // the meter's: the card calls, the host holds the credential.
                 ...model.actions(),
