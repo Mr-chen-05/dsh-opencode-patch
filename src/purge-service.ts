@@ -80,6 +80,88 @@ const idOf = (model: unknown): string | undefined => {
   return undefined;
 };
 
+/**
+ * Whether `id` is retired on a route this plugin owns.
+ *
+ * A route this plugin does not own answers `false`: another vendor's model ids
+ * are not ours to retire, and guessing would delete references we cannot check.
+ *
+ * @param route - the provider route, as the profile spells it.
+ * @param id - the model id.
+ * @returns whether our catalog has retired it.
+ */
+const isRetiredOnOwnedRoute = (route: string, id: string): boolean => {
+  const plane = PLANES.find((candidate) => candidate.route === route)?.plane;
+  return plane !== undefined && isDeprecatedModelOn(plane, id);
+};
+
+/**
+ * Remove every reference to a retired model from one entry's config.
+ *
+ * PURE, and exported because this is the half that used to be missing: `purge()`
+ * rewrote `providers.<route>.models` and nothing else, so a retired id could
+ * disappear from the picker while remaining the compaction summariser — the
+ * button said "3 models removed" and left a session-breaking reference behind.
+ *
+ * Two reference shapes exist in a DSH profile:
+ *
+ * 1. `allowedModels: [{ provider, model }]` — the subagent tool's selection.
+ * 2. `summarizationProvider` / `summarizationModel` — compaction's summariser,
+ *    which is a PAIR: removing the model and leaving the provider would ask for a
+ *    default model on a named route, so both keys go and the entry falls back to
+ *    its own defaults.
+ *
+ * @param config - the entry's config, verbatim.
+ * @param isRetired - whether this plugin's catalog has retired `id` on `provider`.
+ * @returns the config to write (unchanged when nothing matched), and what went.
+ */
+export const stripRetiredReferences = (
+  config: Record<string, unknown>,
+  isRetired: (provider: string, id: string) => boolean
+): { next: Record<string, unknown>; removed: PurgedModel[] } => {
+  const removed: PurgedModel[] = [];
+  let next = config;
+
+  const { allowedModels } = config;
+  if (Array.isArray(allowedModels)) {
+    const kept = allowedModels.filter((row) => {
+      if (!isRecord(row)) {
+        return true;
+      }
+      const { model, provider } = row;
+      if (typeof model !== "string" || typeof provider !== "string") {
+        return true;
+      }
+      if (!isRetired(provider, model)) {
+        return true;
+      }
+      removed.push({ id: model, provider, site: "subagent" });
+      return false;
+    });
+    if (kept.length !== allowedModels.length) {
+      next = { ...next, allowedModels: kept };
+    }
+  }
+
+  const provider = config.summarizationProvider;
+  const model = config.summarizationModel;
+  if (
+    typeof provider === "string" &&
+    typeof model === "string" &&
+    isRetired(provider, model)
+  ) {
+    const {
+      summarizationModel: _model,
+      summarizationProvider: _provider,
+      ...rest
+    } = next;
+    removed.push({ id: model, provider, site: "summarizer" });
+    next = rest;
+  }
+
+  return { next, removed };
+};
+
 export class ModelPurgeService extends TypertRemoteService {
   constructor(ctx: unknown) {
     if (!isRecord(ctx)) {
@@ -168,6 +250,39 @@ export class ModelPurgeService extends TypertRemoteService {
           }
         }
         return { ...current, providers };
+      });
+      removed.push(...entryRemoved);
+    }
+
+    // **Every other surface that names a model by id.** The provider lists above
+    // are what the picker reads; these are what actually CALL a model, and they
+    // live in entries that declare no provider at all — which is why the sweep
+    // above could not see them. A retired id here is worse than a stale picker
+    // row: compaction that cannot resolve its summariser fails the checkpoint,
+    // and the session then ends every turn on `max-tokens`.
+    for (const entry of editor.entries()) {
+      const options = isRecord(entry) ? entry.options : undefined;
+      const config = isRecord(options) ? options.config : undefined;
+      if (!isRecord(config)) {
+        continue;
+      }
+      // Decided before the write so an entry with nothing to strip is not
+      // rewritten at all: an unconditional edit would mark every entry dirty on
+      // every click.
+      if (
+        stripRetiredReferences(config, isRetiredOnOwnedRoute).removed.length ===
+        0
+      ) {
+        continue;
+      }
+      const entryRemoved: PurgedModel[] = [];
+      await editor.edit(entry, (current) => {
+        const { next, removed: gone } = stripRetiredReferences(
+          current,
+          isRetiredOnOwnedRoute
+        );
+        entryRemoved.push(...gone);
+        return next;
       });
       removed.push(...entryRemoved);
     }

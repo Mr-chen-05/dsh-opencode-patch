@@ -139,7 +139,8 @@ export const en = {
     "Deletes the model entries this deployment declares that the live catalog has retired. It rewrites the provider list in your profile — nothing is filtered at read time, so what the picker shows is exactly what you declared.",
   purgeAction: "Purge",
   purgeBusy: "Purging…",
-  purgeRemoved: "model(s) removed from your configuration",
+  purgeRemoved:
+    "reference(s) to retired models removed from your configuration",
   purgeNothing:
     "Nothing to purge — the catalog reports no retired model in your list.",
   purgeCatalogUnread:
@@ -299,8 +300,8 @@ export const zh: Record<keyof typeof en, string> = {
     "删除本部署声明过、但线上目录已下架的模型条目。它会重写你 profile 里的 provider 列表——读取时不做任何过滤，所以选择器显示的就是你真正声明的。",
   purgeAction: "清理",
   purgeBusy: "清理中…",
-  purgeRemoved: "个模型已从配置中移除",
-  purgeNothing: "没有可清理的模型——目录显示你的列表里没有已下架条目。",
+  purgeRemoved: "处已下架的模型引用已从配置中移除",
+  purgeNothing: "没有可清理的内容——目录显示你的声明与引用里都没有已下架模型。",
   purgeCatalogUnread: "没有移除任何条目，但目录读取失败——联网后重试。",
   purgeUnavailable: "不可用：此组合没有 config editor。",
   purgeFailed: "清理失败",
