@@ -22,8 +22,10 @@
  * @module dsh-opencode-patch/opencode-store
  */
 
+import { existsSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
+import type { OpencodeStoreInspection } from "./opencode-store-contract.ts";
 import { isRecord } from "./utils/guards.ts";
 
 /** A credential as the installation stores it, minus everything unused. */
@@ -153,4 +155,141 @@ export const readOpencodeCredentials = (
     ];
   });
   return credentials.length === 0 ? undefined : credentials;
+};
+
+/** What one stored credential document contributes to the summary. */
+export interface CredentialSummary {
+  readonly email?: string;
+  readonly expired?: boolean;
+  readonly expiresAt?: string;
+  readonly orgName?: string;
+  readonly refreshable?: boolean;
+  readonly type: "oauth" | "key" | "unknown";
+}
+
+/**
+ * Summarize one credential document, keeping only what identifies it.
+ *
+ * PURE, and extracted for that reason: every shape a real store can hold — the
+ * JSON document an OAuth session is, the JSON document an API key is, a bare key
+ * from an older version, and something malformed — is a branch a test can hand
+ * this function directly. Buried in the query above, the same branches would only
+ * be reachable by building a database per case.
+ *
+ * The token is never read: `key` and `access` are simply not consulted. `refresh`
+ * is looked at only to answer whether one EXISTS — its value never leaves this
+ * function — because that is what decides whether a lapsed session is a problem.
+ *
+ * @param raw - the `value` column, verbatim.
+ * @returns the identifying fields, with `type` always present.
+ */
+export const summarizeCredential = (raw: string): CredentialSummary => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Not JSON. A bare key is what an older installation stored; anything else
+    // is a document this module does not understand, and saying so is better
+    // than calling it a key.
+    return { type: raw.trimStart().startsWith("{") ? "unknown" : "key" };
+  }
+  if (!isRecord(parsed)) {
+    return { type: "unknown" };
+  }
+  const kind = parsed.type;
+  const meta = isRecord(parsed.metadata) ? parsed.metadata : {};
+  const { email, orgName } = meta;
+  const { expires, refresh } = parsed;
+  return {
+    ...(typeof email === "string" ? { email } : {}),
+    ...(typeof expires === "number"
+      ? {
+          expired: expires < Date.now(),
+          expiresAt: new Date(expires).toISOString(),
+        }
+      : {}),
+    ...(typeof orgName === "string" ? { orgName } : {}),
+    ...(typeof refresh === "string" ? { refreshable: true } : {}),
+    type: kind === "oauth" || kind === "key" ? kind : "unknown",
+  };
+};
+
+/**
+ * Inspect the local OpenCode installation to summarize stored account information
+ * WITHOUT exposing any secret tokens.
+ *
+ * Checks database existence, parses the primary active credential and/or
+ * account row, and extracts email, organization, account type, and expiry date.
+ *
+ * @param databasePath - path to opencode.db or :memory:
+ * @returns inspection summary with zero secrets
+ */
+export const inspectOpencodeStore = (
+  databasePath: string
+): OpencodeStoreInspection => {
+  if (databasePath === ":memory:" || !existsSync(databasePath)) {
+    return { found: false, message: "not_found" };
+  }
+
+  const credRows = rows(
+    databasePath,
+    `SELECT integration_id AS integrationId, label, value FROM credential
+     WHERE integration_id = 'opencode'
+     ORDER BY active DESC, time_updated DESC`
+  );
+
+  const accountRows = rows(
+    databasePath,
+    `SELECT id, email, token_expiry AS tokenExpiry FROM account
+     ORDER BY time_updated DESC LIMIT 1`
+  );
+
+  // The account row first: it is the installation's own record of who is signed
+  // in, and the credential's metadata is a copy of it. Reading in this order
+  // means the credential only fills gaps rather than overwriting.
+  const [account] = accountRows ?? [];
+  const [primary] = credRows ?? [];
+  const summary =
+    primary === undefined
+      ? undefined
+      : summarizeCredential(text(primary.value) ?? "");
+
+  const email = text(account?.email) ?? summary?.email;
+  const expiresAt =
+    typeof account?.tokenExpiry === "number"
+      ? new Date(account.tokenExpiry).toISOString()
+      : summary?.expiresAt;
+  const expired =
+    typeof account?.tokenExpiry === "number"
+      ? account.tokenExpiry < Date.now()
+      : summary?.expired;
+  const label = primary === undefined ? undefined : text(primary.label);
+  const accountId = text(account?.id);
+  const orgName = summary?.orgName;
+  const refreshable = summary?.refreshable;
+  const type = summary?.type ?? "unknown";
+
+  if (email === undefined && label === undefined && type === "unknown") {
+    return {
+      found: true,
+      message: "no_credentials_in_store",
+      path: databasePath,
+    };
+  }
+
+  return {
+    account: {
+      accountId,
+      email,
+      expired,
+      expiresAt,
+      label,
+      orgName,
+      refreshable,
+      type,
+    },
+    found: true,
+    message: "ok",
+    path: databasePath,
+  };
 };

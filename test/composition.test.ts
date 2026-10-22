@@ -95,6 +95,17 @@ describe("composition · a real cordis Context", () => {
     expect(typeof purge?.purge).toBe("function");
   });
 
+  it("leaves the store-inspection service reachable through ctx.get", async () => {
+    // The same failure mode as the purge row, for the same reason: the card's
+    // "check this machine" button resolves the namespace at click time, and a
+    // service that mounted under the wrong name answers `undefined` there — which
+    // the card can only report as "this host mounted no inspection service".
+    const { ctx } = await mount({ config: { usageEnabled: false } });
+    const store = ctx.get("opencodeStore") as { inspect?: unknown } | undefined;
+    expect(store, "the inspection service must be reachable").toBeDefined();
+    expect(typeof store?.inspect).toBe("function");
+  });
+
   it("leaves the usage service reachable only while the meter is on", async () => {
     const off = await mount({ config: { usageEnabled: false } });
     expect(off.ctx.get("opencodeGoUsage")).toBeUndefined();

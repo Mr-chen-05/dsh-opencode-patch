@@ -19,7 +19,11 @@ import { DatabaseSync } from "node:sqlite";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { readOpencodeCredentials } from "../src/opencode-store.ts";
+import {
+  inspectOpencodeStore,
+  readOpencodeCredentials,
+  summarizeCredential,
+} from "../src/opencode-store.ts";
 
 const temporary: string[] = [];
 
@@ -213,5 +217,227 @@ describe("opencode-store: credentials", () => {
   it("answers undefined for an installation with none", () => {
     const path = database(schema);
     expect(readOpencodeCredentials(path)).toBeUndefined();
+  });
+});
+
+describe("opencode-store: inspection", () => {
+  /** An OAuth row shaped exactly like a live installation's. */
+  const oauthValue = (expires: number): string =>
+    JSON.stringify({
+      type: "oauth",
+      methodID: "device",
+      refresh: "rt_fixture_refresh",
+      access: "st_fixture_access",
+      expires,
+      metadata: {
+        accountID: "acc_fixture",
+        email: "someone@example.com",
+        orgID: "wrk_fixture",
+        orgName: "Fixture Org",
+      },
+    });
+
+  it("summarizes the account without ever carrying the token", () => {
+    // The whole point of this reader: the switch is a permission, and the answer
+    // to "what would it read?" must be an identity, never a secret.
+    const future = Date.now() + 86_400_000;
+    const path = database((db) => {
+      schema(db);
+      addCredential(db, "a", "opencode", oauthValue(future), 1, "Default");
+      db.prepare(
+        "INSERT INTO account (id, email, token_expiry) VALUES (?, ?, ?)"
+      ).run("acc_fixture", "someone@example.com", future);
+    });
+    const result = inspectOpencodeStore(path);
+    expect(result.found).toBe(true);
+    expect(result.account?.email).toBe("someone@example.com");
+    expect(result.account?.orgName).toBe("Fixture Org");
+    expect(result.account?.type).toBe("oauth");
+    expect(result.account?.expired).toBe(false);
+    expect(result.account?.expiresAt).toBe(new Date(future).toISOString());
+    // Nothing that looks like key material survived into the answer.
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain("st_fixture_access");
+    expect(serialized).not.toContain("rt_fixture_refresh");
+  });
+
+  it("reports an expired credential as expired", () => {
+    // Reachable in normal use: a session that lapsed still sits in the store, and
+    // a switch that reads it would resolve nothing. The card has to be able to say
+    // that rather than showing a green check.
+    const past = Date.now() - 86_400_000;
+    const path = database((db) => {
+      schema(db);
+      addCredential(db, "a", "opencode", oauthValue(past), 1);
+    });
+    const result = inspectOpencodeStore(path);
+    expect(result.found).toBe(true);
+    expect(result.account?.expired).toBe(true);
+  });
+
+  it("reads a bare API key row as an API key", () => {
+    const path = database((db) => {
+      schema(db);
+      addCredential(db, "a", "opencode", "oc_sk_fixture_key", 1, "API key");
+    });
+    const result = inspectOpencodeStore(path);
+    expect(result.account?.type).toBe("key");
+    expect(result.account?.label).toBe("API key");
+  });
+
+  it("says the store exists when it holds no OpenCode credential", () => {
+    const path = database((db) => {
+      schema(db);
+      addCredential(db, "a", "opencode-go", "sk-fixture-go", 1);
+    });
+    const result = inspectOpencodeStore(path);
+    expect(result.found).toBe(true);
+    expect(result.account).toBeUndefined();
+    expect(result.message).toBe("no_credentials_in_store");
+  });
+
+  it("answers not-found for a path that does not exist", () => {
+    expect(inspectOpencodeStore("/nonexistent/opencode.db")).toEqual({
+      found: false,
+      message: "not_found",
+    });
+  });
+
+  it("answers not-found for :memory: rather than opening a throwaway database", () => {
+    expect(inspectOpencodeStore(":memory:")).toEqual({
+      found: false,
+      message: "not_found",
+    });
+  });
+
+  it("still answers when the database carries no account table", () => {
+    // A store from a version that wrote only credentials. `rows` answers
+    // `undefined` for a query that cannot run, and the inspection has to read
+    // that as "no account row" rather than as "nothing here".
+    const path = database((db) => {
+      db.exec(`
+        CREATE TABLE credential (
+          id TEXT PRIMARY KEY, integration_id TEXT, label TEXT, value TEXT,
+          active INTEGER, time_created INTEGER, time_updated INTEGER
+        );
+      `);
+      addCredential(db, "a", "opencode", "oc_sk_fixture_bare", 1, "API key");
+    });
+    const result = inspectOpencodeStore(path);
+    expect(result.found).toBe(true);
+    expect(result.account?.type).toBe("key");
+    expect(result.account?.label).toBe("API key");
+  });
+
+  it("answers no-credential-in-store when the database carries no credential table", () => {
+    const path = database((db) => {
+      db.exec(
+        "CREATE TABLE account (id TEXT PRIMARY KEY, email TEXT, token_expiry INTEGER, time_updated INTEGER)"
+      );
+    });
+    const result = inspectOpencodeStore(path);
+    expect(result.found).toBe(true);
+    expect(result.account).toBeUndefined();
+  });
+
+  it("prefers the account row's expiry over the credential's copy", () => {
+    // Both records carry an expiry and they can disagree (one is written on
+    // refresh, the other on login). The account row is the installation's own
+    // record of the session, so it wins.
+    const accountExpiry = Date.now() + 86_400_000;
+    const credentialExpiry = Date.now() - 86_400_000;
+    const path = database((db) => {
+      schema(db);
+      addCredential(
+        db,
+        "a",
+        "opencode",
+        JSON.stringify({ type: "oauth", expires: credentialExpiry }),
+        1
+      );
+      db.prepare(
+        "INSERT INTO account (id, email, token_expiry) VALUES (?, ?, ?)"
+      ).run("acc_fixture", "someone@example.com", accountExpiry);
+    });
+    const result = inspectOpencodeStore(path);
+    expect(result.account?.expired).toBe(false);
+    expect(result.account?.expiresAt).toBe(
+      new Date(accountExpiry).toISOString()
+    );
+  });
+
+  it("omits an expiry the account row does not carry", () => {
+    const path = database((db) => {
+      schema(db);
+      db.prepare(
+        "INSERT INTO account (id, email, token_expiry) VALUES (?, ?, NULL)"
+      ).run("acc_fixture", "someone@example.com");
+    });
+    const result = inspectOpencodeStore(path);
+    expect(result.account?.email).toBe("someone@example.com");
+    expect(result.account?.expiresAt).toBeUndefined();
+  });
+});
+
+describe("opencode-store: one credential document", () => {
+  it("reads an OAuth document's identity, and its expiry", () => {
+    const expires = Date.now() + 86_400_000;
+    const summary = summarizeCredential(
+      JSON.stringify({
+        type: "oauth",
+        access: "st_fixture_access",
+        refresh: "rt_fixture_refresh",
+        expires,
+        metadata: { email: "someone@example.com", orgName: "Fixture Org" },
+      })
+    );
+    expect(summary).toEqual({
+      email: "someone@example.com",
+      expired: false,
+      expiresAt: new Date(expires).toISOString(),
+      orgName: "Fixture Org",
+      refreshable: true,
+      type: "oauth",
+    });
+  });
+
+  it("never returns the token fields it was handed", () => {
+    const summary = summarizeCredential(
+      JSON.stringify({
+        type: "key",
+        key: "oc_sk_fixture_secret",
+        metadata: { email: "someone@example.com" },
+      })
+    );
+    expect(JSON.stringify(summary)).not.toContain("oc_sk_fixture_secret");
+    expect(summary.type).toBe("key");
+  });
+
+  it("reads a bare key from an older installation as a key", () => {
+    expect(summarizeCredential("oc_sk_fixture_bare")).toEqual({ type: "key" });
+  });
+
+  it("calls a malformed document unknown rather than guessing", () => {
+    // Truncated JSON is what a crashed write leaves behind. Calling it a key
+    // would put a Bearer header on a document that is not one.
+    expect(summarizeCredential('{"type":"oauth",')).toEqual({
+      type: "unknown",
+    });
+  });
+
+  it("calls a document whose kind it cannot place unknown", () => {
+    expect(summarizeCredential(JSON.stringify({ type: "mystery" }))).toEqual({
+      type: "unknown",
+    });
+  });
+
+  it("calls a JSON document that is not an object unknown", () => {
+    expect(summarizeCredential("null")).toEqual({ type: "unknown" });
+  });
+
+  it("survives metadata that is not an object", () => {
+    expect(
+      summarizeCredential(JSON.stringify({ type: "key", metadata: "junk" }))
+    ).toEqual({ type: "key" });
   });
 });
