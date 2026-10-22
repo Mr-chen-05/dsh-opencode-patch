@@ -100,17 +100,17 @@ export const OPENCODE_FAMILY_API: Readonly<
   Record<"go" | "zen", Readonly<Record<string, string>>>
 > = {
   go: {
-    "@ai-sdk/anthropic": "https://opencode.ai/inference/go/anthropic/v1",
-    "@ai-sdk/openai": "https://opencode.ai/inference/go/openai/v1",
     "": "https://opencode.ai/inference/go/openai/v1",
+    "@ai-sdk/anthropic": "https://opencode.ai/inference/go/anthropic/v1",
     "@ai-sdk/google": "https://opencode.ai/inference/go/google/v1beta",
+    "@ai-sdk/openai": "https://opencode.ai/inference/go/openai/v1",
   },
   zen: {
     "": "https://opencode.ai/inference/openai/v1",
-    "@ai-sdk/openai": "https://opencode.ai/inference/openai/v1",
     "@ai-sdk/anthropic": "https://opencode.ai/inference/anthropic/v1",
     "@ai-sdk/google": "https://opencode.ai/inference/google/v1beta",
     "@ai-sdk/mistral": "https://opencode.ai/inference/openai/v1",
+    "@ai-sdk/openai": "https://opencode.ai/inference/openai/v1",
   },
 };
 
@@ -434,15 +434,14 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
   {
     context_window: 1_000_000,
     cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
+      cache_read: 0.015,
+      input: 0.15,
+      output: 0.6,
     },
-    id: "minimax-m3.1-flash-free",
+    id: "minimax-m3.1-flash",
     input_modalities: ["text", "image"],
-    is_free: true,
     max_output_tokens: 512_000,
-    name: "MiniMax M3.1 Flash Free",
+    name: "MiniMax M3.1 Flash",
     reasoning: true,
     reasoning_options: [
       { type: "effort", values: ["low", "medium", "high", "xhigh", "max"] },
@@ -1737,23 +1736,6 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
     name: "MiniMax-M3",
     reasoning: true,
     reasoning_options: [{ type: "toggle" }],
-  },
-  {
-    context_window: 1_000_000,
-    cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
-    },
-    id: "minimax-m3.1-flash-free",
-    input_modalities: ["text", "image"],
-    is_free: true,
-    max_output_tokens: 512_000,
-    name: "MiniMax M3.1 Flash Free",
-    reasoning: true,
-    reasoning_options: [
-      { type: "effort", values: ["low", "medium", "high", "xhigh", "max"] },
-    ],
   },
   {
     context_window: 524_288,

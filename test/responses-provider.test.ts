@@ -1597,7 +1597,7 @@ describe("responses-provider · the keyless and unreadable declarations", () => 
         listModels: async (route: string) => {
           listed.push(route);
           return [
-            { id: "minimax-m3.1-flash-free" },
+            { id: "beam-free" },
             { id: "gpt-5.4" },
             { name: "no id here" },
             null,

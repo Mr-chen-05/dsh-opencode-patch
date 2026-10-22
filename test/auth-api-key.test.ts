@@ -80,7 +80,7 @@ describe("API Key Authentication", () => {
       {
         body: {
           messages: [{ content: "hi", role: "user" }],
-          model: "minimax-m3.1-flash-free",
+          model: "beam-free",
           stream: true,
         },
       }

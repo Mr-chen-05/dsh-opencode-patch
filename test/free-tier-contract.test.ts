@@ -33,7 +33,7 @@ const freeModelIds = (): string[] => {
   for (const id of [
     "mimo-v2.6-flash-free",
     "big-pickle",
-    "minimax-m3.1-flash-free",
+    "beam-free",
     "muse-spark-1.2-contributor-free",
   ]) {
     if (findModelSpec(id)?.is_free === true) {

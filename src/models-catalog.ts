@@ -181,13 +181,27 @@ const providerApiFor = (entry: unknown): string =>
  * family, and a second value would mean the assumption is wrong rather than that
  * the first should be replaced.
  *
+ * **The keys come out SORTED, and that is load-bearing.** The map is built from
+ * the order the vendor's JSON happens to list its models in, and that order is
+ * not stable: the catalog re-serializes on its own schedule, and the same data
+ * arrives with its models in a different sequence. The map is written verbatim
+ * into the generated shim, so an unstable order means the nightly freshness job
+ * finds a diff that contains no change at all — which is how a pull request
+ * arrived whose entire content was three lines of key order.
+ *
+ * Sorting here fixes it at the source: the parser, the shim and the runtime
+ * refresh all read the same map, so one rule governs all three. The values are
+ * untouched; only the order is decided rather than inherited.
+ *
  * @param entry - one provider entry from the catalog.
  * @returns the family map, empty when the entry carries no models.
  */
 const familyApiFor = (entry: unknown): FamilyApi => {
-  const out: Record<string, string> = {};
+  const found = new Map<string, string>();
   if (!isRecord(entry) || !isRecord(entry.models)) {
-    return out;
+    // A plain object, not an empty Map: the caller compares these against `{}`
+    // and a Map is a different shape, not an equal one.
+    return {};
   }
   const providerApi = providerApiFor(entry);
   for (const rawModel of Object.values(entry.models)) {
@@ -197,9 +211,15 @@ const familyApiFor = (entry: unknown): FamilyApi => {
     const provider = isRecord(rawModel.provider) ? rawModel.provider : {};
     const npm = typeof provider.npm === "string" ? provider.npm : "";
     const api = typeof provider.api === "string" ? provider.api : providerApi;
-    if (api.length > 0 && out[npm] === undefined) {
-      out[npm] = api;
+    if (api.length > 0 && !found.has(npm)) {
+      found.set(npm, api);
     }
+  }
+  // Sorted on the way out, so the map's order is decided here rather than
+  // inherited from the vendor's serialization.
+  const out: Record<string, string> = {};
+  for (const key of [...found.keys()].toSorted()) {
+    out[key] = found.get(key) ?? "";
   }
   return out;
 };

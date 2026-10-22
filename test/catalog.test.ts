@@ -182,16 +182,16 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     // replacing the whole set — so these counts are the cold-start picker, and a
     // silent drop here is a model nobody can pick. Regenerate with
     // `scripts/regenerate-catalog-shim.ts` rather than editing by hand.
-    expect(OPENCODE_ZEN_CATALOG.length).toBe(83);
+    expect(OPENCODE_ZEN_CATALOG.length).toBe(82);
     const freeModels = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free === true);
     // Only the free tiers the registry still lists as active. The count is the
     // `is_free` flag the shim carries, NOT the `-free` suffix: `big-pickle` is
     // flagged and is not suffixed, so a suffix rule would have missed it.
-    expect(freeModels.length).toBe(10);
+    expect(freeModels.length).toBe(9);
 
     const ids = new Set(OPENCODE_ZEN_CATALOG.map((m) => m.id));
     expect(ids.has("beam-free")).toBe(true);
-    expect(ids.has("minimax-m3.1-flash-free")).toBe(true);
+    expect(ids.has("beam-free")).toBe(true);
     expect(ids.has("mimo-v2.6-flash-free")).toBe(true);
     expect(ids.has("claude-sonnet-4-5")).toBe(true);
     expect(ids.has("gpt-5.4")).toBe(true);
@@ -343,7 +343,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
       "https://opencode.ai/zen/go/v1/models",
       Response.json({
         data: [
-          { id: "minimax-m3.1-flash-free", object: "model" },
+          { id: "beam-free", object: "model" },
           { id: "muse-spark-1.2-contributor", object: "model" },
         ],
         object: "list",
@@ -352,9 +352,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const goJson = (await goResponse.json()) as {
       data: Array<{ id: string }>;
     };
-    expect(goJson.data.some((m) => m.id === "minimax-m3.1-flash-free")).toBe(
-      true
-    );
+    expect(goJson.data.some((m) => m.id === "beam-free")).toBe(true);
     expect(goJson.data.some((m) => m.id === "muse-spark-1.2-contributor")).toBe(
       true
     );
@@ -363,7 +361,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
       "https://opencode.ai/zen/v1/models",
       Response.json({
         data: [
-          { id: "minimax-m3.1-flash-free", object: "model" },
+          { id: "beam-free", object: "model" },
           { id: "muse-spark-1.2", object: "model" },
           { id: "mimo-v2.6-flash-free", object: "model" },
         ],
@@ -373,9 +371,7 @@ describe("OpenCode Model Catalog & Enrichment", () => {
     const zenJson = (await zenResponse.json()) as {
       data: Array<{ id: string }>;
     };
-    expect(zenJson.data.some((m) => m.id === "minimax-m3.1-flash-free")).toBe(
-      true
-    );
+    expect(zenJson.data.some((m) => m.id === "beam-free")).toBe(true);
     // Active catalog rows the gateway lists are kept: enrichment strips only
     // what the REGISTRY retired, and none of these carries that flag.
     expect(zenJson.data.some((m) => m.id === "muse-spark-1.2")).toBe(true);
