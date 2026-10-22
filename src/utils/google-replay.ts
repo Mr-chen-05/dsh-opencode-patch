@@ -1,4 +1,4 @@
-import { isRecord } from "./utils/guards.ts";
+import { isRecord } from "./guards.ts";
 
 /** Translate only adapter-owned Google replay identity across a route redirect. */
 export const googleReplayFor = (

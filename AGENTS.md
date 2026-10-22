@@ -67,11 +67,12 @@ It is the same trick `scripts/check.ts` already uses for the client bundle, at f
 
 ## What moved
 
-| to `utils/`        | from                          |
-| :----------------- | :---------------------------- |
-| `request-shape.ts` | new (extracted in #74)        |
-| `guards.ts`        | `src/`                        |
-| `session-id.ts`    | the rules inside `session.ts` |
+| to `utils/`        | from                                              |
+| :----------------- | :------------------------------------------------ |
+| `request-shape.ts` | new (extracted in #74)                            |
+| `guards.ts`        | `src/`                                            |
+| `session-id.ts`    | the rules inside `session.ts`                     |
+| `google-replay.ts` | `src/` (pure translation, so the gate polices it) |
 
 - `src/session.ts` · `src/turn-store.ts` — the `ses_<12hex><14base62>` derivation and the `AsyncLocalStorage` turn store.
 - `src/stream-hook.ts` · `src/fetch-patch.ts` · `src/tool-fallback.ts` — the `llm/stream` hook, the fetch interceptor, and the free-tier `read`/`bash` fallback.
@@ -90,7 +91,6 @@ It is the same trick `scripts/check.ts` already uses for the client bundle, at f
 - `src/session-cost.ts` · `src/cordis-context.ts` · `src/debug.ts` — per-turn accounting, the typed host interfaces, and stream debug logging.
 - `src/pi-provider.ts` — the per-protocol base URLs, the pi model object, and the gateway headers. Every value here is measured; see `docs/redirect-planes.md`.
 - `src/attachment-services.ts` — optional attachment and filesystem services for Google image requests, captured through Cordis child scopes.
-- `src/google-replay.ts` — preserve Google tool signatures while translating replay identity between public and internal routes.
 - `src/google-bridge.ts` — the Google models, served through the plugin's own adapter on the real `llm` service. It is the ONLY module that imports pi at runtime, and its route is `opencode-google` so the `google` name stays free for a real deployment.
 - `src/opencode-paths.ts` — where an OpenCode installation keeps its files, ported from `~/dev/opencode`'s `global-roots.ts` (the directory) and `database-path.ts` (the filename). It takes `home`, `env` and `channel` as parameters and reads neither the environment nor the filesystem, which is what makes the Windows and Linux layouts testable from here. Two facts it encodes that are easy to get wrong: the directory is XDG on EVERY platform — macOS and Windows use `~/.local/share` too, and `os.homedir()` is the only platform-dependent call — and the FILENAME is not constant, being `$OPENCODE_DB`, else `opencode.db` on a stable channel, else `opencode-<channel>.db`. The database sits under `data` while the config sits under `config`, so one root cannot serve both. It is the foundation of the opt-in reader: `go-discovery.ts`'s `resolveOpencodeStoreKey` is what imports it, and nothing else does.
 - `src/opencode-store.ts` — reading the credentials an OpenCode installation already holds, through `node:sqlite`. Two rules shape it: nothing throws (a missing file, a foreign schema and `:memory:` all answer `undefined`), and a value never leaves the return value — no log line, no error message, no client bundle. `node:sqlite` is host-only, which is what keeps the module on the host side of the bundle rule. It is reached only through `resolveOpencodeStoreKey`, which is the last step of every key-source policy and is off unless `readOpencodeStore` is on. Its second reader, `inspectOpencodeStore`, answers the _other_ question — "is there a credential here, and whose is it?" — with a sanitized summary (email, org, kind, expiry) and never the token, which is what lets the settings card show the evidence beside the permission.
