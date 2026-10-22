@@ -29,6 +29,7 @@ import {
 } from "./models-catalog.ts";
 import {
   baseForProtocol,
+  LEGACY_PLANE_API,
   protocolFor,
   thinkingLevelMapFor,
 } from "./pi-provider.ts";
@@ -614,10 +615,21 @@ const effortsFromLevelMap = (
  * Only these are rewritten. Matching a path rather than an origin keeps a
  * deployment's own proxy out of it: `https://gateway.internal/zen/v1` is not this
  * vendor's endpoint and is none of our business.
+ *
+ * The list is DERIVED from {@link LEGACY_PLANE_API}, not written out here. It was
+ * written out here, and it carried only the Zen plane — so a profile declaring
+ * `…/zen/v1` was repaired to the inference family while one declaring
+ * `…/zen/go/v1`, the older address of the *other* plane, was left alone. Under
+ * `endpoint: auto` both are "follow the catalog", and the second plane's old
+ * address was quietly exempt: measured, both families answer 200 on Go, so the
+ * only thing the omission bought was one plane drifting behind the other.
+ *
+ * The bare `…/zen` entry is the alias pi's own installed catalog still ships,
+ * which the plane table writes with its version segment.
  */
 const LEGACY_PLANE_BASES: ReadonlySet<string> = new Set([
   "https://opencode.ai/zen",
-  "https://opencode.ai/zen/v1",
+  ...Object.values(LEGACY_PLANE_API),
 ]);
 
 /** Whether a value is a usable token count. */
