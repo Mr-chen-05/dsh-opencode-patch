@@ -100,15 +100,15 @@ export const OPENCODE_FAMILY_API: Readonly<
   Record<"go" | "zen", Readonly<Record<string, string>>>
 > = {
   go: {
-    "": "https://opencode.ai/inference/go/openai/v1",
-    "@ai-sdk/openai": "https://opencode.ai/inference/go/openai/v1",
-    "@ai-sdk/google": "https://opencode.ai/inference/go/google/v1beta",
     "@ai-sdk/anthropic": "https://opencode.ai/inference/go/anthropic/v1",
+    "@ai-sdk/openai": "https://opencode.ai/inference/go/openai/v1",
+    "": "https://opencode.ai/inference/go/openai/v1",
+    "@ai-sdk/google": "https://opencode.ai/inference/go/google/v1beta",
   },
   zen: {
     "": "https://opencode.ai/inference/openai/v1",
-    "@ai-sdk/anthropic": "https://opencode.ai/inference/anthropic/v1",
     "@ai-sdk/openai": "https://opencode.ai/inference/openai/v1",
+    "@ai-sdk/anthropic": "https://opencode.ai/inference/anthropic/v1",
     "@ai-sdk/google": "https://opencode.ai/inference/google/v1beta",
     "@ai-sdk/mistral": "https://opencode.ai/inference/openai/v1",
   },
@@ -361,21 +361,6 @@ export const OPENCODE_GO_CATALOG: readonly CatalogModelSpec[] = [
     input_modalities: ["text"],
     max_output_tokens: 131_072,
     name: "LongCat-2.0",
-    reasoning: true,
-    reasoning_options: [{ type: "toggle" }],
-  },
-  {
-    context_window: 1_000_000,
-    cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
-    },
-    id: "longcat-2.5-preview-free",
-    input_modalities: ["text", "image"],
-    is_free: true,
-    max_output_tokens: 131_072,
-    name: "LongCat 2.5 Preview Free",
     reasoning: true,
     reasoning_options: [{ type: "toggle" }],
   },
@@ -1698,21 +1683,6 @@ export const OPENCODE_ZEN_CATALOG: readonly CatalogModelSpec[] = [
       { type: "toggle" },
       { type: "effort", values: ["low", "high", "max"] },
     ],
-  },
-  {
-    context_window: 1_000_000,
-    cost: {
-      cache_read: 0,
-      input: 0,
-      output: 0,
-    },
-    id: "longcat-2.5-preview-free",
-    input_modalities: ["text", "image"],
-    is_free: true,
-    max_output_tokens: 131_072,
-    name: "LongCat 2.5 Preview Free",
-    reasoning: true,
-    reasoning_options: [{ type: "toggle" }],
   },
   {
     context_window: 200_000,
