@@ -17,7 +17,7 @@ import {
 import { DEFAULT_PROVIDERS, readStringList } from "./config-values.ts";
 import { purgeRemote } from "./purge-contract.ts";
 import { OpencodeCard } from "./settings-card.tsx";
-import { en, zh } from "./settings-copy.ts";
+import { en, withBundleCopy, zh, type CopyKey } from "./settings-copy.ts";
 import { SPECS } from "./settings-fields.ts";
 import { purgeDeprecatedModels } from "./settings-purge.ts";
 import { remoteNamespace, remoteNamespaceOf } from "./settings-remote.ts";
@@ -312,39 +312,21 @@ const modelDirectoryStore = (
 };
 
 /**
- * The meter's own translator, reading the bundle's OWN dictionaries.
+ * The meter's translator: this bundle's dictionaries, never the seat's.
  *
  * The locale service allows one dictionary per (namespace, locale) and throws on
  * a second registration, so a stale copy of this bundle holding the namespace
  * starves every key we add: old keys translate, new keys render verbatim, and
  * nothing says why — which is exactly how `goPlanTitle` reached the screen. So
- * the meter no longer competes for a shared namespace at all: `en`/`zh` ship in
- * this very bundle, the active locale comes from the service per call, and the
- * lookup falls back en → zh → key. A language switch lands on the next render
- * without a reload, because the id is read at call time, not captured.
+ * the meter does not ask the seat at all; see {@link withBundleCopy} for the
+ * fallback the settings card keeps on top of it.
  *
- * The settings card keeps the bound `t` — its rows come from the same
- * dictionaries, but the card is registered through the framework's `t` seat and
- * was never bitten: it mounts after boot, when the race is already decided.
+ * A language switch lands on the next call without a reload, because the id is
+ * read at call time rather than captured.
  */
-const meterTranslate =
-  (active: () => string | undefined): ((key: string) => string) =>
-  (key: string): string => {
-    // Widened to an index signature ON PURPOSE: the caller holds an arbitrary
-    // key, so the lookup is a miss-or-hit at runtime and `?? key` is the miss.
-    // The previous form asserted `key as keyof typeof dict`, which is a
-    // narrower type than the value it was given — an assertion that existed
-    // only to satisfy the compiler about a lookup that is untyped by nature.
-    // The GETTER is called here, not at construction. The doc above claimed
-    // exactly this and the code did the opposite: `meterTranslate(active)`
-    // captured the id once, so `t` was frozen at whatever language was active
-    // when the injector was built, while the panel's `locale` — which feeds
-    // `Intl` for the dates and durations — was re-read on every render. A live
-    // language switch therefore produced a row whose WORDS were one language
-    // and whose NUMBERS were another.
-    const dict: Record<string, string> = active() === "zh" ? zh : en;
-    return dict[key] ?? key;
-  };
+const meterTranslate = (active: () => string | undefined) =>
+  // An identity seat: there is nothing to prefer over the bundle here.
+  withBundleCopy<CopyKey>((key) => key, active);
 
 export const apply = (ctx: ClientContext): void => {
   ctx.effect?.(() => {

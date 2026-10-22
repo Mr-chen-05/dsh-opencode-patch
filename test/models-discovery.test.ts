@@ -1461,21 +1461,24 @@ describe("models-discovery: a keyless deployment is offered only what it can cal
 describe("models-discovery · the endpoint a model is dispatched to", () => {
   /** One plane-route adapter answering with a fixed model, then resolve it. */
   const resolveBase = async (
-    own: Record<string, unknown>
+    own: Record<string, unknown>,
+    plan: { model?: string; route?: string } = {}
   ): Promise<unknown> => {
+    const route = plan.route ?? "opencode";
+    const model = plan.model ?? "minimax-m3.1-flash-free";
     const answer = () => ({
       context: { contextWindow: 999 },
-      id: "minimax-m3.1-flash-free",
+      id: model,
       inputModalities: ["text"],
       name: "Space Bunny",
-      provider: "opencode",
+      provider: route,
       ...own,
     });
     const adapter: Record<string, unknown> = {
       modelOf: (_snapshot: unknown) => answer(),
       resolveModel: async () => answer(),
     };
-    const llm = { adapters: new Map([["opencode", { adapter }]]) };
+    const llm = { adapters: new Map([[route, { adapter }]]) };
     const stop = decoratePlaneAdapters(
       llm as never,
       resolveConfig({ enrichModels: true })
@@ -1486,10 +1489,10 @@ describe("models-discovery · the endpoint a model is dispatched to", () => {
     ) => Promise<unknown>;
     // The MODEL id matters: without one the wrapper has no catalog entry to work
     // from and passes the adapter's answer through untouched.
-    const resolved = (await resolveModel(
-      "opencode",
-      "minimax-m3.1-flash-free"
-    )) as Record<string, unknown>;
+    const resolved = (await resolveModel(route, model)) as Record<
+      string,
+      unknown
+    >;
     stop?.();
     return resolved.baseUrl;
   };
@@ -1505,6 +1508,28 @@ describe("models-discovery · the endpoint a model is dispatched to", () => {
     expect(await resolveBase({ baseUrl: "https://opencode.ai/zen/v1" })).toBe(
       "https://opencode.ai/inference/openai/v1"
     );
+  });
+
+  it("repairs the OTHER plane's retired base too", async () => {
+    // The Go plane's old address used to be exempt, because the set was written
+    // out by hand and carried only Zen. A profile declaring `…/zen/go/v1` was
+    // therefore never repaired, so `endpoint: auto` followed the catalog on one
+    // plane and a pre-move address on the other. Measured against the gateway:
+    // both families answer a real completion on Go (200 with a session header),
+    // so the exemption bought nothing but the drift.
+    expect(
+      await resolveBase(
+        { baseUrl: "https://opencode.ai/zen/go/v1" },
+        { model: "deepseek-v4-pro", route: "opencode-go" }
+      )
+    ).toBe("https://opencode.ai/inference/go/openai/v1");
+    // And the repair is still narrow: a proxy is still nobody's business.
+    expect(
+      await resolveBase(
+        { baseUrl: "https://gateway.internal/zen/go/v1" },
+        { model: "deepseek-v4-pro", route: "opencode-go" }
+      )
+    ).toBe("https://gateway.internal/zen/go/v1");
   });
 
   it("leaves any other endpoint alone", async () => {

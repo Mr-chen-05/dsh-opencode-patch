@@ -16,6 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 import { OpencodeCard, purgeLine } from "../src/settings-card.tsx";
+import { en } from "../src/settings-copy.ts";
 
 /**
  * The host's primitives are NOT importable in a test process.
@@ -73,6 +74,7 @@ const props = (extra: Record<string, unknown>) =>
     edit: () => {},
     resetField: () => {},
     save: () => {},
+    getLocale: () => "en",
     t: (key: string) => key,
     useOpencodeCard: (selector: (s: typeof state) => unknown) =>
       selector(state),
@@ -159,17 +161,17 @@ describe("settings-card: rendering the states the call-time walker could not rea
 
   it("renders the summary view as the description alone", () => {
     const html = markup({ view: "summary" });
-    expect(html).toContain("description");
+    expect(html).toContain(en.description);
     expect(html).not.toContain("purge");
   });
 
   it("renders no purge row when the host offers no action", () => {
-    expect(markup({})).not.toContain("purgeAction");
+    expect(markup({})).not.toContain(en.purgeAction);
   });
 
   it("renders the purge action when the host offers one", () => {
     const html = markup({ purgeDeprecated: async () => ({ kind: "purged" }) });
-    expect(html).toContain("purgeAction");
+    expect(html).toContain(en.purgeAction);
   });
 
   it("renders the busy label while a purge runs, and the outcome line when it lands", () => {
@@ -177,7 +179,7 @@ describe("settings-card: rendering the states the call-time walker could not rea
     // and the line it leaves behind. Neither is reachable by calling the
     // component as a function, because both live in `useState`.
     const html = markup({ purgeDeprecated: async () => ({ kind: "purged" }) });
-    expect(html).toContain("purgeAction");
+    expect(html).toContain(en.purgeAction);
     expect(html).not.toContain('data-state="busy"');
   });
 
@@ -288,7 +290,7 @@ describe("settings-card: the states that only exist after an interaction", () =>
     } = await mountCard({ purgeDeprecated });
     try {
       const button = [...host.querySelectorAll("button")].find((b) =>
-        (b.textContent ?? "").includes("purgeAction")
+        (b.textContent ?? "").includes(en.purgeAction)
       );
       expect(button, "the purge button must be rendered").toBeDefined();
 
@@ -298,7 +300,7 @@ describe("settings-card: the states that only exist after an interaction", () =>
       await flush();
       // The label changed while the request is outstanding.
       const busy = [...host.querySelectorAll("button")].some((b) =>
-        (b.textContent ?? "").includes("purgeBusy")
+        (b.textContent ?? "").includes(en.purgeBusy)
       );
       expect(busy, "the button reports the in-flight state").toBe(true);
 
@@ -307,7 +309,7 @@ describe("settings-card: the states that only exist after an interaction", () =>
       });
       await flush();
       // And the outcome line is rendered once it lands.
-      expect(host.textContent).toContain("purgeNothing");
+      expect(host.textContent).toContain(en.purgeNothing);
     } finally {
       cleanup();
     }
@@ -319,13 +321,13 @@ describe("settings-card: the states that only exist after an interaction", () =>
     });
     try {
       const button = [...host.querySelectorAll("button")].find((b) =>
-        (b.textContent ?? "").includes("purgeAction")
+        (b.textContent ?? "").includes(en.purgeAction)
       );
       act(() => {
         button?.click();
       });
       await settle();
-      expect(host.textContent).toContain("purgeFailed");
+      expect(host.textContent).toContain(en.purgeFailed);
     } finally {
       cleanup();
     }
