@@ -242,7 +242,7 @@ opencode-responses:
 | **网关请求** | 恢复 User-Agent（默认开启） | `on` | 恢复官方 OpenCode CLI 的 `User-Agent`，使 Cloudflare WAF 校验通过 |
 | **网关请求** | 注入客户端来源头（默认开启） | `on` | 在网关流量上注入 `x-opencode-client`（以及来源请求头集合） |
 | **网关请求** | 附带工作区项目标识（默认开启） | `on` | 用当前文件夹名标记 `x-opencode-project`；关闭则省略该请求头 |
-| **模型与免费额度** | 使用 models.dev 补全模型列表（默认开启） | `on` | 将规范参数、显示名、价格与当前免费模型合并进列表**以及**原生 DSH 模型发现 |
+| **模型与免费额度** | 用 models.dev 目录补全模型信息（默认开启） | `on` | 把目录的上下文上限、模态与思考档位补进模型信息，并让网关 `/models` 列表带上完整目录。**不会**往选择器里添加模型——选择器只显示已声明的；要添加请用卡片的**检查目录** |
 | **模型与免费额度** | 自动补全核心工具（默认开启） | `on` | 补上免费层 `/responses` 请求体所需的 `read` + `bash` schema |
 | **配额计量** | 开启输入区用量计量（默认开启） | `on` | 在输入框停靠栏挂载实时计量表——Go 额度环，或 Zen 会话消耗 |
 | **配额计量** | 显示会话消耗与模型费率（默认开启） | `on` | 追加显示本会话累计花费与当前模型每百万 Token 费率 |
@@ -404,7 +404,7 @@ Zen 路线上不出现任何 Go 的数字：根本不画圆环（没有可量的
 | `400 MissingSessionID` | 未附带会话请求头 | 确认 `dsh-opencode-patch` 已列入 profile 的 `dsh.profile.bundles` |
 | Auto Review 报 `TRANSPORT: Connection error` | 更新后宿主进程未重启 | 停止并重启 `dsh web`，让新的 `lib/index.mjs` 加载 |
 | Go 模型始终不显示额度环 | 解析不到 Go 凭据，或当前激活的网关不是 `opencode-go` | 在 DSH Credentials 中存储 `OPENCODE_GO_API_KEY`，并经 `opencode-go` 路由 |
-| 目录中的模型在 Settings → Fetch 里缺失，或已下线的模型仍然存在 | 宿主模块过期、补全关闭，或适配器用自带目录作答 | `pnpm run build`、重启 `dsh web`、保持**使用 models.dev 补全模型列表**开启、从匹配的路由获取、搜索精确 id（如 `space-bunny-free`） |
+| 目录中的模型在 Settings → Fetch 里缺失，或已下线的模型仍然存在 | 宿主模块过期、补全关闭，或适配器用自带目录作答 | `pnpm run build`、重启 `dsh web`、保持**用 models.dev 目录补全模型信息**开启、从匹配的路由获取、搜索精确 id（如 `space-bunny-free`） |
 | 弹出面板以红色显示“已达限额” | 滚动 / 每月窗口已用到 100% | 打开 [OpenCode 控制台](https://opencode.ai/console)并启用 _使用余额（Use balance）_，以溢出到 Zen 额度 |
 | 非 OpenCode 模型行为异常 | 与本补丁无关 | 发往其他网关的流量原样通过 |
 
