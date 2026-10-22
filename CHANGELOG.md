@@ -6,6 +6,67 @@ This project is an evolution of [**`nobu121/dsh-opencode-session`**](https://git
 
 ---
 
+## [1.3.0](https://github.com/viztor/dsh-opencode-patch/compare/v1.2.3...v1.3.0) (2026-10-22)
+
+
+### Features
+
+* **settings:** drop hiddenModels and purge retired models from the profile ([7ffa6c1](https://github.com/viztor/dsh-opencode-patch/commit/7ffa6c1d892fc022d15225f134a791622c5b022d))
+* **settings:** make the OpenCode-store switch answer "what is actually there?" ([d7246f1](https://github.com/viztor/dsh-opencode-patch/commit/d7246f124c953685bd419c53823e7ede2ecaf48f))
+* **settings:** make the OpenCode-store switch answer "what is actually there?" ([d1f10f3](https://github.com/viztor/dsh-opencode-patch/commit/d1f10f34e7731edb6461a332f56707449be35b60))
+* **settings:** show the models the catalog offers but the profile never declared ([1725757](https://github.com/viztor/dsh-opencode-patch/commit/1725757c1d60808f2315968617cb159b5420a499))
+* **settings:** show the models the catalog offers but the profile never declared ([de7d395](https://github.com/viztor/dsh-opencode-patch/commit/de7d3950b2577090fc622b362c2cc6288830f350))
+* **testability:** extract pure retry utility, handle error envelopes, and inject timing ([b296a2d](https://github.com/viztor/dsh-opencode-patch/commit/b296a2de61f552d28362fd33775583b9a45e1923))
+* **testability:** extract pure retry utility, handle error envelopes, and inject timing ([7b1c5d4](https://github.com/viztor/dsh-opencode-patch/commit/7b1c5d4749f9852d0293b7bef6db21da45b9a617))
+
+
+### Fixes
+
+* **cordis:** a guard that throws is not a guard ([203ac61](https://github.com/viztor/dsh-opencode-patch/commit/203ac61f92dd556ceb97fb7b5f875c70ac2ba40e))
+* **diagnostics:** a route whose models could not be read is not a route that declared none ([5b9fe55](https://github.com/viztor/dsh-opencode-patch/commit/5b9fe55798aecdb0affc35f873e690770ab594c6))
+* **discovery:** join the live catalog into the selectable model list ([3e8b214](https://github.com/viztor/dsh-opencode-patch/commit/3e8b214ab8804bd5a78fd924c3212ec08102250a))
+* **discovery:** join the live catalog into the selectable model list ([e1f69f2](https://github.com/viztor/dsh-opencode-patch/commit/e1f69f22b1d01765c441be781f3f88510f5b7ef9))
+* **meter:** do not spend the one registration on a scope without slots ([6ac3ecf](https://github.com/viztor/dsh-opencode-patch/commit/6ac3ecfcd32225ee7ebcbc88aee51c97fecaa1b0))
+* **meter:** do not spend the one registration on a scope without slots ([38cd437](https://github.com/viztor/dsh-opencode-patch/commit/38cd437b80af19f1e692ea0216df64b3ce9bf94e))
+* **meter:** read the remote namespace through ctx.get, not the property ([ec7b14e](https://github.com/viztor/dsh-opencode-patch/commit/ec7b14ec4f9db2a73c825b9e28e663e9e1ec4197))
+* **meter:** read the remote namespace through ctx.get, not the property ([7136027](https://github.com/viztor/dsh-opencode-patch/commit/7136027c806b872fb5300625ff21db8988c409ee))
+* **models:** never mount the catalog for a route that declares nothing ([8e63d02](https://github.com/viztor/dsh-opencode-patch/commit/8e63d02d8e012ab8b971462e0a42aaf7ecbb14eb))
+* **models:** never mount the catalog for a route that declares nothing ([5ae81e9](https://github.com/viztor/dsh-opencode-patch/commit/5ae81e9a32341d5da5a77b4b762e1a19c309c329))
+* **panel:** render the host's MenuSurface instead of hand-rolling menu material ([c130443](https://github.com/viztor/dsh-opencode-patch/commit/c130443bbfa0d5524fe63482bc820aeee5b7ec45))
+* **panel:** render the host's MenuSurface instead of hand-rolling menu material ([cfbe1ea](https://github.com/viztor/dsh-opencode-patch/commit/cfbe1ea0b89345e1b93a64ed341eaffeb5463669))
+* **picker:** a route that declares models is not a route with none ([517e057](https://github.com/viztor/dsh-opencode-patch/commit/517e057d9f5a87a386e1f586f548a624eeab0eb3))
+* **picker:** a route that declares models is not a route with none ([06624f4](https://github.com/viztor/dsh-opencode-patch/commit/06624f44af154fdbe253c7b1cd2d1b0b1a223bb7))
+* **purge:** clean the references a retired model leaves behind, not just its declaration ([8fc8e16](https://github.com/viztor/dsh-opencode-patch/commit/8fc8e16898dd23f8873c1d5b2b3b190af1881f2b))
+* **purge:** clean the references a retired model leaves behind, not just its declaration ([0c66432](https://github.com/viztor/dsh-opencode-patch/commit/0c664323521d6b0affb9def235c44ab1ab6072ab))
+* **purge:** the namespace was never mounted, and the read flag was stale ([31f53b0](https://github.com/viztor/dsh-opencode-patch/commit/31f53b03172bb55cad1b589c6ca7c1954be3a6f2))
+* **purge:** the namespace was never mounted, and the read flag was stale ([160f31c](https://github.com/viztor/dsh-opencode-patch/commit/160f31c9324afd94c7374fd9f37c3b20d036c62f))
+* **routing:** read the declared models from the config, not from listModels ([b0846fc](https://github.com/viztor/dsh-opencode-patch/commit/b0846fc4304b2c867d560d650b544a8a46a7ce51))
+* **routing:** read the declared models from the config, not from listModels ([b35fb8a](https://github.com/viztor/dsh-opencode-patch/commit/b35fb8a24ba130c0c11a0622c4cb40f6cb460018))
+* **routing:** the loader's entries() is a generator, not an array ([22e3cae](https://github.com/viztor/dsh-opencode-patch/commit/22e3caeb1f98f785fd650a013a9a852c1f179d53))
+* **routing:** the loader's entries() is a generator, not an array ([c4cd856](https://github.com/viztor/dsh-opencode-patch/commit/c4cd8567c4306b1ac7015b32ca2318848ec061b7))
+* **settings:** make settings quota read resilient and add refresh affordance ([eacd3b2](https://github.com/viztor/dsh-opencode-patch/commit/eacd3b245371a9fff9df29d58b6ce008b40415a2))
+* **settings:** make settings quota read resilient and add refresh affordance ([1232bba](https://github.com/viztor/dsh-opencode-patch/commit/1232bba2add9cfc7f67cd81c38dccd2a59234070))
+* **ui:** withdraw the catalog join, and give every token a fallback ([da4dd82](https://github.com/viztor/dsh-opencode-patch/commit/da4dd82c3ed73b357b0c833d37c7d5f3a12a5178))
+* **ui:** withdraw the catalog join, and give every token a fallback ([960d299](https://github.com/viztor/dsh-opencode-patch/commit/960d29900065431ae4ae303a7676119415fd1fde))
+* **usage:** fall back to zen overflow on 401 for zen routes ([2165810](https://github.com/viztor/dsh-opencode-patch/commit/2165810ba81274da3e72e40f531dad5661ec5ca3))
+* **usage:** fall back to zen overflow on 401 for zen routes ([984f5e1](https://github.com/viztor/dsh-opencode-patch/commit/984f5e12f9b5cac5598e1a9e9391dabe30bcac5c))
+* **usage:** register the remote service on the root, once per process ([8e7d630](https://github.com/viztor/dsh-opencode-patch/commit/8e7d63014bda0ab603833a44c833072fb8095b54))
+* **usage:** register the remote service on the root, once per process ([8fb0e34](https://github.com/viztor/dsh-opencode-patch/commit/8fb0e345759da43169c4aff8003cfd1d5d80fcff))
+
+
+### Reverts
+
+* **settings:** remove the "check catalog" row ([dd1aeb3](https://github.com/viztor/dsh-opencode-patch/commit/dd1aeb31b0244d67fb8a305d78764ac1d56489a5))
+* **settings:** remove the "check catalog" row ([9d3e86d](https://github.com/viztor/dsh-opencode-patch/commit/9d3e86dc72feaf98756fcadabcc66713d3791613))
+
+
+### Documentation
+
+* **catalog:** name the registry we actually fetch, and pin it with a test ([b962f98](https://github.com/viztor/dsh-opencode-patch/commit/b962f988a31484a49f64152f5aa21ea7c8488d03))
+* **catalog:** name the registry we actually fetch, and pin it with a test ([384afa5](https://github.com/viztor/dsh-opencode-patch/commit/384afa51815f6b7934437254b2589aa85cc0c57a))
+* **copy:** say what the enrichment switch actually does ([6bc15df](https://github.com/viztor/dsh-opencode-patch/commit/6bc15dfc780328c9c59cfb2c7d5fd6c1acd2093a))
+* **copy:** say what the enrichment switch actually does ([d3e9b21](https://github.com/viztor/dsh-opencode-patch/commit/d3e9b21c947673711139ebf124c1417d7db0cf80))
+
 ## [1.2.3](https://github.com/viztor/dsh-opencode-patch/compare/v1.2.2...v1.2.3) (2026-10-19)
 
 
