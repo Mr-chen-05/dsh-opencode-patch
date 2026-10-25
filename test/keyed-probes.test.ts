@@ -667,6 +667,7 @@ describe("keyed probes · the CI wiring", () => {
       "test/e2e/keyed-probes.e2e.ts",
       "test/support/keyed-probes.ts",
       "test/support/keyless-matrix.ts",
+      "test/support/e2e-env.ts",
       ".github/workflows/ci.yml",
     ]) {
       expect(armed.test(path), path).toBe(true);
@@ -717,6 +718,51 @@ describe("keyed probes · the CI wiring", () => {
       if (step !== testStep) {
         expect(step).not.toContain("secrets.OPENCODE");
       }
+    }
+  });
+});
+
+describe("the e2e-host job · its pull-request scope", () => {
+  const ci = readFileSync(
+    new URL("../.github/workflows/ci.yml", import.meta.url),
+    "utf8"
+  );
+  const job = ci.slice(ci.indexOf("\n  e2e-host:\n"));
+  const scopeStep =
+    job.split(/\n {6}- /u).find((step) => step.includes("id: scope")) ?? "";
+  /** The pattern the scope step greps the changed paths with. */
+  const scope = /grep -Eq '([^']+)'/u.exec(scopeStep)?.[1];
+
+  it("the scope runs the binary e2e on its own inputs, the reader its gate comes through included, and not on unrelated paths", () => {
+    expect(scope).toBeDefined();
+    // The ERE is JavaScript-compatible, so the pattern CI runs is the one
+    // tested here.
+    const runs = new RegExp(scope ?? "(?!)", "u");
+    for (const path of [
+      "src/host/route-claim.ts",
+      "src/lifecycle.ts",
+      "src/fetch-patch.ts",
+      "test/e2e/host/probe-plugin.mjs",
+      "test/e2e/host-binary.e2e.ts",
+      "test/support/host.ts",
+      "test/support/host-versions.ts",
+      "test/support/e2e-env.ts",
+      "patches/pi.patch",
+      ".github/workflows/ci.yml",
+      "vitest.e2e.config.ts",
+      "vite.config.ts",
+    ]) {
+      expect(runs.test(path), path).toBe(true);
+    }
+    for (const path of [
+      "README.md",
+      "package.json",
+      "src/catalog-data.ts",
+      "src/utils/plane-model.ts",
+      "test/support/e2e-env.ts.bak",
+      "test/e2e-env.test.ts",
+    ]) {
+      expect(runs.test(path), path).toBe(false);
     }
   });
 });

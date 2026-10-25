@@ -45,6 +45,7 @@ import {
   characterizedProviders,
   drainStream,
   fakeCredentials,
+  modelIds,
   PLANES,
   piAiRestarts,
   piKnows,
@@ -59,6 +60,7 @@ import {
   todayRowsFor,
   type TodayRow,
   UNKNOWN_ID,
+  until,
   waitForPlaneOwner,
 } from "./support/host.ts";
 import {
@@ -67,10 +69,6 @@ import {
   protocolForSdk,
   reasoningFor,
 } from "./support/src.ts";
-
-/** The ids of a listing, in order. */
-const modelIds = (models: readonly { id: string }[]): string[] =>
-  models.map((model) => model.id);
 
 type RowKey = keyof typeof S0_TODAY.rows;
 
@@ -106,23 +104,6 @@ afterEach(async () => {
   tier = undefined;
   vi.unstubAllGlobals();
 });
-
-/** Poll until `predicate` holds: a committed edit reaches the plane on a microtask. */
-const until = async (
-  predicate: () => boolean | Promise<boolean>,
-  what: string,
-  deadlineMs = 5_000
-): Promise<void> => {
-  const end = Date.now() + deadlineMs;
-  while (!(await predicate())) {
-    if (Date.now() > end) {
-      throw new Error(`never happened: ${what}`);
-    }
-    await new Promise((resolve) => {
-      setTimeout(resolve, 10);
-    });
-  }
-};
 
 /** pi-ai's row as the profile file holds it. */
 const savedPiRow = (

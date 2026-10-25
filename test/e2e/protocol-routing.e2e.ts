@@ -67,7 +67,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { armedKey, keyedTierOf } from "../support/keyed-probes.ts";
+import { e2e } from "../support/e2e-env.ts";
 import {
   baseUrlFor,
   GO_GOOGLE_BASE_URL,
@@ -80,24 +80,27 @@ import {
   findModelSpec,
   findModelSpecOn,
   isServableSdk,
+  openCodeSessionIdFor,
   planeModelFor,
 } from "../support/src.ts";
 
-const LIVE = process.env.OPENCODE_E2E === "1";
+/** The process's own live-suite environment, read once at import. */
+const E2E = e2e();
+
+const LIVE = E2E.live;
 /** What may spend a key: the keyed cases here run on the `full` tier only. */
-const TIER = keyedTierOf(process.env.OPENCODE_E2E_KEYED);
-const ZEN_KEY = armedKey(TIER, "full", process.env.OPENCODE_API_KEY);
+const ZEN_KEY = E2E.keyFor("opencode", "full");
 
 /**
  * The Go plane. A different base URL AND a different credential — which is why
  * probing its models against the Zen base proves nothing about them.
  */
-const GO_KEY = armedKey(TIER, "full", process.env.OPENCODE_GO_API_KEY);
+const GO_KEY = E2E.keyFor("opencode-go", "full");
 
 /** A base to probe instead of the plugin's own, per plane (a mirror or a stub). */
 const BASE_OVERRIDE: Readonly<Record<"go" | "zen", string | undefined>> = {
-  go: process.env.OPENCODE_GO_BASE_URL,
-  zen: process.env.OPENCODE_ZEN_BASE_URL,
+  go: E2E.baseOverride.go,
+  zen: E2E.baseOverride.zen,
 };
 
 /** Generous: these cross the public internet from CI. */
@@ -192,14 +195,16 @@ const BODY_FOR: Readonly<Record<string, Record<string, unknown>>> = {
 /**
  * Headers the plugin injects, so a probe looks like the traffic we actually
  * send: a turn's user agent is `OPENCODE_UA`, which the fetch patch stamps —
- * `OPENCODE_PATCH_USER_AGENT` signs only the plugin's own requests.
+ * `OPENCODE_PATCH_USER_AGENT` signs only the plugin's own requests — and a
+ * session id derived the plugin's own way, so it is in the band the gateway
+ * admits by construction rather than a hand-written value it refuses.
  */
 const PLUGIN_HEADERS: Readonly<Record<string, string>> = {
   "content-type": "application/json",
   "user-agent": OPENCODE_UA,
   "x-opencode-client": "cli",
   "x-opencode-project": "global",
-  "x-opencode-session": "ses_e2e0000000000abcdefghij",
+  "x-opencode-session": openCodeSessionIdFor("protocol-routing"),
 };
 
 interface Probe {

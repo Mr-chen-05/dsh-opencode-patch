@@ -66,8 +66,8 @@ These are the rules a correct implementation satisfies. Each one has a test in �
 
 | Guard | Holds | Fails when |
 | :-- | :-- | :-- |
-| `catalog.test.ts` · SDK coverage | I5 | the catalog names an SDK `PROTOCOL_FOR_SDK` does not map |
-| `catalog.test.ts` · plane × SDK coverage | I1, I2 | a catalog model resolves to a protocol other than its SDK's, or to a base off its own plane |
+| `catalog-routing.test.ts` · SDK coverage | I5 | the catalog names an SDK `PROTOCOL_FOR_SDK` does not map |
+| `catalog-routing.test.ts` · plane × SDK coverage | I1, I2 | a catalog model resolves to a protocol other than its SDK's, or to a base off its own plane |
 | `plane-model.test.ts` · protocol and base tables | I2, I3, I4 | a protocol, a family or a route-level base resolves to the wrong endpoint for its plane |
 | `protocol-routing.e2e.ts` · live probe | I1, I3 | a protocol is declared routable without a path and an auth convention that were really sent, on either plane |
 | `test/mock/*.mock.ts` · offline gateway | §9's shape table | a plane × protocol × family sends a path, query or wire header its endpoint would refuse, or the mock answers a request the vendor would refuse |
@@ -192,7 +192,7 @@ What carried over from the bridge, and why:
 - **The route names stay the vendor's.** No `google` route is taken; there are no hidden routes at all.
 - **A Go Gemini turn's replay state carries `provider: "opencode-go"`**, the label it is replayed under, so a signed tool call replays natively and the translators that bridged two labels (`utils/google-replay.ts`) are gone — decided by a mock-gateway replay test (`test/mock/plane-dispatch.mock.ts`).
 
-What is verified, and in what composition: the in-process characterization (`test/host-characterization.test.ts`) and the real-host suite (`test/host-planes.test.ts`) run the plugin on the real `llm` service and `llm-pi-ai` in both apply orders, and the binary e2e (`test/e2e/host-binary.e2e.ts`) runs the built bundle on a published host, asserting that both planes are the plugin's `PlaneAdapter` and that a Go Gemini turn is sent to `https://opencode.ai/inference/go/google/v1beta`.
+What is verified, and in what composition: the in-process characterization (`test/host-characterization.test.ts`) and the real-host suite (the `test/host-planes*.test.ts` files) run the plugin on the real `llm` service and `llm-pi-ai` in both apply orders, and the binary e2e (`test/e2e/host-binary.e2e.ts`) runs the built bundle on a published host, asserting that both planes are the plugin's `PlaneAdapter` and that a Go Gemini turn is sent to `https://opencode.ai/inference/go/google/v1beta`.
 
 ## 13. Measured: which endpoint families the gateway serves
 
