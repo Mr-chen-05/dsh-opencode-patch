@@ -291,9 +291,7 @@ describe(
 
     it("fixture: the gap ids are gaps on pi 1.1.0, the unknown id is unknown everywhere, and the known ids are known", () => {
       expect(piKnows("opencode", "gpt-5.3-codex-spark")).toBeUndefined();
-      expect(
-        piKnows("opencode-go", "gemini-4-argon-contributor")
-      ).toBeUndefined();
+      expect(piKnows("opencode-go", "gemini-4-argon")).toBeUndefined();
       expect(piKnows("opencode-go", "minimax-m3.1-flash")).toBeUndefined();
       expect(piKnows("opencode", "deepseek-v4-pro")).toBe("openai-completions");
       expect(piKnows("opencode", "gemini-3-flash")).toBe(
@@ -487,7 +485,7 @@ describe(
       ).toMatch(/model "gpt-5\.3-codex-spark" needs an api/u);
       expect(
         directory.find((entry) => entry.provider === "opencode-go")?.error
-      ).toMatch(/model "gemini-4-argon-contributor" needs an api/u);
+      ).toMatch(/model "gemini-4-argon" needs an api/u);
     });
 
     it("[INTENDED_CHANGE] keyless listing: before a key is captured, the listing patch hides every paid model on both planes (D21)", async () => {
@@ -510,7 +508,7 @@ describe(
       }
       expect(listed).toEqual(S0_TODAY.keyedListing);
       expect(listed.opencode).not.toContain("gpt-5.3-codex-spark");
-      expect(listed["opencode-go"]).not.toContain("gemini-4-argon-contributor");
+      expect(listed["opencode-go"]).not.toContain("gemini-4-argon");
       expect(listed["opencode-go"]).not.toContain("minimax-m3.1-flash");
       for (const plane of PLANES) {
         expect(listed[plane]).not.toContain(UNKNOWN_ID);
@@ -607,16 +605,16 @@ describe(
       expect(drained.finish).toEqual({ code: "INVALID_CONFIG", kind: "error" });
     });
 
-    it("[KNOWN_DEFECT] Go gemini-4-argon-contributor: resolveCallConfig refuses it (INVALID_CONFIG) while the turn is served on the Go Google base through the bridge", async () => {
-      expect(
-        await callConfigOf("opencode-go", "gemini-4-argon-contributor")
-      ).toBe("INVALID_CONFIG");
+    it("[KNOWN_DEFECT] Go gemini-4-argon: resolveCallConfig refuses it (INVALID_CONFIG) while the turn is served on the Go Google base through the bridge", async () => {
+      expect(await callConfigOf("opencode-go", "gemini-4-argon")).toBe(
+        "INVALID_CONFIG"
+      );
       const { drained, requests } = await sentBy(
         "opencode-go",
-        "gemini-4-argon-contributor"
+        "gemini-4-argon"
       );
       expect(requests.map((request) => request.url)).toEqual(
-        S0_TODAY.rows["opencode-go/gemini-4-argon-contributor"].sent
+        S0_TODAY.rows["opencode-go/gemini-4-argon"].sent
       );
       expect(requests[0]?.headers["x-goog-api-key"]).toBe("go-test-key".length);
       // pi maps a Google 401 to its own code, not AUTH (as with pi alone).
@@ -654,7 +652,7 @@ describe(
       );
       const cleared = readFileSync(profile.patchPath, "utf8");
       expect(cleared).not.toContain("gpt-5.3-codex-spark");
-      expect(cleared).toContain("gemini-4-argon-contributor");
+      expect(cleared).toContain("gemini-4-argon");
       await expect(
         ctx.configEditor.edit(piEntry, appendTo("opencode", SAVE_CANDIDATE))
       ).rejects.toThrow(S0_TODAY.saveRejectedUnknown);
@@ -727,7 +725,7 @@ describe("characterization · the apply order (no host)", () => {
   // when P-R1 flips this row it drops todayRowsFor's pi-ai-first override in
   // the same diff, and this case becomes "[BASELINE] no facet depends on the
   // apply order" (CONTRIBUTING.md, "Tags").
-  it("[KNOWN_DEFECT] the apply order decides exactly one facet today: Go gemini-4-argon-contributor's callConfig is INVALID_CONFIG in the published order and \"ok\" with pi-ai first (P-R1 drops todayRowsFor's pi-ai-first override with this row's flip)", () => {
+  it("[KNOWN_DEFECT] the apply order decides exactly one facet today: Go gemini-4-argon's callConfig is INVALID_CONFIG in the published order and \"ok\" with pi-ai first (P-R1 drops todayRowsFor's pi-ai-first override with this row's flip)", () => {
     const piAiFirst = todayRowsFor("pi-ai-first");
     const moved = ROW_KEYS.flatMap((key) =>
       FACETS.filter(
@@ -736,10 +734,8 @@ describe("characterization · the apply order (no host)", () => {
           JSON.stringify(expectedFacet(facet, key))
       ).map((facet) => `${key} · ${facet}`)
     );
-    expect(moved).toEqual([
-      "opencode-go/gemini-4-argon-contributor · callConfig",
-    ]);
-    const key = "opencode-go/gemini-4-argon-contributor";
+    expect(moved).toEqual(["opencode-go/gemini-4-argon · callConfig"]);
+    const key = "opencode-go/gemini-4-argon";
     expect(expectedFacet("callConfig", key)).toBe("INVALID_CONFIG");
     expect(expectedFacet("callConfig", key, piAiFirst)).toBe("ok");
   });
