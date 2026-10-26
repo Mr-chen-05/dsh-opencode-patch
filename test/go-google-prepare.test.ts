@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { decoratePlaneAdapters, resolveConfig } from "./support/src.ts";
 
-const model = "gemini-4-argon-contributor";
+const model = "gemini-4-argon";
 const route = "opencode-go-google";
 
 describe("Go Google preparation", () => {

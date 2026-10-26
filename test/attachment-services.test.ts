@@ -60,9 +60,7 @@ it("releases optional service scopes when adapter registration fails", () => {
       host: { PiAiAdapter },
       plane: "opencode-go",
       apiKeyRef: "UNUSED_KEY",
-      specs: OPENCODE_GO_CATALOG.filter(
-        (spec) => spec.id === "gemini-4-argon-contributor"
-      ),
+      specs: OPENCODE_GO_CATALOG.filter((spec) => spec.id === "gemini-4-argon"),
       llm: {
         registerAdapter: () => {
           throw new Error("registration failed");
@@ -147,9 +145,7 @@ it("streams a durable image through the actual Go Gemini adapter", async () => {
     host: { PiAiAdapter },
     plane: "opencode-go",
     apiKeyRef: "BRIDGE_IMAGE_KEY",
-    specs: OPENCODE_GO_CATALOG.filter(
-      (spec) => spec.id === "gemini-4-argon-contributor"
-    ),
+    specs: OPENCODE_GO_CATALOG.filter((spec) => spec.id === "gemini-4-argon"),
     llm: {
       registerAdapter: (_routes, value) => {
         adapter = value as typeof adapter;
@@ -167,7 +163,7 @@ it("streams a durable image through the actual Go Gemini adapter", async () => {
   try {
     for await (const _chunk of adapter!.stream({
       provider: "opencode-go-google",
-      model: "gemini-4-argon-contributor",
+      model: "gemini-4-argon",
       messages: [
         {
           role: "user",
