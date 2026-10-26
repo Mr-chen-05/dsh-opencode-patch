@@ -242,9 +242,11 @@ jobs:
   # a catalog-unknown id, and `test/e2e/host-binary.e2e.ts` asserts today's
   # rows (`S0_TODAY`, shared with the in-process characterization).
   #
-  # Two cells. `pinned` installs the host with npm `overrides` forcing pi to
-  # the version `test/support/host-versions.ts` names and applies the
-  # harness's own patch; `floating` takes whatever pi npm resolves for the
+  # Two cells. `pinned` installs the host with npm `overrides` forcing pi,
+  # cordis and the loader to the versions `test/support/host-versions.ts`
+  # names (the published host declares the last two as tilde ranges, so a
+  # fresh install could otherwise take a newer patch) and applies the
+  # harness's own patch to pi; `floating` takes whatever pi npm resolves for the
   # published host (newer than the harness pins), so a pi release that moves
   # the ground shows up nightly. Pull requests run `pinned` only, and only when
   # they touch the host seam; dispatch and the nightly run both cells.
@@ -325,29 +327,33 @@ jobs:
         id: versions
         if: steps.scope.outputs.run == 'true'
         run: |
-          node --experimental-strip-types --input-type=module -e "import { HOST_VERSIONS } from './test/support/host-versions.ts'; console.log('dsh=' + HOST_VERSIONS.dsh); console.log('pi=' + HOST_VERSIONS.pi)" >> "$GITHUB_OUTPUT"
+          node --experimental-strip-types --input-type=module -e "import { HOST_VERSIONS } from './test/support/host-versions.ts'; console.log('dsh=' + HOST_VERSIONS.dsh); console.log('pi=' + HOST_VERSIONS.pi); console.log('cordis=' + HOST_VERSIONS.cordis); console.log('loader=' + HOST_VERSIONS.loader)" >> "$GITHUB_OUTPUT"
           echo "PREFIX=$RUNNER_TEMP/dsh-host" >> "$GITHUB_ENV"
-      # The pinned install is reproducible, so it is cached by the versions
-      # and the patch; the floating one is the point of re-resolving, so never.
+      # The pinned install forces every host version HOST_VERSIONS names, so it
+      # is cached by those versions and the patch (the rest of the published
+      # host's tree is whatever its ranges resolved on the miss that filled
+      # the cache); the floating one is the point of re-resolving, so never.
       - name: cache the pinned host install
         id: host-cache
         if: steps.scope.outputs.run == 'true' && matrix.cell == 'pinned'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/dsh-host
-          key: dsh-host-${{ matrix.cell }}-${{ steps.versions.outputs.dsh }}-${{ steps.versions.outputs.pi }}-${{ hashFiles('patches/*.patch') }}
+          key: dsh-host-${{ matrix.cell }}-${{ steps.versions.outputs.dsh }}-${{ steps.versions.outputs.pi }}-${{ steps.versions.outputs.cordis }}-${{ steps.versions.outputs.loader }}-${{ hashFiles('patches/*.patch') }}
       - name: install the published host into a throwaway prefix
         if: steps.scope.outputs.run == 'true' && steps.host-cache.outputs.cache-hit != 'true'
         env:
           CELL: ${{ matrix.cell }}
           DSH: ${{ steps.versions.outputs.dsh }}
           PI: ${{ steps.versions.outputs.pi }}
+          CORDIS: ${{ steps.versions.outputs.cordis }}
+          LOADER: ${{ steps.versions.outputs.loader }}
         run: |
           mkdir -p "$PREFIX"
           # The overrides must be in the prefix's own package.json BEFORE the
           # install, or npm resolves the wrapper's ^range to the newest pi.
           if [ "$CELL" = pinned ]; then
-            printf '{ "private": true, "overrides": { "@earendil-works/pi-ai": "%s" } }\n' "$PI" > "$PREFIX/package.json"
+            printf '{ "private": true, "overrides": { "@earendil-works/pi-ai": "%s", "@deepseek-ai/cordis": "%s", "@deepseek-ai/cordis-plugin-loader": "%s" } }\n' "$PI" "$CORDIS" "$LOADER" > "$PREFIX/package.json"
           else
             printf '{ "private": true }\n' > "$PREFIX/package.json"
           fi
@@ -356,11 +362,13 @@ jobs:
           if [ "$CELL" = pinned ]; then
             patch -p1 -d "$PREFIX/node_modules/@earendil-works/pi-ai" < "patches/@earendil-works__pi-ai@$PI.patch"
           fi
-      - name: assert the pi the host resolved
+      - name: assert the pi, cordis and loader the host resolved
         if: steps.scope.outputs.run == 'true'
         env:
           CELL: ${{ matrix.cell }}
           PI: ${{ steps.versions.outputs.pi }}
+          CORDIS: ${{ steps.versions.outputs.cordis }}
+          LOADER: ${{ steps.versions.outputs.loader }}
         run: |
           resolved="$(node -p "require(process.env.PREFIX + '/node_modules/@earendil-works/pi-ai/package.json').version")"
           echo "cell $CELL: pi $resolved"
@@ -373,6 +381,18 @@ jobs:
             echo "::error::the pinned cell resolved pi $resolved, not $PI"
             exit 1
           fi
+          # The check test/host-versions.test.ts runs for the unit install,
+          # here for the host the binary e2e boots (a cached prefix included).
+          for pair in "cordis:$CORDIS" "cordis-plugin-loader:$LOADER"; do
+            name="@deepseek-ai/${pair%%:*}"
+            want="${pair#*:}"
+            got="$(node -p "require(process.env.PREFIX + '/node_modules/$name/package.json').version")"
+            echo "cell $CELL: $name $got"
+            if [ "$CELL" = pinned ] && [ "$got" != "$want" ]; then
+              echo "::error::the pinned cell resolved $name $got, not $want"
+              exit 1
+            fi
+          done
       - if: steps.scope.outputs.run == 'true'
         run: pnpm run build
       - name: boot the host binary with the probe

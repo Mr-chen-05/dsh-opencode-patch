@@ -16,6 +16,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  adaptersOf,
   drainStream,
   fakeCredentials,
   fakeLaunchEnvironment,
@@ -31,6 +32,38 @@ afterEach(async () => {
   tier = undefined;
   vi.unstubAllGlobals();
 });
+
+/** What pi's `Models.getAuth` answers, as far as these cases read it. */
+interface PiAuthResult {
+  readonly env?: Readonly<Record<string, string>>;
+  readonly source?: string;
+}
+
+/**
+ * pi's own auth answer for a route, through the collection pi-ai's adapter
+ * built for its current snapshot (adapter.ts:251-259, private) and pi's public
+ * `Models.getAuth` (pi 1.1.0 `dist/models.d.ts`). It is the one place a stored
+ * record's `env` is observable on a plane: pi forwards it as the result's
+ * `env` (`dist/auth/helpers.js`), and no plane request reads it back.
+ *
+ * @param current - the tier whose pi-ai adapter to read.
+ * @param route - the route to resolve auth for.
+ * @returns the source and env, with the key left out.
+ */
+const piAuthOf = async (
+  current: TierA,
+  route: string
+): Promise<PiAuthResult | undefined> => {
+  const adapter = adaptersOf(current.llm).get(route)?.adapter as unknown as {
+    current: () => {
+      models: { getAuth: (id: string) => Promise<PiAuthResult | undefined> };
+    };
+  };
+  const result = await adapter.current().models.getAuth(route);
+  return result === undefined
+    ? undefined
+    : { env: result.env, source: result.source };
+};
 
 /** One completions model on Zen, which pi 1.1.0 serves at its legacy base. */
 const ZEN_COMPLETIONS = { models: [{ id: "deepseek-v4-pro" }] };
@@ -59,6 +92,86 @@ describe("host · pi-ai's credential paths (tier A)", () => {
       "llm-pi-ai/opencode",
     ]);
     expect(drained.finish).toEqual({ code: "AUTH", kind: "error" });
+    // A record with no env hands pi none (auth.ts:80 spreads it only when set).
+    expect(await piAuthOf(tier, "opencode")).toEqual({
+      env: undefined,
+      source: "stored credential",
+    });
+  });
+
+  it("maps an api-key record carrying env as well: pi's auth carries the stored env, the turn still authenticates with the stored key, and the launch environment is not read (auth.ts:74-84)", async () => {
+    const wire = recordingFetch();
+    vi.stubGlobal("fetch", wire.fetch);
+    const credentials = fakeCredentials({
+      records: {
+        "llm-pi-ai/opencode": {
+          env: { OPENCODE_REGION: "test" },
+          key: "stored-k",
+          kind: "api-key",
+        },
+      },
+    });
+    const launchEnvironment = fakeLaunchEnvironment({
+      OPENCODE_API_KEY: "env-key-k",
+    });
+    tier = await mountTierA({
+      credentials,
+      launchEnvironment,
+      providers: { opencode: ZEN_COMPLETIONS },
+    });
+    const drained = await drainStream(tier.llm, "opencode", "deepseek-v4-pro");
+    expect(wire.requests.map((request) => request.url)).toEqual([
+      LEGACY_COMPLETIONS,
+    ]);
+    // The stored key's length, not the environment's (a different length).
+    expect(wire.requests[0]?.headers.authorization).toBe(
+      "Bearer stored-k".length
+    );
+    expect(launchEnvironment.reads).toEqual([]);
+    expect(drained.finish).toEqual({ code: "AUTH", kind: "error" });
+    // The env branch itself (auth.ts:80): nothing on a plane's wire reads the
+    // stored env, so it is asserted where pi hands it on, in its auth answer.
+    expect(await piAuthOf(tier, "opencode")).toEqual({
+      env: { OPENCODE_REGION: "test" },
+      source: "stored credential",
+    });
+  });
+
+  it("hands a non-api-key record's payload to pi verbatim: on a plane, whose pi auth has no OAuth, the turn fails PI_AI_ERROR with no request and no fallback to the launch environment (auth.ts:74-84)", async () => {
+    // Not a record a plane's Sign-in writes (pi 1.1.0's planes offer an API
+    // key only); pinned so P-R1's store, which copies this mapping, answers
+    // the same for one a user or another plane left behind.
+    const wire = recordingFetch();
+    vi.stubGlobal("fetch", wire.fetch);
+    const credentials = fakeCredentials({
+      records: {
+        "llm-pi-ai/opencode": {
+          kind: "grant",
+          payload: {
+            access: "grant-access",
+            expires: Date.now() + 3_600_000,
+            refresh: "grant-refresh",
+            type: "oauth",
+          },
+        },
+      },
+    });
+    const launchEnvironment = fakeLaunchEnvironment({
+      OPENCODE_API_KEY: "env-k",
+    });
+    tier = await mountTierA({
+      credentials,
+      launchEnvironment,
+      providers: { opencode: ZEN_COMPLETIONS },
+    });
+    const drained = await drainStream(tier.llm, "opencode", "deepseek-v4-pro");
+    expect(credentials.calls).toContainEqual([
+      "readRecord",
+      "llm-pi-ai/opencode",
+    ]);
+    expect(wire.requests).toEqual([]);
+    expect(launchEnvironment.reads).toEqual([]);
+    expect(drained.finish).toEqual({ code: "PI_AI_ERROR", kind: "error" });
   });
 
   it("F18 — a named ref the credentials service misses is MISSING_CREDENTIAL with no request, and listModels answers [] (index.ts:188-211; adapter.ts:295-312)", async () => {
