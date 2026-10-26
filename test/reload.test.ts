@@ -31,7 +31,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   adaptersOf,
+  type HostLlm,
   mountTierA,
+  planeKeysOnly,
   s0Providers,
   type TierA,
 } from "./support/host.ts";
@@ -120,6 +122,14 @@ const nameOf = (value: unknown): unknown =>
 const baseUrlOf = (value: unknown): unknown =>
   isRecord(value) ? value.baseUrl : undefined;
 
+const idsOf = (value: unknown): unknown =>
+  Array.isArray(value)
+    ? value.map((entry: unknown) => (isRecord(entry) ? entry.id : entry))
+    : value;
+
+/** The settings namespace the tier-A discovery probe registers under. */
+const PROBE_NAMESPACE = "reload-probe";
+
 /** The base a plane's catalog dispatches `id` to, under the default endpoint. */
 const planeBase = (
   route: "opencode" | "opencode-go",
@@ -172,6 +182,21 @@ interface Site {
     /** A's install, where what differs is not config. */
     readonly installA?: (llm: object) => (() => void) | undefined;
     readonly probe: (llm: Record<string, unknown>) => Promise<unknown>;
+  };
+  /**
+   * The same site on the real host (tier A), where the stand-in's probe does not
+   * apply: a call whose answer through the site's decoration differs from the
+   * host's own THERE, so the block's "survivor still decorates" and "last
+   * dispose restores" checks can fail. Without one, the listing would be probed
+   * by a filter with nothing to filter (tier A mounts no hidden route) and
+   * discovery not at all.
+   */
+  readonly tierA: {
+    /** The install the block drives, where the site's default decorates nothing there. */
+    readonly install?: (llm: object) => (() => void) | undefined;
+    /** Host state the probe needs, set before the first install. */
+    readonly setup?: (llm: HostLlm) => void;
+    readonly probe: (llm: HostLlm) => Promise<unknown>;
   };
 }
 
@@ -228,6 +253,15 @@ const SITES: readonly Site[] = [
         }),
       probe: (llm) => call(llm, "listModels", "opencode"),
     },
+    // pi-ai lists the plane's catalog once a key is stored; with no credential
+    // the keyless filter drops the priced ids the host's own answer keeps.
+    tierA: {
+      install: (llm) =>
+        hideResponsesRoute(asContext(llm), resolveConfig(), {
+          hasCredential: () => false,
+        }),
+      probe: async (llm) => idsOf(await llm.listModels("opencode")),
+    },
     targetOf: (llm) => llm,
   },
   {
@@ -254,6 +288,17 @@ const SITES: readonly Site[] = [
           baseURL: "https://relay.example/v1",
         }),
     },
+    // A discovery registered on the real runtime, answering one id with no
+    // network: the decoration merges by the request's route alone.
+    tierA: {
+      probe: (llm) =>
+        llm.discoverModels(PROBE_NAMESPACE, { provider: "opencode-go" }),
+      setup: (llm) => {
+        llm.registerModelDiscovery(PROBE_NAMESPACE, async () => [
+          { id: "minimax-m3" },
+        ]);
+      },
+    },
     targetOf: (llm) => llm,
   },
   {
@@ -278,6 +323,12 @@ const SITES: readonly Site[] = [
         nameOf(
           await call(llm, "resolveModelInfo", "opencode-go", "minimax-m3")
         ),
+    },
+    // pi's installed catalog is an older snapshot than ours for this id, and the
+    // decoration's window is authoritative.
+    tierA: {
+      probe: async (llm) =>
+        contextWindowOf(await llm.resolveModelInfo("opencode", "gpt-5.4")),
     },
     targetOf: (llm) => llm,
   },
@@ -338,6 +389,17 @@ const SITES: readonly Site[] = [
             : undefined,
         };
       },
+    },
+    tierA: {
+      probe: async (llm) =>
+        baseUrlOf(
+          await call(
+            adaptersOf(llm).get("opencode")?.adapter ?? {},
+            "resolveModel",
+            "opencode",
+            "deepseek-v4-pro"
+          )
+        ),
     },
     targetOf: adapterOf,
   },
@@ -545,7 +607,11 @@ describe("reload · on the real host (tier A)", { timeout: 15_000 }, () => {
       [site.name, "last disposed first", site, false] as const,
     ])
   )("%s · %s", async (name, _order, site, fifo) => {
-    tier = await mountTierA({ providers: s0Providers() });
+    // Plane keys stored, so pi-ai lists the planes' catalogs (the listing probe).
+    tier = await mountTierA({
+      credentials: planeKeysOnly(),
+      providers: s0Providers(),
+    });
     const { llm } = tier;
     let target: object = llm;
     if (name === "plane-adapters") {
@@ -556,21 +622,28 @@ describe("reload · on the real host (tier A)", { timeout: 15_000 }, () => {
       expect(adaptersOf(llm).get("opencode-go")?.adapter).toBe(shared);
       target = shared ?? {};
     }
+    site.tierA.setup?.(llm);
+    const install = site.tierA.install ?? site.install;
     const listed = llm.listProviders();
     const info = await llm.resolveModelInfo("opencode", "deepseek-v4-pro");
+    const raw = await site.tierA.probe(llm);
     for (const key of site.keys) {
       expect(Object.hasOwn(target, key), key).toBe(false);
     }
 
-    const a = site.install(llm);
+    const a = install(llm);
     const installedA = ownValues(target, site.keys);
-    const b = site.install(llm);
+    const b = install(llm);
     expect(a).toBeTypeOf("function");
     expect(b).toBeTypeOf("function");
     const installedB = ownValues(target, site.keys);
     for (const key of site.keys) {
       expect(Object.hasOwn(target, key), key).toBe(true);
     }
+    // The probe has to tell the decoration from the host's own answer here,
+    // or the two checks against `raw` below could not fail.
+    const decorated = await site.tierA.probe(llm);
+    expect(decorated).not.toEqual(raw);
 
     (fifo ? a : b)?.();
     const survivor = fifo ? installedB : installedA;
@@ -580,18 +653,19 @@ describe("reload · on the real host (tier A)", { timeout: 15_000 }, () => {
         `survivor intact: ${key}`
       ).toBe(survivor.get(key));
     }
+    await expect(site.tierA.probe(llm), "survivor decorates").resolves.toEqual(
+      decorated
+    );
     if (name === "plane-adapters") {
-      expect(
-        baseUrlOf(
-          await call(target, "resolveModel", "opencode", "deepseek-v4-pro")
-        )
-      ).toBe(planeBase("opencode", "deepseek-v4-pro"));
+      expect(decorated).toBe(planeBase("opencode", "deepseek-v4-pro"));
     }
 
     (fifo ? b : a)?.();
     for (const key of site.keys) {
       expect(Object.hasOwn(target, key), `restored: ${key}`).toBe(false);
     }
+    await expect(site.tierA.probe(llm), "restored").resolves.toEqual(raw);
+    // Smoke: other calls through the restored receiver still answer as before.
     expect(llm.listProviders()).toEqual(listed);
     await expect(
       llm.resolveModelInfo("opencode", "deepseek-v4-pro")
@@ -665,9 +739,35 @@ describe("reload · through apply()", () => {
         on: vi.fn(),
       }) as unknown as CordisContext;
 
+    const ownBefore = {
+      adapter: new Set(Reflect.ownKeys(adapter)),
+      llm: new Set(Reflect.ownKeys(llm)),
+    };
     apply(ctxFor());
     apply(ctxFor());
     expect(cleanups).toHaveLength(2);
+    // The behavioural tripwire for "patchMethod is the only way": whatever
+    // syntax a later site used, every function `apply()` left as an own property
+    // of a host object carries the helper's record. A bare `llm.x = wrapped`
+    // would leave an own function with none.
+    for (const [label, host] of [
+      ["llm", llm],
+      ["adapter", adapter],
+    ] as const) {
+      const added = Reflect.ownKeys(host).filter(
+        (key) => !ownBefore[label].has(key)
+      );
+      expect(added.length, label).toBeGreaterThan(0);
+      for (const key of added) {
+        const value = Reflect.getOwnPropertyDescriptor(host, key)?.value;
+        if (typeof value === "function" && typeof key === "string") {
+          expect(
+            inspectPatch(value, key),
+            `${label}.${key} installed through patchMethod`
+          ).toBeDefined();
+        }
+      }
+    }
     const llmB = ownValues(llm, llmKeys);
     const adapterB = ownValues(adapter, adapterKeys);
     for (const key of llmKeys) {
