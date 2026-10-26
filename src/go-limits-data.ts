@@ -27,10 +27,10 @@ export const GO_MODEL_LIMITS: Readonly<Record<string, ModelAllowance>> = {
     goPlus: 160,
     name: "DeepSeek V4.1 Flash (Off-Peak)",
   },
-  "gemini-4-argon-contributor": {
-    go: Number.NaN,
-    goPlus: Number.NaN,
-    name: "Gemini 4 Argon Contributor",
+  "gemini-4-argon": {
+    go: 30,
+    goPlus: 120,
+    name: "Gemini 4 Argon (50% off)",
   },
   "glm-5.2": {
     go: 60,
