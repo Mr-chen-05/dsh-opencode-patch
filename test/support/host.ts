@@ -428,7 +428,7 @@ export const S0_PROFILE = {
       { id: "deepseek-v4-pro" },
       { id: "muse-spark-1.2-contributor" },
       { id: "minimax-m3" },
-      { id: "gemini-4-argon-contributor" },
+      { id: "gemini-4-argon" },
       { id: "minimax-m3.1-flash" },
     ],
   },
@@ -654,12 +654,12 @@ export const S0_TODAY = {
       sent: [`${ZEN}/inference/go/anthropic/v1/messages?beta=true`],
       tags: tags(D, B, B),
     },
-    "opencode-go/gemini-4-argon-contributor": {
+    "opencode-go/gemini-4-argon": {
       callConfig: "INVALID_CONFIG",
       info: { context: 1_048_576, efforts: ["low", "medium", "high"] },
       finish: "PI_AI_ERROR",
       sent: [
-        `${ZEN}/inference/go/google/v1beta/models/gemini-4-argon-contributor:streamGenerateContent?alt=sse`,
+        `${ZEN}/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse`,
       ],
       tags: tags(B, D, B),
     },
@@ -705,7 +705,7 @@ export const ZEN_UNDESCRIBED = ["gpt-5.3-codex-spark", UNKNOWN_ID] as const;
 /**
  * TODAY's rows for an apply order. `S0_TODAY.rows` is the `plugin-first`
  * table; with `pi-ai-first` the adapter decoration wraps pi-ai's plane adapter
- * and exactly one facet moves — Go gemini-4-argon-contributor validates —
+ * and exactly one facet moves — Go gemini-4-argon validates —
  * measured in `test/host-characterization.test.ts`, which generates one test
  * per row and facet for each order, titled with that order's tags. The moved
  * facet is `BASELINE` in this table: its `"ok"` is already what P-R1 keeps, so
@@ -730,11 +730,11 @@ export const todayRowsFor = (
   }
   return {
     ...S0_TODAY.rows,
-    "opencode-go/gemini-4-argon-contributor": {
-      ...S0_TODAY.rows["opencode-go/gemini-4-argon-contributor"],
+    "opencode-go/gemini-4-argon": {
+      ...S0_TODAY.rows["opencode-go/gemini-4-argon"],
       callConfig: "ok",
       tags: {
-        ...S0_TODAY.rows["opencode-go/gemini-4-argon-contributor"].tags,
+        ...S0_TODAY.rows["opencode-go/gemini-4-argon"].tags,
         callConfig: B,
       },
     },

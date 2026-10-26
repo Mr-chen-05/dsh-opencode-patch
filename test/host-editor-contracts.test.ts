@@ -57,7 +57,7 @@ const knownProviders = (): Record<string, Record<string, unknown>> => {
   const providers = s0Providers();
   const gaps = new Set([
     "gpt-5.3-codex-spark",
-    "gemini-4-argon-contributor",
+    "gemini-4-argon",
     "minimax-m3.1-flash",
   ]);
   for (const plane of ["opencode", "opencode-go"]) {
