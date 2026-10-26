@@ -21,11 +21,14 @@ import { interpolate } from "@deepseek-ai/cordis-plugin-loader";
 import { resolveRetryPolicy } from "@deepseek-ai/dsh-llm";
 import * as LlmPiAi from "@deepseek-ai/dsh-llm-pi-ai";
 import z from "@deepseek-ai/schemastery";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   adaptersOf,
+  drainStream,
+  fakeCredentials,
   mountTierA,
+  recordingFetch,
   s0Providers,
   type TierA,
 } from "./support/host.ts";
@@ -143,6 +146,7 @@ let tier: TierA | undefined;
 afterEach(async () => {
   await tier?.dispose();
   tier = undefined;
+  vi.unstubAllGlobals();
 });
 
 describe("host · pi-ai's Config (llm-pi-ai/src/config.ts)", () => {
@@ -260,7 +264,7 @@ describe("host · ResolvedPiAiProviderProfile (llm-pi-ai/src/config.ts:186-219,4
     ]);
   });
 
-  it("resolves a profile with these keys at runtime, models destructured out", async () => {
+  it("resolves a profile with these keys at runtime, models destructured out; F4 — a stored id pi cannot place is deferred to modelErrors and catalogError (config.ts:487)", async () => {
     tier = await mountTierA({ providers: s0Providers() });
     const profile = profileOf(tier, "opencode");
     expect(Object.keys(profile).toSorted()).toEqual([
@@ -300,6 +304,48 @@ describe("host · ResolvedPiAiProviderProfile (llm-pi-ai/src/config.ts:186-219,4
     ]).toEqual(["gemini-4-argon-contributor", "minimax-m3.1-flash"]);
   });
 
+  it("F4 — a stored id pi cannot place is not listed, and a turn on it is INVALID_CONFIG with no request (index.ts:171; adapter.ts:271-311)", async () => {
+    // Plugin-less, so this half of F4 outlives the characterization rows that
+    // also show it with the plugin mounted (P-R1 flips those). A key is stored
+    // for each plane: with none, F18's empty listing would mask the check.
+    const wire = recordingFetch();
+    vi.stubGlobal("fetch", wire.fetch);
+    const mounted = await mountTierA({
+      credentials: fakeCredentials({
+        refs: { OPENCODE_API_KEY: "zen-k", OPENCODE_GO_API_KEY: "go-k" },
+      }),
+      providers: s0Providers(),
+    });
+    tier = mounted;
+    const listed = async (route: string): Promise<string[]> => {
+      const models = await mounted.llm.listModels(route);
+      return models.map((model) => model.id);
+    };
+    expect(await listed("opencode")).toEqual([
+      "deepseek-v4-pro",
+      "gpt-5.4",
+      "claude-haiku-5-5",
+      "gemini-3-flash",
+    ]);
+    expect(await listed("opencode-go")).toEqual([
+      "deepseek-v4-pro",
+      "muse-spark-1.2-contributor",
+      "minimax-m3",
+    ]);
+    for (const [route, model] of [
+      ["opencode", "gpt-5.3-codex-spark"],
+      ["opencode-go", "gemini-4-argon-contributor"],
+      ["opencode-go", "minimax-m3.1-flash"],
+    ] as const) {
+      const drained = await drainStream(mounted.llm, route, model);
+      expect(drained.finish, `${route}/${model}`).toEqual({
+        code: "INVALID_CONFIG",
+        kind: "error",
+      });
+    }
+    expect(wire.requests).toEqual([]);
+  });
+
   it("F1/F2 — a model-less plane resolves pi 1.1.0's whole catalog, per protocol, on the legacy bases", async () => {
     tier = await mountTierA({
       providers: { opencode: {}, "opencode-go": {} },
@@ -329,6 +375,31 @@ describe("host · ResolvedPiAiProviderProfile (llm-pi-ai/src/config.ts:186-219,4
         bases: ["https://opencode.ai/zen/go/v1"],
         count: 6,
       },
+    });
+  });
+
+  it("F5 — a route-level api and baseURL override every model, collapsing pi's four protocols onto one (llm-pi-ai/src/catalog.ts:917,922)", async () => {
+    tier = await mountTierA({
+      providers: {
+        opencode: { api: "openai-responses" },
+        "opencode-go": { baseURL: "https://gateway.test/go" },
+      },
+    });
+    const zen = profileOf(tier, "opencode");
+    expect(zen.catalogError).toBeUndefined();
+    // Every one of F2's 83 Zen models now speaks Responses; each keeps its own
+    // base, which only the route's baseURL would override.
+    expect(byProtocol(zen.piProvider)).toEqual({
+      "openai-responses": {
+        bases: ["https://opencode.ai/zen", "https://opencode.ai/zen/v1"],
+        count: 83,
+      },
+    });
+    // Go's 30 models keep their protocols and all move to the route's base.
+    expect(byProtocol(profileOf(tier, "opencode-go").piProvider)).toEqual({
+      "anthropic-messages": { bases: ["https://gateway.test/go"], count: 5 },
+      "openai-completions": { bases: ["https://gateway.test/go"], count: 19 },
+      "openai-responses": { bases: ["https://gateway.test/go"], count: 6 },
     });
   });
 });

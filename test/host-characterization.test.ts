@@ -16,8 +16,9 @@
  * the binary e2e reads too, so the in-process host and the published binary
  * cannot drift apart unnoticed. Each model's three facets (model info, the
  * call-config verdict, the wire) carry their own tag there, and this file
- * generates one test per model and facet titled with that tag, so the tag is
- * what a reader and a phase's diff go by. Where a measurement contradicted the
+ * generates one test per model and facet titled with that tag, in each apply
+ * order (`todayRowsFor(order)` carries that order's tags), so the tag is what
+ * a reader and a phase's diff go by. Where a measurement contradicted the
  * plan's expectation the row keeps the measurement and says so.
  *
  * Every case boots its own host, so a key the fetch patch captured in one case
@@ -230,14 +231,21 @@ const dropFrom =
     };
   };
 
-/** One generated case per row and facet, titled with the facet's own tag. */
-const FACET_CASES = ROW_KEYS.flatMap((key) =>
-  (["info", "callConfig", "wire"] as const).map((facet) => ({
-    facet,
-    key,
-    tag: S0_TODAY.rows[key].tags[facet],
-  }))
-);
+const FACETS = ["info", "callConfig", "wire"] as const;
+
+/**
+ * One generated case per row and facet, titled with the facet's own tag in
+ * that order's table, so a phase's diff names every facet it moves in both
+ * orders.
+ */
+const facetCasesFor = (order: ApplyOrder) =>
+  ROW_KEYS.flatMap((key) =>
+    FACETS.map((facet) => ({
+      facet,
+      key,
+      tag: todayRowsFor(order)[key].tags[facet],
+    }))
+  );
 
 /** The plane a row key belongs to, and the bundled catalog for it. */
 const catalogFor = (key: RowKey) =>
@@ -377,7 +385,7 @@ describe(
       expect(compared).toBeGreaterThan(0);
     });
 
-    it("fixture: the binary e2e's cell-aware helpers — the floating save-block pattern names any undescribed id and only those, and todayRowsFor refuses an order it does not know", () => {
+    it("fixture: the binary e2e's cell-aware helpers — the floating save-block pattern names any undescribed id and only those, todayRowsFor refuses an order it does not know, and a facet its pi-ai-first table moves is retagged with it, from KNOWN_DEFECT to BASELINE", () => {
       // The pinned message is one the floating pattern accepts, so the two
       // cells cannot disagree on a pinned run.
       const pinned =
@@ -396,6 +404,39 @@ describe(
       }
       for (const order of APPLY_ORDERS) {
         expect(Object.keys(todayRowsFor(order))).toEqual(ROW_KEYS);
+      }
+      // Structural, so no phase has to edit it: a facet whose VALUE differs
+      // between the orders is exactly a facet whose TAG differs, and each one
+      // is a defect in the published order whose pi-ai-first value is already
+      // what P-R1 keeps. Which facets those are today is pinned by the
+      // [KNOWN_DEFECT] apply-order case below; once P-R1 collapses the
+      // override, both sets are empty and this still holds.
+      const piAiFirst = todayRowsFor("pi-ai-first");
+      const moved = ROW_KEYS.flatMap((key) =>
+        FACETS.filter(
+          (facet) =>
+            JSON.stringify(expectedFacet(facet, key, piAiFirst)) !==
+            JSON.stringify(expectedFacet(facet, key))
+        ).map((facet) => `${key} · ${facet}`)
+      );
+      const retagged = ROW_KEYS.flatMap((key) =>
+        FACETS.filter(
+          (facet) =>
+            piAiFirst[key].tags[facet] !== S0_TODAY.rows[key].tags[facet]
+        ).map((facet) => `${key} · ${facet}`)
+      );
+      expect(retagged).toEqual(moved);
+      for (const key of ROW_KEYS) {
+        for (const facet of FACETS) {
+          if (moved.includes(`${key} · ${facet}`)) {
+            expect(S0_TODAY.rows[key].tags[facet], `${key} · ${facet}`).toBe(
+              "KNOWN_DEFECT"
+            );
+            expect(piAiFirst[key].tags[facet], `${key} · ${facet}`).toBe(
+              "BASELINE"
+            );
+          }
+        }
       }
       // A probe JSON missing the field reads `undefined`; it must not select
       // the pi-ai-first table.
@@ -476,9 +517,14 @@ describe(
       }
     });
 
-    it.each(FACET_CASES)("[$tag] $key · $facet", async ({ facet, key }) => {
-      expect(await measureFacet(facet, key)).toEqual(expectedFacet(facet, key));
-    });
+    it.each(facetCasesFor("plugin-first"))(
+      "[$tag] $key · $facet",
+      async ({ facet, key }) => {
+        expect(await measureFacet(facet, key)).toEqual(
+          expectedFacet(facet, key)
+        );
+      }
+    );
 
     it("[KNOWN_DEFECT] the toggle-only model is offered Minimal/Xhigh/Max (D1)", async () => {
       // Chosen from the bundled catalog, not by name: on/off reasoning, no levels.
@@ -655,30 +701,49 @@ describe(
       }
     });
 
-    it("[KNOWN_DEFECT] the Go Gemini verdict depends on the apply order: decorated, gemini-4-argon-contributor validates, and no other facet of any row moves (decoratePlaneAdapters in src/models-discovery.ts)", async () => {
-      // The plan expected INVALID_CONFIG for Go Gemini; that holds in the
-      // published host's order (above) and not in this one, where the wrapped
-      // plane adapter delegates to opencode-go-google. todayRowsFor is the
-      // table the binary e2e picks when its probe infers this order.
-      const expected = todayRowsFor("pi-ai-first");
-      expect(
-        ROW_KEYS.filter(
-          (key) =>
-            JSON.stringify(expected[key]) !== JSON.stringify(S0_TODAY.rows[key])
-        )
-      ).toEqual(["opencode-go/gemini-4-argon-contributor"]);
-      for (const facet of ["info", "callConfig", "wire"] as const) {
-        const measured: Record<string, unknown> = {};
-        const want: Record<string, unknown> = {};
-        for (const key of ROW_KEYS) {
-          measured[key] = await measureFacet(facet, key);
-          want[key] = expectedFacet(facet, key, expected);
-        }
-        expect(measured, facet).toEqual(want);
+    // The plan expected INVALID_CONFIG for Go Gemini; that holds in the
+    // published host's order (the plugin-first block, where the case is
+    // [KNOWN_DEFECT]) and not in this one, where the wrapped plane adapter
+    // delegates to opencode-go-google (decoratePlaneAdapters in
+    // src/models-discovery.ts), so here it is [BASELINE]. todayRowsFor is the
+    // table the binary e2e picks when its probe infers this order; these cases
+    // measure every facet of it, and the apply-order case below pins that
+    // only that one facet moves.
+    it.each(facetCasesFor("pi-ai-first"))(
+      "[$tag] $key · $facet",
+      async ({ facet, key }) => {
+        expect(await measureFacet(facet, key)).toEqual(
+          expectedFacet(facet, key, todayRowsFor("pi-ai-first"))
+        );
       }
-    });
+    );
   }
 );
+
+describe("characterization · the apply order (no host)", () => {
+  // Pure: it reads the two tables the binary e2e picks between, and boots
+  // nothing. Each order's generated facet cases measure its table; this case
+  // pins WHERE they differ today. The dependence on the order is the defect:
+  // when P-R1 flips this row it drops todayRowsFor's pi-ai-first override in
+  // the same diff, and this case becomes "[BASELINE] no facet depends on the
+  // apply order" (CONTRIBUTING.md, "Tags").
+  it("[KNOWN_DEFECT] the apply order decides exactly one facet today: Go gemini-4-argon-contributor's callConfig is INVALID_CONFIG in the published order and \"ok\" with pi-ai first (P-R1 drops todayRowsFor's pi-ai-first override with this row's flip)", () => {
+    const piAiFirst = todayRowsFor("pi-ai-first");
+    const moved = ROW_KEYS.flatMap((key) =>
+      FACETS.filter(
+        (facet) =>
+          JSON.stringify(expectedFacet(facet, key, piAiFirst)) !==
+          JSON.stringify(expectedFacet(facet, key))
+      ).map((facet) => `${key} · ${facet}`)
+    );
+    expect(moved).toEqual([
+      "opencode-go/gemini-4-argon-contributor · callConfig",
+    ]);
+    const key = "opencode-go/gemini-4-argon-contributor";
+    expect(expectedFacet("callConfig", key)).toBe("INVALID_CONFIG");
+    expect(expectedFacet("callConfig", key, piAiFirst)).toBe("ok");
+  });
+});
 
 describe(
   "characterization · a gap-free plane (tier B)",

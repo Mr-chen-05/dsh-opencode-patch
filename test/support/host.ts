@@ -706,7 +706,10 @@ export const ZEN_UNDESCRIBED = ["gpt-5.3-codex-spark", UNKNOWN_ID] as const;
  * TODAY's rows for an apply order. `S0_TODAY.rows` is the `plugin-first`
  * table; with `pi-ai-first` the adapter decoration wraps pi-ai's plane adapter
  * and exactly one facet moves — Go gemini-4-argon-contributor validates —
- * measured in `test/host-characterization.test.ts`. The binary e2e picks the
+ * measured in `test/host-characterization.test.ts`, which generates one test
+ * per row and facet for each order, titled with that order's tags. The moved
+ * facet is `BASELINE` in this table: its `"ok"` is already what P-R1 keeps, so
+ * there is nothing for a phase to flip in this order. The binary e2e picks the
  * table from the order its probe INFERRED — whether the decoration wrapped
  * pi-ai's plane adapter, which is what the rows depend on — because on a real
  * host the order is a race (F17) the suite must not pin.
@@ -730,6 +733,10 @@ export const todayRowsFor = (
     "opencode-go/gemini-4-argon-contributor": {
       ...S0_TODAY.rows["opencode-go/gemini-4-argon-contributor"],
       callConfig: "ok",
+      tags: {
+        ...S0_TODAY.rows["opencode-go/gemini-4-argon-contributor"].tags,
+        callConfig: B,
+      },
     },
   };
 };
@@ -1368,21 +1375,40 @@ export const planeKeysOnly = (): FakeCredentials =>
   });
 
 /**
+ * `credentialRef`'s grammar (`credentials/credentials/src/index.ts:19,29-34`):
+ * a POSIX shell identifier. Restated because `@deepseek-ai/dsh-credentials` is
+ * only a transitive dependency here.
+ */
+const CREDENTIAL_REF_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
  * session-controller's `hasProviderApiKey` (`api/session-controller/src/catalog.ts:97-116`),
- * restated line for line from the real parts, because the package does not
- * export it (its `exports` map reaches `SessionController` and
- * `buildModelCatalog` only). `initializeDefaultModel` (`index.ts:320-331`)
- * calls it after a Sign-in and, when it answers false, replaces the user's
- * default model with the account's first one. It answers the FIRST
- * configurable provider whose profile, read from `settings.describe`'s VALUE
- * at the provider's `settingsPath`, names an `apiKeyEnv` the credentials
- * service reports as configured — so it is the reader F20 changes.
+ * restated from the real parts because no installed copy reaches it: the
+ * published `@deepseek-ai/dsh-api-session-controller` entry exports
+ * `SessionController`, `buildModelCatalog` and a few classes but not this
+ * function, its tarball ships `lib/` and no `src/` (so the `./src/*` export
+ * resolves nothing), and the package is not a dependency here in any case.
+ * `initializeDefaultModel` (`index.ts:320-331`) calls it after a Sign-in and,
+ * when it answers false, replaces the user's default model with the account's
+ * first one. It answers the FIRST configurable provider whose profile, read
+ * from `settings.describe`'s VALUE at the provider's `settingsPath`, names an
+ * `apiKeyEnv` the credentials service reports as configured — so it is the
+ * reader F20 changes.
  *
- * @param tier - the booted host.
+ * It keeps upstream's `credentialRef(ref)` brand as a grammar check that
+ * throws the same `TypeError`, so a profile whose `apiKeyEnv` is outside the
+ * grammar fails here as it fails upstream rather than reading "not
+ * configured". The deliberate differences: it answers the provider id instead
+ * of `true`, and it omits upstream's `RemoteError` for a missing `settings` or
+ * `credentials` service, which tier B always provides.
+ *
+ * @param tier - the booted host (only `ctx.settings`, `llm` and
+ *   `credentials.service` are read).
  * @returns that provider's id (`true` upstream), or `undefined` (`false`).
+ * @throws {TypeError} for an `apiKeyEnv` outside `credentialRef`'s grammar.
  */
 export const providerWithApiKey = async (
-  tier: TierB
+  tier: Pick<TierB, "credentials" | "ctx" | "llm">
 ): Promise<string | undefined> => {
   const describeRef = tier.credentials.service.describe as unknown as (
     ref: string
@@ -1406,6 +1432,11 @@ export const providerWithApiKey = async (
     }
     const ref: unknown = Reflect.get(profile, "apiKeyEnv");
     if (typeof ref === "string" && ref.length > 0) {
+      if (!CREDENTIAL_REF_PATTERN.test(ref)) {
+        throw new TypeError(
+          `credential ref "${ref}" must match ${String(CREDENTIAL_REF_PATTERN)}`
+        );
+      }
       const described = await describeRef(ref);
       if (described.configured) {
         return provider.provider;
