@@ -76,7 +76,7 @@ describe("plane-model · protocol (D16)", () => {
     expect(modelOf(inputFor("opencode", "mistral-large-4")).api).toBe(
       "openai-completions"
     );
-    const gemini = inputFor("opencode-go", "gemini-4-argon-contributor");
+    const gemini = inputFor("opencode-go", "gemini-4-argon");
     expect(gemini.pi).toBeUndefined();
     expect(modelOf(gemini).api).toBe("google-generative-ai");
     expect(modelOf(inputFor("opencode", "not-a-real-model")).api).toBe(
@@ -199,8 +199,7 @@ describe("plane-model · base (modern, legacy, route-level)", () => {
       modelOf(inputFor("opencode", "gpt-5.3-codex-spark", legacy)).baseUrl
     ).toBe("https://opencode.ai/zen/v1");
     expect(
-      modelOf(inputFor("opencode-go", "gemini-4-argon-contributor", legacy))
-        .baseUrl
+      modelOf(inputFor("opencode-go", "gemini-4-argon", legacy)).baseUrl
     ).toBe("https://opencode.ai/inference/go/google/v1beta");
     expect(
       modelOf(inputFor("opencode-go", "minimax-m3.1-flash", legacy)).baseUrl

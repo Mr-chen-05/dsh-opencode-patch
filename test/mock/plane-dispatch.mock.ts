@@ -62,7 +62,7 @@ const PROTOCOL_OF: Readonly<Record<Plane, Readonly<Record<string, Protocol>>>> =
     },
     "opencode-go": {
       "deepseek-v4-pro": "openai-completions",
-      "gemini-4-argon-contributor": "google-generative-ai",
+      "gemini-4-argon": "google-generative-ai",
       "minimax-m3": "anthropic-messages",
       "minimax-m3.1-flash": "openai-completions",
       "muse-spark-1.2-contributor": "openai-responses",
@@ -417,12 +417,12 @@ describe("plane dispatch · Go Gemini replay stays on one provider label", () =>
       providers: {
         "opencode-go": {
           apiKeyEnv: "OPENCODE_GO_API_KEY",
-          models: [{ id: "gemini-4-argon-contributor" }],
+          models: [{ id: "gemini-4-argon" }],
         },
       },
     });
     await waitForPlaneOwner(tier.llm, ["opencode-go"]);
-    const model = "gemini-4-argon-contributor";
+    const model = "gemini-4-argon";
     const tools = [
       {
         description: "Read a sample value",

@@ -477,14 +477,10 @@ describe.skipIf(!ENABLED)("e2e · the published host binary (dsh)", () => {
           sent: row.sent,
         });
       }
-      expect(
-        out.dispatch["opencode-go/gemini-4-argon-contributor"]?.sent
-      ).toEqual([
-        "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon-contributor:streamGenerateContent?alt=sse",
+      expect(out.dispatch["opencode-go/gemini-4-argon"]?.sent).toEqual([
+        "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse",
       ]);
-      expect(out.callConfig["opencode-go/gemini-4-argon-contributor"]).toBe(
-        "ok"
-      );
+      expect(out.callConfig["opencode-go/gemini-4-argon"]).toBe("ok");
     }
   );
 
