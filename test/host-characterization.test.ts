@@ -318,9 +318,7 @@ describe(
 
     it("fixture: the gap ids are gaps on pi 1.1.0, the unknown id is unknown everywhere, and the known ids are known", () => {
       expect(piKnows("opencode", "gpt-5.3-codex-spark")).toBeUndefined();
-      expect(
-        piKnows("opencode-go", "gemini-4-argon-contributor")
-      ).toBeUndefined();
+      expect(piKnows("opencode-go", "gemini-4-argon")).toBeUndefined();
       expect(piKnows("opencode-go", "minimax-m3.1-flash")).toBeUndefined();
       expect(piKnows("opencode", "deepseek-v4-pro")).toBe("openai-completions");
       expect(piKnows("opencode", "gemini-3-flash")).toBe(
@@ -622,16 +620,14 @@ describe(
       expect(drained.finish).toEqual({ code: "AUTH", kind: "error" });
     });
 
-    it("[BASELINE] Go gemini-4-argon-contributor validates and is sent on Go's Google base with the Go key (F10)", async () => {
-      expect(
-        await callConfigOf("opencode-go", "gemini-4-argon-contributor")
-      ).toBe("ok");
+    it("[BASELINE] Go gemini-4-argon validates and is sent on Go's Google base with the Go key (F10)", async () => {
+      expect(await callConfigOf("opencode-go", "gemini-4-argon")).toBe("ok");
       const { drained, requests } = await sentBy(
         "opencode-go",
-        "gemini-4-argon-contributor"
+        "gemini-4-argon"
       );
       expect(requests.map((request) => request.url)).toEqual(
-        S0_TODAY.rows["opencode-go/gemini-4-argon-contributor"].sent
+        S0_TODAY.rows["opencode-go/gemini-4-argon"].sent
       );
       expect(requests[0]?.headers["x-goog-api-key"]).toBe("go-test-key".length);
       // pi maps a Google 401 to its own code, not AUTH (as with pi alone).
@@ -738,7 +734,7 @@ describe("characterization · the apply order (no host)", () => {
   // pick between, and boots nothing. Each order's generated facet cases
   // measure its table; this case pins that they no longer differ. P-T1b held
   // it as "[KNOWN_DEFECT] the apply order decides exactly one facet" (Go
-  // gemini-4-argon-contributor's callConfig); P-R1 flipped that row and
+  // gemini-4-argon's callConfig); P-R1 flipped that row and
   // dropped todayRowsFor's pi-ai-first override in the same diff
   // (CONTRIBUTING.md, "Tags").
   it("[BASELINE] no facet depends on the apply order: todayRowsFor answers S0_TODAY's rows, with S0_TODAY's tags, in both orders", () => {

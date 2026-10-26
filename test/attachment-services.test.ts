@@ -33,7 +33,7 @@ const goGeminiAdapter = async (
     buildProvider: buildPlaneProvider(libraries),
     catalog: OPENCODE_GO_CATALOG,
     endpoint: "auto",
-    entry: { models: [{ id: "gemini-4-argon-contributor" }] },
+    entry: { models: [{ id: "gemini-4-argon" }] },
     familyApi: OPENCODE_FAMILY_API.go,
     piModels: libraries.builtinModels("opencode-go"),
     resolveRetryPolicy: libraries.resolveRetryPolicy,
@@ -181,7 +181,7 @@ it("streams a durable image through the plane adapter's Go Gemini model", async 
   try {
     for await (const _chunk of adapter.stream({
       provider: "opencode-go",
-      model: "gemini-4-argon-contributor",
+      model: "gemini-4-argon",
       messages: [
         {
           role: "user",

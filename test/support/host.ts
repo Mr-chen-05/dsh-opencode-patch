@@ -457,7 +457,7 @@ export const S0_PROFILE = {
       { id: "deepseek-v4-pro" },
       { id: "muse-spark-1.2-contributor" },
       { id: "minimax-m3" },
-      { id: "gemini-4-argon-contributor" },
+      { id: "gemini-4-argon" },
       { id: "minimax-m3.1-flash" },
     ],
   },
@@ -670,12 +670,12 @@ export const S0_TODAY = {
       sent: [`${ZEN}/inference/go/anthropic/v1/messages?beta=true`],
       tags: tags(B, B, B),
     },
-    "opencode-go/gemini-4-argon-contributor": {
+    "opencode-go/gemini-4-argon": {
       callConfig: "ok",
       info: { context: 1_048_576, efforts: ["low", "medium", "high"] },
       finish: "PI_AI_ERROR",
       sent: [
-        `${ZEN}/inference/go/google/v1beta/models/gemini-4-argon-contributor:streamGenerateContent?alt=sse`,
+        `${ZEN}/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse`,
       ],
       tags: tags(B, B, B),
     },

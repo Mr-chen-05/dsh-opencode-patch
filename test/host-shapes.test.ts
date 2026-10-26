@@ -308,7 +308,7 @@ describe("host · ResolvedPiAiProviderProfile (llm-pi-ai/src/config.ts:186-219,4
       ...(
         profileOf(tier, "opencode-go").modelErrors as Map<string, string>
       ).keys(),
-    ]).toEqual(["gemini-4-argon-contributor", "minimax-m3.1-flash"]);
+    ]).toEqual(["gemini-4-argon", "minimax-m3.1-flash"]);
   });
 
   it("F4 — a stored id pi cannot place is not listed, and a turn on it is INVALID_CONFIG with no request (index.ts:171; adapter.ts:271-311)", async () => {
@@ -341,7 +341,7 @@ describe("host · ResolvedPiAiProviderProfile (llm-pi-ai/src/config.ts:186-219,4
     ]);
     for (const [route, model] of [
       ["opencode", "gpt-5.3-codex-spark"],
-      ["opencode-go", "gemini-4-argon-contributor"],
+      ["opencode-go", "gemini-4-argon"],
       ["opencode-go", "minimax-m3.1-flash"],
     ] as const) {
       const drained = await drainStream(mounted.llm, route, model);
