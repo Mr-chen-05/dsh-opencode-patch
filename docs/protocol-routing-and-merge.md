@@ -8,11 +8,11 @@ OpenCode serves its models on **four different API shapes**, and which one a mod
 
 | API shape | Wire endpoint (Zen) | Which models | Signal in the catalog |
 | :-- | :-- | :-- | :-- |
-| OpenAI **Chat Completions** | `POST /inference/openai/v1/chat/completions` | **the default**: 25 of 82 | the model names **no** SDK |
-| OpenAI **Responses** | `POST /inference/openai/v1/responses` | 31 of 82 | `@ai-sdk/openai` |
-| Anthropic **Messages** | `POST /inference/anthropic/v1/messages` | 17 of 82 | `@ai-sdk/anthropic` |
-| Google **Generative AI** | `POST /inference/google/v1beta/models/<id>:streamGenerateContent` | 8 of 82 | `@ai-sdk/google` |
-| OpenAI **Chat Completions** (as pi files it) | `POST /inference/openai/v1/chat/completions` | 1 of 82 | `@ai-sdk/mistral` |
+| OpenAI **Chat Completions** | `POST /inference/openai/v1/chat/completions` | **the default**: 24 of 81 | the model names **no** SDK |
+| OpenAI **Responses** | `POST /inference/openai/v1/responses` | 31 of 81 | `@ai-sdk/openai` |
+| Anthropic **Messages** | `POST /inference/anthropic/v1/messages` | 17 of 81 | `@ai-sdk/anthropic` |
+| Google **Generative AI** | `POST /inference/google/v1beta/models/<id>:streamGenerateContent` | 8 of 81 | `@ai-sdk/google` |
+| OpenAI **Chat Completions** (as pi files it) | `POST /inference/openai/v1/chat/completions` | 1 of 81 | `@ai-sdk/mistral` |
 
 Counts are the shipped catalog. They are asserted against this table by `catalog.test.ts`, because a count written into prose does not regenerate with the data it counts. Go's endpoints are the same paths under `/inference/go/…`; `endpoint: legacy` sends every protocol to `/zen/v1` (`/zen/go/v1` on Go), except Go's Google, which only the inference family serves.
 
@@ -123,7 +123,7 @@ Two properties matter more than completeness:
 
 Cold start is never empty: the bundled shim answers before the first refresh, so the picker has models immediately, and a refresh replaces the set rather than appending to it twice. A missing price is its own answer: when models.dev has no row for a model, the meter shows the model's name and `—` for the rate rather than `Free`, and the panel never falls back to describing the _previous_ model.
 
-Both generated files are checked in CI: `catalog:shim` and `limits:shim` exit non-zero when the vendor moved, which is the only way to notice that models.dev changed under you. Regenerating one is a three-step deploy: regenerate, rebuild the bundles, commit both. The host loads `lib/index.mjs`, not `src/`.
+Both generated files are checked in CI: `catalog:shim` and `limits:shim` exit non-zero when the vendor moved, which is the only way to notice that models.dev changed under you. A pull request is gated on that only when its own diff touches the generator or a module the generator loads (`scripts/freshness-scope.ts` decides); any other pull request, and a push to main, warns, and the nightly job proposes the refresh. Regenerating one is a three-step deploy: regenerate, rebuild the bundles, commit both. The host loads `lib/index.mjs`, not `src/`.
 
 ## 4. The UI
 
