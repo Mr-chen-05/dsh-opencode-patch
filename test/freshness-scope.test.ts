@@ -226,7 +226,7 @@ describe("freshness scope · the import walk on a known tree", () => {
       'export type { T } from "../src/types-only.ts";',
       'import { type K } from "../src/kept.ts";',
       'import "../src/side-effect.ts";',
-      'const lazy = await import("../src/lazy.ts");',
+      'const lazy = await import("./lazy.ts");',
       'import { OPENCODE_GO_CATALOG } from "../src/catalog-data.ts";',
       // A string and a regex that each hold `/*`: a comment-stripping pattern
       // took them for a comment's start and swallowed every edge up to the
@@ -240,10 +240,10 @@ describe("freshness scope · the import walk on a known tree", () => {
       // edge of the script itself.
       'const emitted = `\nimport { g } from "../src/in-template.ts";\n`;',
     ].join("\n"),
+    "scripts/lazy.ts": "",
     "src/a.ts": 'export { c } from "./nested/index.ts";\nimport z from "pkg";',
     "src/b.ts": 'import { a } from "./a.ts";',
     "src/catalog-data.ts": 'import { hidden } from "./only-via-output.ts";',
-    "src/lazy.ts": "",
     "src/nested/index.ts": 'import { d } from "../d.tsx";',
     "src/d.tsx": "",
     "src/kept.ts": "",
@@ -261,15 +261,16 @@ describe("freshness scope · the import walk on a known tree", () => {
     // reached by `import { type K }`, which strips to `import {}` and still
     // loads the module. `src/after-glob.ts` and `src/after-regex.ts` follow a
     // `/*` inside a string and a regex; `src/in-template.ts` is named only
-    // inside a template, so it is no input.
+    // inside a template, so it is no input. `scripts/lazy.ts` is reached by a
+    // dynamic `import()`, which loads it as surely as a static one.
     expect(inputsOf("catalog:shim", treeReader(tree))).toStrictEqual([
+      "scripts/lazy.ts",
       "scripts/regenerate-catalog-shim.ts",
       "src/a.ts",
       "src/after-glob.ts",
       "src/after-regex.ts",
       "src/d.tsx",
       "src/kept.ts",
-      "src/lazy.ts",
       "src/nested/index.ts",
       "src/side-effect.ts",
     ]);
