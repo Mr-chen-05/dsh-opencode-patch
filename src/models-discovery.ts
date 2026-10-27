@@ -10,7 +10,8 @@
  *
  * It is candidate metadata, as the host's own answer is: nothing is written
  * until the user adopts a row and saves (D8), and the composer still shows
- * only the declared list.
+ * the declared list (or the plane's catalog for an entry that declares none,
+ * which this wrapper does not decide).
  *
  * @module dsh-opencode-patch/models-discovery
  */
@@ -110,20 +111,49 @@ const remoteModalities = (
 };
 
 /**
- * One row in the Remote's shape: each field from the candidate first, then
- * from the catalog spec, and only when one of them has it.
+ * Which source a row's fields are read from first.
+ *
+ * - `pi-first`: a route pi-ai serves. pi-ai reads pi's row (after the user's),
+ *   so the catalog only fills a field pi's row omits.
+ * - `catalog-first`: a plane the plugin serves. The composer reads the catalog
+ *   before pi (D17), and a row adopted from the fetch is saved as the user's
+ *   row, which the composer reads before both — so the row carries what the
+ *   composer already serves, and pi fills only what the catalog lacks.
+ */
+type FieldOrder = "catalog-first" | "pi-first";
+
+/** A supplied modality list narrowed, or `undefined` when none was supplied. */
+const modalitiesOf = (
+  supplied: readonly string[] | undefined
+): ("text" | "image")[] | undefined =>
+  supplied === undefined ? undefined : remoteModalities(supplied);
+
+/**
+ * One row in the Remote's shape: each field from the first source `order`
+ * names that has it, and only when one of them has it.
  */
 const rowFrom = (
   candidate: DiscoveryCandidate | undefined,
   spec: CatalogModelSpec | undefined,
-  id: string
+  id: string,
+  order: FieldOrder = "pi-first"
 ): DiscoveredRow => {
-  const name = candidate?.name ?? spec?.name;
-  const contextWindow = candidate?.contextWindow ?? spec?.context_window;
-  const maxTokens = candidate?.maxTokens ?? spec?.max_output_tokens;
-  const supplied = candidate?.inputModalities ?? spec?.input_modalities;
-  const modalities =
-    supplied === undefined ? undefined : remoteModalities(supplied);
+  const catalogFirst = order === "catalog-first";
+  const name = catalogFirst
+    ? (spec?.name ?? candidate?.name)
+    : (candidate?.name ?? spec?.name);
+  const contextWindow = catalogFirst
+    ? (spec?.context_window ?? candidate?.contextWindow)
+    : (candidate?.contextWindow ?? spec?.context_window);
+  const maxTokens = catalogFirst
+    ? (spec?.max_output_tokens ?? candidate?.maxTokens)
+    : (candidate?.maxTokens ?? spec?.max_output_tokens);
+  // Catalog-first mirrors the composer's `input`: the catalog's list when any
+  // text or image entry survives it, else pi's.
+  const modalities = catalogFirst
+    ? (modalitiesOf(spec?.input_modalities) ??
+      modalitiesOf(candidate?.inputModalities))
+    : modalitiesOf(candidate?.inputModalities ?? spec?.input_modalities);
   return {
     id,
     ...(name === undefined ? {} : { name }),
@@ -178,19 +208,13 @@ export const resolveDiscoveryProvider = (
 };
 
 /**
- * Enrich an adapter’s discovery answer from the catalog, honoring provider-scoped
- * retirements.
- *
- * The adapter’s own rows keep their values and order; a field a row lacks is
- * filled from the catalog, and every row is cut to the Remote's five fields.
- * **Nothing is appended**: this is what a route the plugin does NOT serve gets
- * — another pi-ai row's planes, a custom relay, a gateway-URL draft — and
- * pi-ai, which serves those, cannot serve an id it does not list. A plane the
- * plugin serves is complemented by {@link complementDiscoveredModels} instead.
+ * The adapter's own rows, each id once, retired ids dropped, and every row cut
+ * to the Remote's fields with its values read in `order`.
  */
-export const mergeDiscoveredModels = (
+const adapterRows = (
   discovered: unknown,
-  provider: CatalogProvider
+  provider: CatalogProvider,
+  order: FieldOrder
 ): DiscoveredRow[] => {
   const seen = new Set<string>();
   const merged: DiscoveredRow[] = [];
@@ -213,7 +237,8 @@ export const mergeDiscoveredModels = (
         rowFrom(
           candidate,
           findModelSpecOn(provider, candidate.id),
-          candidate.id
+          candidate.id,
+          order
         )
       );
     }
@@ -221,18 +246,39 @@ export const mergeDiscoveredModels = (
 
   // **Offering is not overriding.** An earlier revision seeded the whole
   // catalog into the PICKER, and that is how a deployment that had declared
-  // four models saw eighty-six. The picker still lists the declared models
-  // alone (D3). What widens is Settings' fetch on a plane the plugin serves,
-  // which offers candidates for the user to adopt: nothing is saved until they
-  // do (D8), and that widening is {@link complementDiscoveredModels}, not this.
+  // four models saw eighty-six. The picker still lists a plane's declared
+  // models alone when it declares any (D3). What widens is Settings' fetch on
+  // a plane the plugin serves, which offers candidates for the user to adopt:
+  // nothing is saved until they do (D8), and that widening is
+  // {@link complementDiscoveredModels}, not this.
   return merged;
 };
 
 /**
+ * Enrich an adapter’s discovery answer from the catalog, honoring provider-scoped
+ * retirements.
+ *
+ * The adapter’s own rows keep their values and order; a field a row lacks is
+ * filled from the catalog, and every row is cut to the Remote's five fields.
+ * **Nothing is appended**: this is what a route the plugin does NOT serve gets
+ * — another pi-ai row's planes, a custom relay, a gateway-URL draft — and
+ * pi-ai, which serves those, cannot serve an id it does not list. A plane the
+ * plugin serves is complemented by {@link complementDiscoveredModels} instead.
+ */
+export const mergeDiscoveredModels = (
+  discovered: unknown,
+  provider: CatalogProvider
+): DiscoveredRow[] => adapterRows(discovered, provider, "pi-first");
+
+/**
  * Settings' fetch on a plane the plugin serves: pi's rows first, in pi's
- * order and enriched as {@link mergeDiscoveredModels} enriches them, then
- * every catalog model of the plane that is servable, not deprecated and
- * missing from pi's answer, in catalog order (D3).
+ * order, then every catalog model of the plane that is servable, not
+ * deprecated and missing from pi's answer, in catalog order (D3).
+ *
+ * Every row reads the catalog before pi, as the composer does (D17): the host
+ * editor's adopt copies a fetched row's capacities into the user's row, which
+ * the composer reads first, so a pi-first row would save pi's older numbers
+ * over the catalog's (Zen `claude-sonnet-4-5`: pi 200000, catalog 1000000).
  *
  * @param discovered - pi-ai's answer, or `[]` when it has none.
  * @param plane - the catalog plane the route serves.
@@ -242,7 +288,7 @@ export const complementDiscoveredModels = (
   discovered: unknown,
   plane: CatalogProvider
 ): DiscoveredRow[] => {
-  const rows = mergeDiscoveredModels(discovered, plane);
+  const rows = adapterRows(discovered, plane, "catalog-first");
   const seen = new Set(rows.map((row) => row.id));
   const catalog = plane === "go" ? getLiveGoCatalog() : getLiveZenCatalog();
   for (const spec of catalog) {
@@ -254,7 +300,7 @@ export const complementDiscoveredModels = (
       continue;
     }
     seen.add(spec.id);
-    rows.push(rowFrom(undefined, spec, spec.id));
+    rows.push(rowFrom(undefined, spec, spec.id, "catalog-first"));
   }
   return rows;
 };

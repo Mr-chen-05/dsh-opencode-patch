@@ -238,8 +238,41 @@ describe(
         // The Remote's codec keeps every row as it is: no unknown key, and
         // modalities are text/image only.
         expect(schema.parse(rows), plane).toStrictEqual(rows);
+        // Every row the catalog describes carries the CATALOG's values, pi's
+        // rows included: the composer serves a plane model catalog-first
+        // (D17), and a row adopted from the fetch is saved as the user's row,
+        // which the composer reads before the catalog.
+        const catalog =
+          plane === "opencode" ? OPENCODE_ZEN_CATALOG : OPENCODE_GO_CATALOG;
+        for (const row of rows) {
+          const spec = catalog.find((model) => model.id === row.id);
+          if (spec === undefined) {
+            continue;
+          }
+          expect(row, `${plane}/${row.id}`).toStrictEqual({
+            contextWindow: spec.context_window,
+            id: row.id,
+            inputModalities: sanitizeModalities(spec.input_modalities),
+            maxTokens: spec.max_output_tokens,
+            name: spec.name,
+          });
+        }
         answers[plane] = rows;
       }
+      // Non-vacuous: pi knows a Zen model at a capacity the catalog does not
+      // (measured on pi 1.1.0: claude-sonnet-4-5 at 200000, catalog 1000000).
+      const differing = (
+        getBuiltinModels("opencode" as never) as {
+          contextWindow?: number;
+          id: string;
+        }[]
+      ).filter((model) => {
+        const spec = OPENCODE_ZEN_CATALOG.find((each) => each.id === model.id);
+        return (
+          spec !== undefined && model.contextWindow !== spec.context_window
+        );
+      });
+      expect(differing.length).toBeGreaterThan(0);
       const zen = idsOf(answers.opencode ?? []);
       const go = idsOf(answers["opencode-go"] ?? []);
       expect(zen).toContain("gpt-5.3-codex-spark");
@@ -261,7 +294,7 @@ describe(
       });
     });
 
-    it("while pi-ai restarts answers the plane's catalog instead of NO_DISCOVERY, directly and through the gateway, and the full answer is back once it settles", async () => {
+    it("F21 — while pi-ai restarts answers the plane's catalog instead of NO_DISCOVERY, directly and through the gateway, and the full answer is back once it settles", async () => {
       const current = await boot(characterizedProviders());
       await waitForPlaneOwner(current.llm);
       const request = { provider: "opencode" };
@@ -376,6 +409,14 @@ describe(
           ? {}
           : { input: [...gap.inputModalities] }),
       };
+      // Before the save the composer does not list it: what lists it below is
+      // the save, not a composer widened to the catalog (D3, D8).
+      expect(idsOf(await current.llm.listModels("opencode"))).not.toContain(
+        gap.id
+      );
+      expect(readFileSync(current.profile.patchPath, "utf8")).not.toContain(
+        gap.id
+      );
       await current.ctx.configEditor.edit(current.piEntry, (raw) => {
         const providers = {
           ...(raw.providers as Record<string, Record<string, unknown>>),
@@ -418,7 +459,7 @@ describe(
 );
 
 describe("host discovery · contract (tier B)", { timeout: 30_000 }, () => {
-  it("the wrapper is seen through the gateway's own dispatch and survives a pi-ai restart and an llm restart", async () => {
+  it("F21 — the wrapper is seen through the gateway's own dispatch and survives a pi-ai restart and an llm restart", async () => {
     const current = await boot(characterizedProviders());
     await waitForPlaneOwner(current.llm);
     // The descriptor names what the gateway calls: if a host renames it, this

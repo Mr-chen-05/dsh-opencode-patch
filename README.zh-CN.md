@@ -168,7 +168,7 @@ Zen 的 provider 级 SDK 是 `@ai-sdk/openai-compatible`。models.dev **只在�
 
 由此有四条性质：
 
-- **你的挑选仍然有效。** 每个平面服务的正是其 `llm-pi-ai` 条目列出的模型；条目没有列出任何模型时，服务整个目录。Settings → Models → Fetch 提供整个目录：pi 自己的列表，加上目录里 pi 未列出的每个可服务、未下线的模型。从中采纳的模型与其他 id 一样保存，并由插件服务。你保存的任何 id 都会被接受并服务：目录与 pi 都未描述的 id 按 Chat Completions 发送，除非平面条目指定了路由级的 `api`——它只作用于这类 id。
+- **你的挑选仍然有效。** 每个平面服务的正是其 `llm-pi-ai` 条目列出的模型；条目没有列出任何模型时，服务整个目录。在**用 OpenCode 官方目录补全列表**开启时（默认），Settings → Models → Fetch 提供整个目录：pi 自己的列表，加上目录里 pi 未列出的每个可服务、未下线的模型。它提供的每一行带的是目录的名称、上下文窗口、输出上限与模态——即输入框所服务的值——只有目录没有时才用 pi 的；从中采纳的模型与其他 id 一样保存，并由插件服务。你保存的任何 id 都会被接受并服务：目录与 pi 都未描述的 id 按 Chat Completions 发送，除非平面条目指定了路由级的 `api`——它只作用于这类 id。
 - **你的模型行优先。** 模型的名称、上下文窗口、输出上限与输入模态，先取你自己的模型行，再取目录，最后取 pi 的内置数据。推理档位先取你行里的 `reasoningEfforts`，再取目录。价格与协议不是模型行的字段：价格先取目录、再取 pi，协议先取目录的 SDK、再取 pi 的条目。
 - **只有开/关两种推理的模型提供“关 / 开”。** 只有该模型的协议确实能关闭推理时才提供“关”；有真正档位列表的模型只提供它自己的档位；档位列表中含 `none` 的 Chat Completions 模型同样提供“关”，按 pi 自己条目的写法发送 `reasoning_effort: "none"`。
 - **一份凭据，按宿主自己的规则。** 平面的认证方式与 `llm-pi-ai` 相同：条目的 `apiKeyEnv` 经凭据服务解析（未挂载凭据服务时读启动环境），保存在 `llm-pi-ai/opencode` 下的登录记录，否则用 pi 自己的 `OPENCODE_API_KEY` 查找——两个平面读的是同一个变量：请在 Go 条目上写明 `apiKeyEnv: OPENCODE_GO_API_KEY`。只有在没有声明引用、且部署选择开启时，才会读取 OpenCode 安装自己的存储。密钥解析不到的平面仍列出其模型，回合在发出任何请求前以 `MISSING_CREDENTIAL` 失败。
@@ -226,7 +226,7 @@ Zen 的 provider 级 SDK 是 `@ai-sdk/openai-compatible`。models.dev **只在�
 | **网关请求** | 恢复 User-Agent（默认开启） | `on` | 恢复官方 OpenCode CLI 的 `User-Agent`，使 Cloudflare WAF 校验通过 |
 | **网关请求** | 注入客户端来源头（默认开启） | `on` | 在网关流量上注入 `x-opencode-client`（以及来源请求头集合） |
 | **网关请求** | 附带工作区项目标识（默认开启） | `on` | 用当前文件夹名标记 `x-opencode-project`；关闭则省略该请求头 |
-| **模型与免费额度** | 用 OpenCode 官方目录补全列表（默认开启） | `on` | 让网关 `/models` 列表带上完整目录，并把目录提供给设置页的模型发现。本身**不会**往选择器里添加模型——选择器只显示已声明的。要声明更多，请在 OpenCode 平面上使用 **Settings → Models → Fetch**：它会提供 pi 的列表以及 pi 缺少的目录模型，选用一行并保存即完成声明。已声明模型自身的信息（上下文、模态、思考档位）始终来自你的模型行与目录，与此开关无关 |
+| **模型与免费额度** | 用 OpenCode 官方目录补全列表（默认开启） | `on` | 让网关 `/models` 列表带上完整目录，并把目录提供给设置页的模型发现。本身**不会**往选择器里添加模型——选择器显示你声明的模型；条目未声明任何模型时显示该平面的目录，此开关不改变这两者。要声明更多，请在 OpenCode 平面上使用 **Settings → Models → Fetch**：它会提供 pi 的列表以及 pi 缺少的目录模型，选用一行并保存即完成声明。已声明模型自身的信息（上下文、模态、思考档位）始终来自你的模型行与目录，与此开关无关 |
 | **模型与免费额度** | 自动补全核心工具（默认开启） | `on` | 补上免费层 `/responses` 请求体所需的 `read` + `bash` schema |
 | **配额计量** | 开启输入区用量计量（默认开启） | `on` | 在输入框停靠栏挂载实时计量表——Go 额度环，或 Zen 会话消耗 |
 | **配额计量** | 显示会话消耗与模型费率（默认开启） | `on` | 追加显示本会话累计花费与当前模型每百万 Token 费率 |
@@ -394,7 +394,7 @@ Zen 路线上不出现任何 Go 的数字：根本不画圆环（没有可量的
 | `400 MissingSessionID` | 未附带会话请求头 | 确认 `dsh-opencode-patch` 已列入 profile 的 `dsh.profile.bundles` |
 | Auto Review 报 `TRANSPORT: Connection error` | 更新后宿主进程未重启 | 停止并重启 `dsh web`，让新的 `lib/index.mjs` 加载 |
 | Go 模型始终不显示额度环 | **重启 `dsh web`，然后查看浏览器控制台**——插件通过 `link:` 加载，`lib/index.mjs` 只在进程启动时读取一次，仅刷新页面仍运行旧的宿主代码；计量会报告它的哪条路径没有返回 | 控制台会指出原因：`no remote to mount on`、带异常的 `did not mount`、`still waiting for remote.opencodeGoUsage`、列出其实际暴露键的 `no opencodeGoUsage service on the remote`，或带返回内容的 `the answer is not a usage shape`。缺失或无法路由的凭据只是几个原因之一：在 `opencode-go` 条目上写明 `apiKeyEnv: OPENCODE_GO_API_KEY` 并在 DSH Credentials 中存储该密钥 |
-| 目录中的模型在 Settings → Fetch 里缺失，或已下线的模型仍然存在 | 宿主模块过期、补全关闭，或该路由不是插件服务的平面（只有所服务的 `llm-pi-ai` 行上的 `opencode`/`opencode-go` 会被补全） | `pnpm run build`、重启 `dsh web`、保持**用 OpenCode 官方目录补全列表**开启、从匹配的路由获取、搜索精确 id（如 `space-bunny-free`） |
+| 目录中的模型在 Settings → Fetch 里缺失，或已下线的模型仍然存在 | 宿主模块过期、补全关闭、该路由不是插件服务的平面（只有所服务的 `llm-pi-ai` 行上的 `opencode`/`opencode-go` 会被补全），或目录尚未读取（离线，或 `models.opencode.ai` 被拦截）——此时 pi 自己的列表（包括已下线的 id）原样通过，比随包目录更新的模型也不会出现 | `pnpm run build`、重启 `dsh web`、保持**用 OpenCode 官方目录补全列表**开启、从匹配的路由获取、搜索精确 id（如 `space-bunny-free`）；目录尚未读取时，待 `models.opencode.ai` 可访问后，先获取一次以触发目录刷新（这次仍是旧列表——刷新在读取之后于后台进行，且没有定时刷新），稍后再获取一次 |
 | 弹出面板以红色显示“已达限额” | 滚动 / 每月窗口已用到 100% | 打开 [OpenCode 控制台](https://opencode.ai/console)并启用 _使用余额（Use balance）_，以溢出到 Zen 额度 |
 | 非 OpenCode 模型行为异常 | 与本补丁无关 | 发往其他网关的流量原样通过 |
 
@@ -413,7 +413,7 @@ Zen 路线上不出现任何 Go 的数字：根本不画圆环（没有可量的
 - **`modelOverrides`、`maxContextWindow` 与 `modelRoutes` 已移除**（以及文档中写过、却从未被读取的 `hiddenModels`）。平面条目中模型自己的行可以写名称、上下文窗口、输出上限、输入模态与推理档位，其余由目录补齐；行里的 `contextWindow` 代替 `maxContextWindow`。仍带有这些已移除键的配置行可以通过校验，这些键会被忽略。
 - **不再能按模型固定协议。** `modelRoutes` 可以让某个模型走你指定的协议；这一点没有替代。目录或 pi 描述过的模型总是使用它们指定的协议；平面条目的路由级 `api` 只作用于两者都未描述的 id，`baseURL` 也只在路由级。价格同样不是模型行的字段：先取目录，再取 pi。
 - **停用或重载插件会恢复它包装过的宿主方法。** 停用时模型发现与设置嫁接会被撤下，热重载会替换它们而不是再叠一层。两个平面交还给 `llm-pi-ai`——见[移除或停用插件](#移除或停用插件)。
-- **Settings → Models → Fetch 会提供 pi 未列出的目录模型。** 在两个平面上，它先回答 pi 的列表，再回答 pi 缺少的每个可服务、未下线的目录模型（例如 Zen 的 `gpt-5.3-codex-spark`、Go 的 `minimax-m3.1-flash`）。`llm-pi-ai` 重启期间，它只回答目录，而不是报错。以前它只回答 pi 的列表。
+- **Settings → Models → Fetch 会提供 pi 未列出的目录模型。** 在**用 OpenCode 官方目录补全列表**开启时（默认），它在两个平面上先回答 pi 的列表，再回答 pi 缺少的每个可服务、未下线的目录模型（例如 Zen 的 `gpt-5.3-codex-spark`、Go 的 `minimax-m3.1-flash`）；`llm-pi-ai` 重启期间，它只回答目录，而不是报错。以前它只回答 pi 的列表。它在平面上提供的每一行现在带的是目录的名称、上下文窗口、输出上限与模态，只有目录没有时才用 pi 的，因此从中采纳的模型保存的正是输入框所服务的值：采纳 Zen 的 `claude-sonnet-4-5` 会保存 1,000,000 的上下文窗口，以前保存的是 pi 的 200,000。此开关关闭时，Fetch 只回答 pi 的列表，重启期间显示 `llm-pi-ai` 的错误。
 - **`@viztor/dsh-opencode` 不再发布。** 其最后一个版本上的 "Renamed to @viztor/dsh-opencode-patch" 弃用提示即为最终信息；请改装 `dsh-opencode-patch` 或 `@viztor/dsh-opencode-patch`。
 
 ## 📜 兼容性与验证

@@ -397,7 +397,20 @@ describe("decorateModelDiscovery", () => {
     );
     const original = vi.fn().mockResolvedValue([
       { id: "beam-free", name: "Beam Free" },
-      { contextWindow: 7, id: "mimo-v2.6-flash-free", name: "pi's MiMo" },
+      {
+        contextWindow: 7,
+        id: "mimo-v2.6-flash-free",
+        inputModalities: ["text"],
+        maxTokens: 3,
+        name: "pi's MiMo",
+      },
+      {
+        contextWindow: 11,
+        id: "pi-only-model",
+        inputModalities: ["text", "image"],
+        maxTokens: 5,
+        name: "pi's Own",
+      },
     ]);
     const { ctx, stop, wrapped } = install(original);
 
@@ -410,24 +423,38 @@ describe("decorateModelDiscovery", () => {
       { baseURL: "https://opencode.ai/zen/v1", provider: "opencode" },
       undefined
     );
-    // pi's two rows in pi's order, then the catalog's servable rows pi lacks,
-    // in catalog order — `mimo-v2.6-flash-free` once, not twice (D3).
+    // pi's three rows in pi's order, then the catalog's servable rows pi
+    // lacks, in catalog order — `mimo-v2.6-flash-free` once, not twice (D3).
     expect(rows.map((row) => row.id)).toEqual([
       "beam-free",
       "mimo-v2.6-flash-free",
+      "pi-only-model",
       ...servableIds(OPENCODE_ZEN_CATALOG).filter(
         (id) => id !== "beam-free" && id !== "mimo-v2.6-flash-free"
       ),
     ]);
-    // pi's values win; the catalog fills only what pi's row omits.
+    // The CATALOG's values win on a plane the plugin serves, in the composer's
+    // own order (D17: the user's row, then the catalog, then pi): a row
+    // adopted from the fetch is saved as the user's row, and it must carry
+    // what the composer already serves, not pi's older capacities.
     const spec = findModelSpecOn("zen", "mimo-v2.6-flash-free");
     expect(spec).toBeDefined();
+    expect(spec?.context_window).not.toBe(7);
     expect(rows[1]).toStrictEqual({
-      contextWindow: 7,
+      contextWindow: spec?.context_window,
       id: "mimo-v2.6-flash-free",
       inputModalities: sanitizeModalities(spec?.input_modalities),
       maxTokens: spec?.max_output_tokens,
-      name: "pi's MiMo",
+      name: spec?.name,
+    });
+    // pi fills what the catalog lacks: an id it does not describe keeps pi's.
+    expect(findModelSpecOn("zen", "pi-only-model")).toBeUndefined();
+    expect(rows[2]).toStrictEqual({
+      contextWindow: 11,
+      id: "pi-only-model",
+      inputModalities: ["text", "image"],
+      maxTokens: 5,
+      name: "pi's Own",
     });
     expectWhitelisted(rows);
     stop?.();
@@ -503,6 +530,30 @@ describe("decorateModelDiscovery", () => {
     await expect(stoodDown("llm-pi-ai", { provider: "opencode" })).rejects.toBe(
       failure
     );
+  });
+
+  it("a route the plugin does not serve keeps pi's own values over the catalog's: pi-ai serves it, in its own order", async () => {
+    // pi-ai serves this route and reads pi's row, never the catalog: the
+    // enrich-only merge fills only what pi's row omits.
+    const spec = findModelSpecOn("go", "minimax-m3");
+    expect(spec?.context_window).not.toBe(7);
+    const original = vi
+      .fn()
+      .mockResolvedValue([
+        { contextWindow: 7, id: "minimax-m3", maxTokens: 3 },
+      ]);
+    const { wrapped } = install(original, STOOD_DOWN);
+    expect(
+      await wrapped("llm-pi-ai", { provider: "opencode-go" })
+    ).toStrictEqual([
+      {
+        contextWindow: 7,
+        id: "minimax-m3",
+        inputModalities: sanitizeModalities(spec?.input_modalities),
+        maxTokens: 3,
+        name: spec?.name,
+      },
+    ]);
   });
 
   it("a plane on a pi-ai row the plugin does not serve keeps pi's own list: enriched, never widened", async () => {
