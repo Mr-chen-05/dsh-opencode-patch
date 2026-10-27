@@ -9,10 +9,11 @@
  * the process. `test/e2e/host-binary.e2e.ts` reads the file.
  *
  * It never reaches the network: `fetch` is replaced at module load, so every
- * request to `opencode.ai` or `models.opencode.ai` is recorded (URL and model
- * only — never a header, so never a key) and answered with a 401, and every
- * other host passes through untouched. What it writes is URLs, model ids,
- * verdicts and host error messages — never a header or a key value — and
+ * request to `opencode.ai` or `models.opencode.ai` is recorded (URL, model and
+ * a Google body's `generationConfig.thinkingConfig` only — never a header, so
+ * never a key) and answered with a 401, and every other host passes through
+ * untouched. What it writes is URLs, model ids, thinking configs, verdicts and
+ * host error messages — never a header or a key value — and
  * every error message is cut to {@link MESSAGE_LIMIT} characters, since one
  * could name a path on the runner.
  *
@@ -105,17 +106,31 @@ const hostOf = (url) => {
   }
 };
 
-const modelOf = async (input, init) => {
+/** A request's JSON body, or `null` where it has none. */
+const bodyOf = async (input, init) => {
   let body = init?.body;
   if (body === undefined && input instanceof Request) {
     body = await input.clone().text();
   }
   try {
-    const { model } = JSON.parse(String(body));
-    return typeof model === "string" ? model : null;
+    return JSON.parse(String(body));
   } catch {
     return null;
   }
+};
+
+/**
+ * What one gateway request is recorded as: its URL, the model its body names,
+ * and — on the Google protocol, whose body names no model — the thinking
+ * config the body carries (the D16 wire: a level, or pi's budget).
+ */
+const recordOf = async (input, init, url) => {
+  const body = await bodyOf(input, init);
+  const model = typeof body?.model === "string" ? body.model : null;
+  const thinkingConfig = body?.generationConfig?.thinkingConfig;
+  return thinkingConfig === undefined
+    ? { model, url }
+    : { model, thinkingConfig, url };
 };
 
 const probeFetch = async (input, init) => {
@@ -123,7 +138,7 @@ const probeFetch = async (input, init) => {
   if (!GATEWAY_HOSTS.has(hostOf(url))) {
     return passThrough(input, init);
   }
-  requests.push({ model: await modelOf(input, init), url });
+  requests.push(await recordOf(input, init, url));
   return Response.json(
     { error: { message: "probe: offline", type: "AuthError" } },
     { status: 401 }
@@ -315,9 +330,18 @@ const measure = async (ctx) => {
     llm.discoverModels(zenNs, { provider: "opencode" })
   );
   const dispatch = {};
+  const thinking = {};
   for (const [route, models] of Object.entries(ids)) {
     for (const model of models) {
+      const before = requests.length;
       dispatch[`${route}/${model}`] = await turn(llm, route, model);
+      const sent = requests
+        .slice(before)
+        .filter((request) => request.thinkingConfig !== undefined)
+        .map((request) => request.thinkingConfig);
+      if (sent.length > 0) {
+        thinking[`${route}/${model}`] = sent;
+      }
     }
   }
   const listModelsAfter = {};
@@ -389,6 +413,7 @@ const measure = async (ctx) => {
     dispatch,
     modelsJoin,
     listModelsAfter,
+    thinking,
   };
 };
 

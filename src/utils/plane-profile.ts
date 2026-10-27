@@ -20,6 +20,7 @@
  */
 
 import { isRecord } from "./guards.ts";
+import { usesCatalogThinkingLevels } from "./model-metadata.ts";
 import {
   type EndpointChoice,
   type PlaneCatalogSpec,
@@ -92,6 +93,11 @@ export type PlaneProviderBuilder = (input: {
   readonly id: PlaneRoute;
   readonly name: string;
   readonly models: readonly Readonly<Record<string, unknown>>[];
+  /**
+   * The served ids the catalog describes by Google thinking level
+   * ({@link usesCatalogThinkingLevels}, D16); none when absent.
+   */
+  readonly levelThinkingModels?: ReadonlySet<string>;
 }) => unknown;
 
 /** What {@link planeProfileFor} takes. */
@@ -266,6 +272,29 @@ const setCompatFields = (compat: unknown): string[] =>
         .map(([field]) => field)
     : [];
 
+/**
+ * The served Google ids whose catalog spec describes thinking by level (D16):
+ * the protocol and the levels both come from the catalog, never the id.
+ */
+const levelThinkingModelsOf = (
+  served: readonly Readonly<Record<string, unknown>>[],
+  catalog: readonly PlaneCatalogSpec[]
+): ReadonlySet<string> => {
+  const specs = new Map(catalog.map((spec) => [spec.id, spec]));
+  const ids = new Set<string>();
+  for (const model of served) {
+    const spec = specs.get(String(model.id));
+    if (
+      model.api === "google-generative-ai" &&
+      spec !== undefined &&
+      usesCatalogThinkingLevels(spec)
+    ) {
+      ids.add(spec.id);
+    }
+  }
+  return ids;
+};
+
 const numberOr = (value: unknown, fallback: number): number =>
   typeof value === "number" ? value : fallback;
 
@@ -368,9 +397,13 @@ export const planeProfileFor = (
   let piProvider: unknown;
   if (routeError === undefined) {
     try {
+      const served = models.filter(
+        (model) => !modelErrors.has(String(model.id))
+      );
       piProvider = input.buildProvider({
         id: route,
-        models: models.filter((model) => !modelErrors.has(String(model.id))),
+        levelThinkingModels: levelThinkingModelsOf(served, input.catalog),
+        models: served,
         name: displayName,
       });
     } catch (error) {
