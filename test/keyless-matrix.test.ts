@@ -20,13 +20,18 @@ import {
   classifyFreeProbe,
   classifyKeylessProbe,
   freeProbeCells,
+  freeProbeMovesOn,
   freeProbeOutcome,
+  freeProbeVerdictOf,
   goneDefaultRows,
   isFreeSpec,
   isModelGoneMessage,
   isTransientProbeAnswer,
+  isUpstreamBusy,
   keylessMatrix,
   LEGACY_DISPATCH,
+  type ProbeAnswer,
+  runFreeProbe,
   MATRIX_FAMILIES,
   MATRIX_PROTOCOLS,
   type MatrixCell,
@@ -450,6 +455,16 @@ describe("keyless matrix · the free probe", () => {
     [410, "", "model-gone"],
     [400, "Model is unavailable", "model-gone"],
     [500, "", "other"],
+    // The upstream busy: the one keyless request that reaches the upstream
+    // is the free model's, and a busy one says nothing about the path.
+    [503, "", "upstream-busy"],
+    [529, "", "upstream-busy"],
+    [
+      500,
+      '{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}',
+      "upstream-busy",
+    ],
+    [502, "<html>Service Unavailable</html>", "other"],
     [400, '{"error":{"message":"max_tokens too small"}}', "other"],
     [401, '{"error":{"type":"FreeTierError"}}', "auth-required"],
     [302, "", "redirected"],
@@ -475,6 +490,17 @@ describe("keyless matrix · the free probe", () => {
     ["429, then served", [answer(429), answer(200)], "pass"],
     ["no answer, twice", [undefined, undefined], "fail"],
     ["500, then 500", [answer(500), answer(500)], "fail"],
+    ["503, then 503 (a busy upstream)", [answer(503), answer(503)], "skip"],
+    ["529, then 529 (a busy upstream)", [answer(529), answer(529)], "skip"],
+    [
+      "500 overloaded, twice",
+      [
+        answer(500, '{"error":{"type":"overloaded_error"}}'),
+        answer(500, '{"error":{"type":"overloaded_error"}}'),
+      ],
+      "skip",
+    ],
+    ["503, then served", [answer(503), answer(200)], "pass"],
     ["path gone", [answer(404)], "fail"],
     ["a key demanded", [answer(401, '{"error":{"type":"AuthError"}}')], "fail"],
     [
@@ -488,6 +514,181 @@ describe("keyless matrix · the free probe", () => {
     expect(
       freeProbeOutcome(verdictOfAttempts(attempts, classifyFreeProbe))
     ).toBe(outcome);
+  });
+
+  it.each([
+    ["one candidate served", ["served"], "served"],
+    ["a retired one, then one served", ["model-gone", "served"], "served"],
+    ["a busy one, then one served", ["upstream-busy", "served"], "served"],
+    [
+      "a busy one, then a path gone",
+      ["upstream-busy", "path-gone"],
+      "path-gone",
+    ],
+    // Every candidate moved past: a busy one among them makes the run a
+    // skip, not three retired models.
+    [
+      "busy, then two retired",
+      ["upstream-busy", "model-gone", "model-gone"],
+      "upstream-busy",
+    ],
+    [
+      "three busy",
+      ["upstream-busy", "upstream-busy", "upstream-busy"],
+      "upstream-busy",
+    ],
+    ["three retired", ["model-gone", "model-gone", "model-gone"], "model-gone"],
+    ["no candidate sent", [], "transport-error"],
+  ] as const)(
+    "the free probe across its candidates: %s → %s",
+    (_name, verdicts, verdict) => {
+      expect(freeProbeVerdictOf(verdicts)).toBe(verdict);
+    }
+  );
+
+  it.each([
+    ["model-gone", true],
+    ["upstream-busy", true],
+    ["served", false],
+    ["free-tier-gated", false],
+    ["path-gone", false],
+    ["auth-required", false],
+    ["wrong-format", false],
+    ["redirected", false],
+    // A 500 on a free model is the path failing, not the model: a probe
+    // that moved past it could pass on the next candidate's answer.
+    ["other", false],
+    ["rate-limited", false],
+    ["transport-error", false],
+  ] as const)("the free probe moves on after %s: %s", (verdict, movesOn) => {
+    expect(freeProbeMovesOn(verdict)).toBe(movesOn);
+  });
+
+  describe("the free probe's candidate walk", () => {
+    const cells = ["free-a", "free-b", "free-c"].map((model) => ({
+      body: {},
+      family: "modern" as const,
+      headers: {},
+      method: "POST" as const,
+      model,
+      plane: "opencode" as const,
+      protocol: "openai-completions" as const,
+      url: `https://example.test/${model}`,
+    }));
+    /** A sender that answers each model with its scripted attempts, recording what it sent. */
+    const scripted = (
+      script: Readonly<Record<string, readonly (ProbeAnswer | undefined)[]>>
+    ) => {
+      const sent: string[] = [];
+      const send = async (cell: MatrixCell) => {
+        sent.push(cell.model ?? "");
+        return script[cell.model ?? ""] ?? [];
+      };
+      return { send, sent };
+    };
+
+    it("served first: one send, and that candidate decides", async () => {
+      const { send, sent } = scripted({ "free-a": [answer(200, "ok")] });
+      const result = await runFreeProbe(cells, send);
+      expect(sent).toEqual(["free-a"]);
+      expect(result.decided).toEqual({
+        bodyText: "ok",
+        model: "free-a",
+        status: 200,
+        verdict: "served",
+      });
+    });
+
+    it("busy, then served: moves on past the busy upstream", async () => {
+      const { send, sent } = scripted({
+        "free-a": [answer(503), answer(529)],
+        "free-b": [answer(200)],
+      });
+      const result = await runFreeProbe(cells, send);
+      expect(sent).toEqual(["free-a", "free-b"]);
+      expect(result.decided.verdict).toBe("served");
+      expect(result.decided.model).toBe("free-b");
+      expect(result.candidates.map((candidate) => candidate.verdict)).toEqual([
+        "upstream-busy",
+        "served",
+      ]);
+    });
+
+    it("busy, then rate-limited: stops on the rate limit", async () => {
+      const { send, sent } = scripted({
+        "free-a": [answer(503), answer(503)],
+        "free-b": [answer(429), answer(429)],
+      });
+      const result = await runFreeProbe(cells, send);
+      expect(sent).toEqual(["free-a", "free-b"]);
+      expect(result.decided).toMatchObject({
+        model: "free-b",
+        status: 429,
+        verdict: "rate-limited",
+      });
+    });
+
+    it("served, then nothing more is sent even if a later model would retire", async () => {
+      const { send, sent } = scripted({
+        "free-a": [answer(200)],
+        "free-b": [answer(410)],
+      });
+      const result = await runFreeProbe(cells, send);
+      expect(sent).toEqual(["free-a"]);
+      expect(result.decided.verdict).toBe("served");
+    });
+
+    it("busy, then two retired: the busy candidate decides, with its own model and status", async () => {
+      const { send, sent } = scripted({
+        "free-a": [answer(503, "busy"), answer(503, "busy")],
+        "free-b": [answer(410, "free-b has been deprecated")],
+        "free-c": [answer(410, "free-c has been deprecated")],
+      });
+      const result = await runFreeProbe(cells, send);
+      expect(sent).toEqual(["free-a", "free-b", "free-c"]);
+      expect(result.decided).toEqual({
+        bodyText: "busy",
+        model: "free-a",
+        status: 503,
+        verdict: "upstream-busy",
+      });
+    });
+
+    it("three retired: the last candidate decides", async () => {
+      const { send } = scripted({
+        "free-a": [answer(410)],
+        "free-b": [answer(410)],
+        "free-c": [answer(400, "Model is unavailable")],
+      });
+      const result = await runFreeProbe(cells, send);
+      expect(result.decided).toMatchObject({
+        model: "free-c",
+        status: 400,
+        verdict: "model-gone",
+      });
+    });
+
+    it("no candidate: nothing sent, a transport error with no model", async () => {
+      const { send, sent } = scripted({});
+      const result = await runFreeProbe([], send);
+      expect(sent).toEqual([]);
+      expect(result.decided).toEqual({
+        bodyText: "",
+        model: undefined,
+        status: undefined,
+        verdict: "transport-error",
+      });
+    });
+  });
+
+  it("the keyed and free classifiers read a busy upstream with one predicate", () => {
+    expect(isUpstreamBusy(503, "")).toBe(true);
+    expect(isUpstreamBusy(529, "")).toBe(true);
+    expect(isUpstreamBusy(502, '{"error":{"status":"UNAVAILABLE"}}')).toBe(
+      true
+    );
+    expect(isUpstreamBusy(500, "")).toBe(false);
+    expect(isUpstreamBusy(429, "overloaded_error")).toBe(false);
   });
 });
 

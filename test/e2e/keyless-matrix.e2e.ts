@@ -3,9 +3,9 @@
  * free-model probe.
  *
  * Twenty-four POSTs, none carrying a key: two planes × four protocols × three
- * URL shapes — legacy (`/zen(/go)/v1`), the provider-level root
- * (`/inference(/go)/v1`) and modern (`/inference(/go)/{openai,anthropic,google}/…`)
- * — each with one PAID model from the live catalog slice (a free model answers
+ * URL shapes — legacy (`/zen(/go)/v1`), the root (`/inference(/go)/v1`, the
+ * provider-level base the catalog declared until 2026-10-16) and modern
+ * (`/inference(/go)/{openai,anthropic,google}/…`) — each with one PAID model from the live catalog slice (a free model answers
  * keyless with a real completion, so the matrix never picks one). The gateway
  * authenticates before it routes, so the answer says whether the PATH exists
  * without spending anything. It runs on every pull request, because it needs
@@ -23,22 +23,28 @@
  *   family, on both planes) answers "path gone" (`goneDefaultRows`);
  * - a FREE completions model, sent keyless to the default completions path
  *   (`/inference/openai/v1/chat/completions`), is parsed there: served, or
- *   gated by the free tier (`freeProbeOutcome`). A retired free model moves
- *   on to the next, three at most; a rate limit (a 429, or a 429 and then no
- *   answer) SKIPS the case, as `protocol-routing.e2e.ts`'s free cases do.
+ *   gated by the free tier (`freeProbeOutcome`). A retired free model or a
+ *   busy upstream (a 503, a 529, or a 5xx naming an overload) moves on to the
+ *   next, three at most (`runFreeProbe`, which records the candidate that
+ *   decided, with its own model and status); a rate
+ *   limit (a 429, or a 429 and then no answer) SKIPS the case, as
+ *   `protocol-routing.e2e.ts`'s free cases do, and so does a busy upstream
+ *   that no candidate got past.
  *
  * `endpoint: legacy` is recorded, not guarded (P-R2): its cells
  * (`LEGACY_DISPATCH`) must answer readably, like every legacy cell, but their
- * path-gone is printed and asserted nowhere live; the offline pin in
- * `test/endpoint-family.test.ts` guards its mapping. Every verdict goes into a
- * dated table (`test/support/endpoint-record.ts`), printed and, when
- * `OPENCODE_E2E_RECORD_DIR` is set, written there as `keyless.md` for the CI
- * job to publish — rewritten after every cell, so a job killed at its time
- * limit still leaves what it measured. A redirect is never followed: it is
- * recorded as `redirected`, with the path it pointed at, in the console table
- * and the dated record alike. The cell table, the
- * sets, the classifiers and every decision above are unit-tested offline in
- * `test/keyless-matrix.test.ts`.
+ * path-gone is printed and asserted nowhere live — except Go's Google, which
+ * is also a default cell (`TODAY_DISPATCH`) and is guarded as one; the
+ * offline pin in `test/endpoint-family.test.ts` guards its mapping. Every
+ * verdict goes into a dated table (`test/support/endpoint-record.ts`),
+ * printed and, when `OPENCODE_E2E_RECORD_DIR` is set, written there as
+ * `keyless.md` for the CI job to publish — rewritten after every cell, so a
+ * job killed at its time limit still leaves what it measured. A redirect is
+ * never followed (`redirect: "manual"`, which `test/keyed-probes.test.ts`
+ * holds every probe `fetch` to): it is recorded as `redirected`, with the
+ * path it pointed at, in the console table and the dated record alike. The
+ * cell table, the sets, the classifiers and every decision above are
+ * unit-tested offline in `test/keyless-matrix.test.ts`.
  *
  * It always measures the vendor's own gateway: the cells are the vendor's
  * paths, which a mirror's `/zen(/go)/v1` base cannot name. So it SKIPS when
@@ -63,9 +69,7 @@ import {
 import {
   type AttemptVerdict,
   cellKey,
-  classifyFreeProbe,
   classifyKeylessProbe,
-  type FreeVerdict,
   freeProbeCells,
   freeProbeOutcome,
   goneDefaultRows,
@@ -78,6 +82,7 @@ import {
   type MatrixFamily,
   type ProbeAnswer,
   redirectPathOf,
+  runFreeProbe,
   unreadRows,
   verdictOfAttempts,
 } from "../support/keyless-matrix.ts";
@@ -289,28 +294,19 @@ describe.skipIf(!LIVE || MIRRORED)(
           cells.length,
           "the live Zen slice has no free completions model"
         ).toBeGreaterThan(0);
-        let verdict: AttemptVerdict | FreeVerdict = "transport-error";
-        let status: number | undefined;
-        let bodyText = "";
-        let model: string | undefined;
-        for (const cell of cells) {
-          ({ model } = cell);
-          const attempts = await sendWithRetry(cell);
-          const answer = attempts.at(-1);
-          status = answer?.status;
-          bodyText = answer?.bodyText ?? "";
-          verdict = verdictOfAttempts(attempts, classifyFreeProbe);
-          // A retired free model says nothing about the path: try the next.
-          if (verdict !== "model-gone") {
-            break;
-          }
-        }
+        // The walk moves past a retired model or a busy upstream, and the
+        // candidate that decides is recorded with its own model and status.
+        const { decided } = await runFreeProbe(cells, sendWithRetry);
+        const { bodyText, model, status, verdict } = decided;
         free = { model, status, verdict };
         await persist(false);
         const outcome = freeProbeOutcome(verdict);
         const detail = `free model ${model ?? "<none>"} on the default completions path: ${verdict} (${status ?? "no answer"}) ${bodyText.slice(0, 200)}`;
         if (outcome === "skip") {
-          context.skip(true, `the gateway was rate-limiting: ${detail}`);
+          context.skip(
+            true,
+            `the gateway was rate-limiting or the upstream busy: ${detail}`
+          );
           return;
         }
         expect(outcome, detail).toBe("pass");

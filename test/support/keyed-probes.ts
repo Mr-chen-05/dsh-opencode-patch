@@ -35,7 +35,9 @@ import {
   type MatrixCell,
   type MatrixProtocol,
   type ProbeAnswer,
+  LEGACY_DISPATCH,
   TODAY_DISPATCH,
+  isUpstreamBusy,
   verdictOfAttempts,
 } from "./keyless-matrix.ts";
 import { OPENCODE_UA } from "./src.ts";
@@ -240,21 +242,6 @@ const MODEL_NOT_FOUND =
   /"message"\s*:\s*"model: |model_not_found|models\/[^\s"']+ is not found/iu;
 
 /**
- * A 5xx that is the upstream provider being busy, not the gateway failing on
- * the path: a 503 or a 529 (Anthropic's `overloaded_error`), or any 5xx whose
- * body names an overload (`overloaded_error`, Gemini's `model is overloaded`
- * or `UNAVAILABLE`). A keyed request reaches the upstream, so this is routine
- * there and says the gateway routed the request. A 500, a 502 or an unnamed
- * 5xx stays `other`: protocol-routing reads a keyed 500 as "the shape does
- * not parse", and a gateway that crashes on a path must still fail.
- */
-const isUpstreamBusy = (status: number, bodyText: string): boolean =>
-  status === 503 ||
-  status === 529 ||
-  (status >= 500 &&
-    /overloaded_error|model is overloaded|UNAVAILABLE/u.test(bodyText));
-
-/**
  * Read one keyed answer.
  *
  * - `redirected` is a 3xx: the probe never follows one, so a moved path is
@@ -269,15 +256,19 @@ const isUpstreamBusy = (status: number, bodyText: string): boolean =>
  *   `FreeTierError` on a paid model): the probe did not look like the plugin,
  *   so it measured nothing about the path.
  * - `auth-refused` is the plane's own key refused on that path, which on a
- *   default-family cell means the plugin's turns would be refused too — the
- *   probe carries the plugin's identity headers, so the two requests match.
+ *   default-family cell means a turn carrying the same key would be refused
+ *   too — the probe carries the plugin's identity headers, so the two
+ *   requests match. On Go that is an entry that names
+ *   `apiKeyEnv: OPENCODE_GO_API_KEY` (README step 3): a Go entry without it
+ *   sends the Zen key (D20), which this probe does not measure.
  * - `wrong-protocol` is the path parsing the request and refusing the model's
  *   protocol there.
  * - `path-exists` is any other 400: the path parsed the request and refused
  *   its content.
  * - `upstream-busy` is the upstream provider overloaded (a 503, a 529, or a
- *   5xx naming an overload): the gateway routed the request, so like a rate
- *   limit it says nothing against the path. Any other 5xx is `other`.
+ *   5xx naming an overload): the gateway may have routed the request, or its
+ *   front may have answered before reading the key, so like a rate limit it
+ *   says nothing about the path or the key. Any other 5xx is `other`.
  *
  * @param answer.status - the HTTP status.
  * @param answer.bodyText - the response body, as text.
@@ -344,10 +335,17 @@ export const keyedVerdictOf = (
   verdictOfAttempts(attempts, classifyKeyedProbe);
 
 /**
- * The verdicts that are the flip rule's evidence (`docs/redirect-planes.md`
- * §13): on a default-family cell, the path is gone, refuses the protocol, or
- * refuses the plane's own key. A red run on one of these is the evidence for
- * a later `fix:` that flips `AUTO_ENDPOINT_FAMILY`.
+ * The verdicts that fail a default-family cell on their own and can be the
+ * flip rule's evidence (`docs/redirect-planes.md` §13): the path is gone,
+ * refuses the protocol, or refuses the plane's own key. Each is evidence only
+ * when the cell a flip would send the same plane × protocol to — the one
+ * `endpoint: legacy` dispatches to ({@link LEGACY_DISPATCH}), when it is not
+ * the default cell itself — accepted the request ({@link planeOutcome});
+ * otherwise a flip would fix nothing. A `model-gone` beside that acceptance is
+ * evidence too, though it fails nothing alone; beside a refused protocol or
+ * model, the account's answer is not that acceptance, as the account's gate
+ * answers before either is read. A red run on flip evidence is
+ * the evidence for P-R2b, the `fix:` that flips `AUTO_ENDPOINT_FAMILY`.
  */
 export const FLIP_EVIDENCE: ReadonlySet<string> = new Set([
   "auth-refused",
@@ -359,8 +357,9 @@ export const FLIP_EVIDENCE: ReadonlySet<string> = new Set([
  * The verdicts that, on a cell the default family dispatches to, fail the
  * job: the flip evidence, and an answer that measured nothing a turn could
  * use — an unreadable status (`other`), a redirect, a refused session, no
- * answer on either attempt (`transport-error`), or no model to send
- * (`no-model`). Only {@link FLIP_EVIDENCE} is evidence for a flip.
+ * answer on the last attempt that did not follow a 429 (`transport-error`),
+ * or no model to send (`no-model`). Only {@link FLIP_EVIDENCE} can be
+ * evidence for a flip.
  */
 const BREAKS_DEFAULT: ReadonlySet<string> = new Set([
   ...FLIP_EVIDENCE,
@@ -386,16 +385,173 @@ export type PlaneOutcome<R> =
   | { readonly kind: "skip"; readonly reason: string };
 
 /**
- * What one plane's keyed probes decide, read from the cells the default
- * family dispatches to (`TODAY_DISPATCH`) and nothing else — the legacy and
- * root rows are recorded only, so they can neither fail nor pass a plane.
+ * The answers on another shape that show it read and accepted the plane's
+ * key and reached the path: served, a parsed body refused for its content, or
+ * the account's answer. A busy upstream is not one: a 503 can come from the
+ * gateway's front before the key is read.
+ */
+const ACCEPTED: ReadonlySet<string> = new Set([
+  "account",
+  "path-exists",
+  "served",
+]);
+
+/**
+ * The answers on another shape that show it accepted the model and its
+ * protocol: {@link ACCEPTED} without the account's answer, as the account's
+ * gate answers before the format check and the model's routing
+ * (`test/e2e/protocol-routing.e2e.ts`), so it says nothing about either.
+ */
+const ACCEPTED_MODEL: ReadonlySet<string> = new Set(["path-exists", "served"]);
+
+/** What another shape must have answered to have accepted what `verdict`, on a default cell, refused. */
+const acceptedBeside = (verdict: string): ReadonlySet<string> =>
+  verdict === "wrong-protocol" || verdict === "model-gone"
+    ? ACCEPTED_MODEL
+    : ACCEPTED;
+
+/**
+ * The answers on another shape that refused the request readably — its key,
+ * its path, its protocol or its model — so a flip to that shape would not
+ * serve it either. Anything else measured nothing: a rate limit, a busy
+ * upstream, no answer, an unreadable one, or the account's gate beside a
+ * refused protocol.
+ */
+const REFUSED: ReadonlySet<string> = new Set([...FLIP_EVIDENCE, "model-gone"]);
+
+/** The default-cell verdicts a flip of the family could fix. */
+const FLIPPABLE: ReadonlySet<string> = new Set([
+  ...FLIP_EVIDENCE,
+  "model-gone",
+]);
+
+/** Why a default cell fails a plane, in the order a reason names them. */
+const BREAK_KINDS = [
+  "flip",
+  "unreached",
+  "unmeasured",
+  "refused",
+  "key",
+  "key-unmeasured",
+  "unreadable",
+] as const;
+type BreakKind = (typeof BREAK_KINDS)[number];
+
+const BREAK_REASONS: Readonly<Record<BreakKind, string>> = {
+  flip: "a cell the default family dispatches to refused the protocol, the plane's own key, the path or a model that the cell `endpoint: legacy` dispatches to for the same protocol accepted (flip evidence, docs/redirect-planes.md §13)",
+  key: "a cell the default family dispatches to refused the plane's own key, and every other shape of the protocol that read the key refused it too (not flip evidence: check the CI secret)",
+  "key-unmeasured":
+    "a cell the default family dispatches to refused the plane's own key, and no other shape of the protocol accepted or refused it (not flip evidence: nothing else measured the key)",
+  refused:
+    "a cell the default family dispatches to refused the model's protocol or is a gone path, and the cell `endpoint: legacy` dispatches to for the same protocol refused the request too, or is the default cell itself (not flip evidence: a flip would not serve it)",
+  unmeasured:
+    "a cell the default family dispatches to refused the model's protocol or is a gone path, and the cell `endpoint: legacy` dispatches to for the same protocol answered nothing that measured the request — a rate limit, a busy upstream, the account's gate, no answer or an unreadable one (not flip evidence this run: the shape a flip reaches measured nothing; re-run)",
+  unreadable:
+    "a cell the default family dispatches to gave no readable answer (not flip evidence)",
+  unreached:
+    "a cell the default family dispatches to refused the protocol, the plane's own key, the path or a model that only a shape no setting dispatches to accepted — the root, or the `/zen/go` cell of Go's Google, which stays modern under every family (not flip evidence: no flip reaches that shape)",
+};
+
+/** What a default cell's siblings — the other shapes of its plane × protocol — answered. */
+interface Siblings {
+  /** The legacy and the root cell's verdicts, those that were probed. */
+  readonly answers: readonly string[];
+  /**
+   * The verdict of the cell a flip sends the plane × protocol to, `null` when
+   * that is the default cell itself (Go's Google), and `undefined` when it was
+   * not probed.
+   */
+  readonly flipTarget: string | null | undefined;
+}
+
+/**
+ * Why one default cell fails its plane, or `undefined` when it does not. A
+ * sibling counts only for what it measured: acceptance for what the default
+ * cell refused ({@link acceptedBeside}); for a refused key, only a sibling
+ * that refused the key too; for a refused protocol or a gone path, the shape
+ * a flip reaches, which must itself have refused the request readably
+ * ({@link REFUSED}) for the run to say that a flip would not serve it.
  *
- * - `fail` when a default cell's verdict {@link breaksDefault}; the reason
- *   says whether it is flip evidence.
+ * @param verdict - the default cell's verdict.
+ * @param siblings - what the other shapes of the same plane × protocol,
+ *   which carry the same model and key, answered.
+ */
+const breakKindOf = (
+  verdict: string,
+  siblings: Siblings
+): BreakKind | undefined => {
+  if (!FLIPPABLE.has(verdict)) {
+    return breaksDefault(verdict) ? "unreadable" : undefined;
+  }
+  const accepted = acceptedBeside(verdict);
+  const { answers, flipTarget } = siblings;
+  if (typeof flipTarget === "string" && accepted.has(flipTarget)) {
+    return "flip";
+  }
+  if (answers.some((answer) => accepted.has(answer))) {
+    return "unreached";
+  }
+  switch (verdict) {
+    case "model-gone": {
+      // "Model is unavailable" is also the answer for an id sent where it
+      // is not served, so it is a retired model only when no other shape
+      // took it.
+      return undefined;
+    }
+    case "auth-refused": {
+      // A gone path, a rate limit or a busy upstream may answer before the
+      // key is read, so only a sibling that refused the key says anything
+      // about it.
+      return answers.includes("auth-refused") ? "key" : "key-unmeasured";
+    }
+    default: {
+      // No flip moves Go's Google, so whatever its siblings answered, a flip
+      // would not serve it.
+      return flipTarget === null || REFUSED.has(flipTarget ?? "")
+        ? "refused"
+        : "unmeasured";
+    }
+  }
+};
+
+/**
+ * The cell a flip of the default family sends a default cell's plane ×
+ * protocol to: the one {@link LEGACY_DISPATCH} holds for it, or `undefined`
+ * when that is the default cell itself (Go's Google), which no flip moves.
+ */
+const flipTargetOf = (cell: string): string | undefined => {
+  const prefix = cell.replace(/ modern$/u, " ");
+  const target = [...LEGACY_DISPATCH].find((key) => key.startsWith(prefix));
+  return target === cell ? undefined : target;
+};
+
+/**
+ * What one plane's keyed probes decide, from the cells the default family
+ * dispatches to (`TODAY_DISPATCH`). The legacy and root rows never fail or
+ * pass a plane on their own; they are read only beside a default cell of the
+ * same plane × protocol, which carries the same model and key, to tell the
+ * default family's own refusal from one every shape gives.
+ *
+ * - `fail` when a default cell's verdict {@link breaksDefault}, or it is
+ *   `model-gone` while another shape accepted the same model
+ *   ({@link ACCEPTED_MODEL}: the account's answer does not count). The
+ *   reason says whether it is flip evidence, which needs the cell a flip
+ *   reaches — the one `endpoint: legacy` dispatches to, when that is not the
+ *   default cell itself — to have accepted the request ({@link acceptedBeside}:
+ *   the account's answer shows a key read and a path that exists, not a
+ *   protocol or a model served). Acceptance only on the root, or on the
+ *   `/zen/go` cell of Go's Google (which stays modern under every family),
+ *   still fails the plane, as no flip reaches it. Each sibling counts only
+ *   for what it measured: a key refused on every shape that read it is the
+ *   CI secret, and a key no other shape read measured nothing else; a
+ *   protocol or a path the shape a flip reaches refused too is one a flip
+ *   would not serve, and one that shape measured nothing about (a rate limit,
+ *   a busy upstream, the account's gate, no answer) is a re-run. None of
+ *   them is flip evidence.
  * - `skip` when no default cell was `served`: every answer was the account's,
  *   a rate limit, a busy upstream, a retired model or a parsed-but-refused
- *   body, so nothing
- *   showed that the plugin's turns are served. A skip, never a pass.
+ *   body, so nothing showed that the plugin's turns are served. A skip, never
+ *   a pass.
  * - `pass` otherwise: nothing broke, and at least one default cell served.
  *
  * @param rows - the plane's probes: each cell's key and verdict.
@@ -414,15 +570,32 @@ export const planeOutcome = <
       reason: "no cell the default family dispatches to was probed",
     };
   }
-  const broken = defaults.filter((row) => breaksDefault(row.verdict));
+  const verdictOf = new Map(rows.map((row) => [row.cell, row.verdict]));
+  const siblingsOf = (cell: string): Siblings => {
+    const answers = ["legacy", "root"]
+      .map((family) => verdictOf.get(cell.replace(/ modern$/u, ` ${family}`)))
+      .filter((verdict) => verdict !== undefined);
+    const target = flipTargetOf(cell);
+    return {
+      answers,
+      flipTarget: target === undefined ? null : verdictOf.get(target),
+    };
+  };
+  const kinds = new Set<BreakKind>();
+  const broken = defaults.filter((row) => {
+    const kind = breakKindOf(row.verdict, siblingsOf(row.cell));
+    if (kind !== undefined) {
+      kinds.add(kind);
+    }
+    return kind !== undefined;
+  });
   if (broken.length > 0) {
-    const evidence = broken.some((row) => FLIP_EVIDENCE.has(row.verdict));
     return {
       broken,
       kind: "fail",
-      reason: evidence
-        ? "a cell the default family dispatches to refused the plane's own key, the protocol or the path (flip evidence, docs/redirect-planes.md §13)"
-        : "a cell the default family dispatches to gave no readable answer (not flip evidence)",
+      reason: BREAK_KINDS.filter((kind) => kinds.has(kind))
+        .map((kind) => BREAK_REASONS[kind])
+        .join("; "),
     };
   }
   if (!defaults.some((row) => row.verdict === "served")) {

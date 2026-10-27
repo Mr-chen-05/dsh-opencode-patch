@@ -107,8 +107,9 @@ describe("endpoint family · the default", () => {
 
 describe("endpoint family · the one constant", () => {
   it("snapshots AUTO_ENDPOINT_FAMILY as modern; auto's bases equal the constant's, a guard that bites once the constant flips", () => {
-    // The family `auto` resolves to; P-R2 measured it and kept it
-    // (docs/redirect-planes.md §13).
+    // The family `auto` resolves to; P-R2 keeps it while the families are
+    // measured in CI (docs/redirect-planes.md §13, pending the first run), and
+    // a measured flip is P-R2b's `fix:`.
     expect(AUTO_ENDPOINT_FAMILY).toBe("modern");
     // While the constant is `modern` this loop restates the first describe.
     // It is the guard for the flip: change the constant, and a `baseUrlFor`

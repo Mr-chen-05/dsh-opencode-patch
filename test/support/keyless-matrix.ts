@@ -2,7 +2,7 @@
  * The keyless 401-vs-404 probe matrix: which gateway paths still exist.
  *
  * Two planes × four protocols × three URL shapes — legacy `/zen(/go)/v1`, the
- * provider-level root `/inference(/go)/v1`, and the modern per-protocol
+ * root `/inference(/go)/v1`, and the modern per-protocol
  * `/inference(/go)/{openai,anthropic,google}/…` — one representative PAID
  * model per plane and protocol, every request sent WITHOUT a key. The gateway
  * authenticates before it routes a model, so a keyless request tells the paths
@@ -10,8 +10,9 @@
  * that it exists, a 410 or a 400 "Model is unavailable" that the model is.
  * Beside the matrix, one keyless FREE-model probe on the default completions
  * path ({@link freeProbeCells}) asks whether the gateway parses a free model
- * there at all. `test/e2e/keyless-matrix.e2e.ts` sends both; P-R2 measured
- * them and kept the default family (`AUTO_ENDPOINT_FAMILY`).
+ * there at all. `test/e2e/keyless-matrix.e2e.ts` sends both; P-R2 measures
+ * them in CI (`docs/redirect-planes.md` §13, pending the first run) and keeps
+ * the default family (`AUTO_ENDPOINT_FAMILY`).
  *
  * Pure: every function here is a function of its arguments — no fetch, no
  * environment, no module state — so the cell table and the classifier are
@@ -32,17 +33,18 @@ export type MatrixPlane = "opencode" | "opencode-go";
 
 /**
  * The three URL shapes, in the order cells are produced: the legacy family,
- * the provider-level root, and the modern family.
+ * the root, and the modern family.
  */
 export const MATRIX_FAMILIES = ["legacy", "root", "modern"] as const;
 export type MatrixFamily = (typeof MATRIX_FAMILIES)[number];
 
 /**
- * The provider-level root shape: one base per plane with every protocol under
- * it, as legacy is. It is the base `models.opencode.ai` declares for each
- * provider (`docs/engineering-notes.md`, "The endpoint chain"). Nothing the
- * plugin sends goes there — a route-level `baseURL` on it selects the modern
- * family — so it is measured only.
+ * The root shape: one base per plane with every protocol under it, as legacy
+ * is. It is the provider-level base `models.opencode.ai` declared until the
+ * 2026-10-16 catalog regeneration (`docs/engineering-notes.md`, "The endpoint
+ * chain"); the catalog now declares the modern completions base
+ * (`OPENCODE_PLANE_API`). Nothing the plugin sends goes there — a route-level
+ * `baseURL` on it selects the modern family — so it is measured only.
  */
 export const INFERENCE_ROOT: Readonly<Record<MatrixPlane, string>> = {
   opencode: "https://opencode.ai/inference/v1",
@@ -106,8 +108,12 @@ export const TODAY_DISPATCH: ReadonlySet<string> = new Set(
  * `src/utils/protocols.ts`) — the modern cell {@link TODAY_DISPATCH} holds.
  *
  * Recorded, not guarded: P-R2 decided the live matrix and the keyed probes
- * print these cells' verdicts (marked `†` in the record) and assert none of
- * them. What guards the configuration is the offline pin of its mapping.
+ * print these cells' verdicts (marked `†` in the record). The keyless matrix
+ * requires each one to answer readably, like every legacy cell
+ * ({@link unreadRows}), but no live assertion reads a `†` cell's path-gone —
+ * except Go's Google, which is also a default cell ({@link TODAY_DISPATCH})
+ * and is guarded as one. What guards the configuration is the offline pin of
+ * its mapping.
  */
 export const LEGACY_DISPATCH: ReadonlySet<string> = new Set(
   (["opencode", "opencode-go"] as const).flatMap((plane) =>
@@ -326,8 +332,9 @@ export type AttemptVerdict = "rate-limited" | "transport-error";
  * rather than the path's: a final 429 is `rate-limited`, and so is NO answer
  * after a 429 — measured, a rate-limited gateway answers 429 and then holds
  * the next connection open until the client gives up
- * (`test/e2e/protocol-routing.e2e.ts`). No answer on every attempt is
- * `transport-error`.
+ * (`test/e2e/protocol-routing.e2e.ts`). Any other last attempt with no answer
+ * is `transport-error` — after no answer, a 5xx, or a busy upstream (a 503 or
+ * a 529) alike: only the 429 hang is a measured gateway pattern.
  *
  * @param attempts - each attempt's answer, `undefined` for one that got none.
  * @param classify - how the suite reads an answer.
@@ -368,6 +375,29 @@ export const redirectPathOf = (
     return undefined;
   }
 };
+
+/**
+ * A 5xx that is the upstream provider being busy, not the gateway failing on
+ * the path: a 503 or a 529 (Anthropic's `overloaded_error`), or any 5xx whose
+ * body names an overload (`overloaded_error`, Gemini's `model is overloaded`
+ * or `UNAVAILABLE`). A request that reaches the upstream — a keyed probe, or
+ * the keyless free probe — sees this routinely. The gateway may have routed
+ * the request, or its front may have answered before reading it, so like a
+ * rate limit it says nothing about the path or the key — which is why the
+ * keyed probes never read it as a shape accepting the request. A 500, a 502
+ * or an unnamed 5xx is not busy:
+ * protocol-routing reads a keyed 500 as "the shape does not parse", and a
+ * gateway that crashes on a path must still fail.
+ *
+ * @param status - the HTTP status.
+ * @param bodyText - the response body, as text.
+ * @returns whether the upstream was busy.
+ */
+export const isUpstreamBusy = (status: number, bodyText: string): boolean =>
+  status === 503 ||
+  status === 529 ||
+  (status >= 500 &&
+    /overloaded_error|model is overloaded|UNAVAILABLE/u.test(bodyText));
 
 /** Whether a status is a redirect, which a probe sends with `redirect: "manual"` and never follows. */
 const isRedirect = (status: number): boolean => status >= 300 && status < 400;
@@ -503,6 +533,7 @@ export type FreeVerdict =
   | "path-gone"
   | "redirected"
   | "served"
+  | "upstream-busy"
   | "wrong-format";
 
 /**
@@ -510,7 +541,10 @@ export type FreeVerdict =
  * request it parsed (a missing session or tool schema), so it passes; a
  * "not supported for format" is the model sent to an endpoint that cannot
  * speak its wire format; any other 401 or 403 means the gateway wanted a key
- * for a model it used to serve without one.
+ * for a model it used to serve without one. A free model is the one keyless
+ * request that reaches the upstream, so a busy upstream
+ * ({@link isUpstreamBusy}) is `upstream-busy`, as the keyed probes read it;
+ * any other 5xx is `other`.
  *
  * @param answer.status - the HTTP status.
  * @param answer.bodyText - the response body, as text.
@@ -547,7 +581,116 @@ export const classifyFreeProbe = (answer: {
   if (answer.status === 401 || answer.status === 403) {
     return "auth-required";
   }
-  return "other";
+  return isUpstreamBusy(answer.status, answer.bodyText)
+    ? "upstream-busy"
+    : "other";
+};
+
+/**
+ * The free-probe verdicts that move on to the next free candidate: a retired
+ * model, or a busy upstream — neither says anything about the path.
+ */
+const FREE_MOVES_ON: ReadonlySet<string> = new Set([
+  "model-gone",
+  "upstream-busy",
+]);
+
+/** Whether the free probe tries the next candidate after this verdict. */
+export const freeProbeMovesOn = (verdict: string): boolean =>
+  FREE_MOVES_ON.has(verdict);
+
+/**
+ * Which candidate decides the free probe, from every candidate's verdict in
+ * the order sent: the last one, which is the first that did not move on
+ * ({@link freeProbeMovesOn}); when every candidate moved on, the first busy
+ * one if any was busy — the run measured a busy upstream, not three retired
+ * models — else the last. `-1` when no candidate was sent.
+ *
+ * @param verdicts - each candidate's verdict, in the order sent.
+ * @returns the deciding candidate's index.
+ */
+const decidingIndex = (
+  verdicts: readonly (FreeVerdict | AttemptVerdict)[]
+): number => {
+  const last = verdicts.length - 1;
+  if (last >= 0 && freeProbeMovesOn(verdicts[last] ?? "")) {
+    const busy = verdicts.indexOf("upstream-busy");
+    return busy === -1 ? last : busy;
+  }
+  return last;
+};
+
+/**
+ * The free probe's verdict from every candidate it sent, in order: the
+ * deciding candidate's ({@link decidingIndex}), or `transport-error` when no
+ * candidate was sent.
+ *
+ * @param verdicts - each candidate's verdict, in the order sent.
+ * @returns the verdict the probe decides on.
+ */
+export const freeProbeVerdictOf = (
+  verdicts: readonly (FreeVerdict | AttemptVerdict)[]
+): FreeVerdict | AttemptVerdict =>
+  verdicts[decidingIndex(verdicts)] ?? "transport-error";
+
+/** One free candidate as the probe read it: what the record names. */
+export interface FreeCandidate {
+  readonly model: string | undefined;
+  /** The last attempt's status, `undefined` when it got no answer. */
+  readonly status: number | undefined;
+  /** The last attempt's body, `""` when it got no answer. */
+  readonly bodyText: string;
+  readonly verdict: FreeVerdict | AttemptVerdict;
+}
+
+/**
+ * Walk the free candidates: send each in order ({@link freeProbeCells}), read
+ * its attempts ({@link verdictOfAttempts}), and stop at the first that does
+ * not move on ({@link freeProbeMovesOn}). The candidate that decides
+ * ({@link freeProbeVerdictOf}) is returned with its OWN model, status and
+ * body, so a busy upstream decided by an earlier candidate is never recorded
+ * under a later one's model and status.
+ *
+ * Pure but for the injected sender, which is the live suite's retried fetch.
+ *
+ * @param cells - the candidates, in the order to send them.
+ * @param send - sends one cell; every attempt's answer, `undefined` for none.
+ * @returns every candidate sent, and the one that decides.
+ */
+export const runFreeProbe = async (
+  cells: readonly MatrixCell[],
+  send: (cell: MatrixCell) => Promise<readonly (ProbeAnswer | undefined)[]>
+): Promise<{
+  readonly candidates: readonly FreeCandidate[];
+  readonly decided: FreeCandidate;
+}> => {
+  const candidates: FreeCandidate[] = [];
+  for (const cell of cells) {
+    // oxlint-disable-next-line no-await-in-loop -- sequential by design: the next candidate is sent only when this one moved on
+    const attempts = await send(cell);
+    const answer = attempts.at(-1);
+    const verdict = verdictOfAttempts(attempts, classifyFreeProbe);
+    candidates.push({
+      bodyText: answer?.bodyText ?? "",
+      model: cell.model,
+      status: answer?.status,
+      verdict,
+    });
+    if (!freeProbeMovesOn(verdict)) {
+      break;
+    }
+  }
+  return {
+    candidates,
+    decided: candidates[
+      decidingIndex(candidates.map((candidate) => candidate.verdict))
+    ] ?? {
+      bodyText: "",
+      model: undefined,
+      status: undefined,
+      verdict: "transport-error",
+    },
+  };
 };
 
 /** The free-probe verdicts that mean the default completions path parses a free model. */
@@ -557,15 +700,16 @@ const FREE_PROBE_PASSES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * What the free probe's last verdict decides: `pass` when the default
+ * What the free probe's verdict decides: `pass` when the default
  * completions path parsed the free model (served, or gated by the free tier);
- * `skip` when the gateway was rate-limiting (`rate-limited`), which says
- * nothing about the path — free models are the class it limits, and
- * `test/e2e/protocol-routing.e2e.ts`'s free cases skip on it too; `fail` on
- * everything else: a gone path, a key demanded, the wrong wire format, a
- * redirect, an unreadable status, no answer, or three retired free models.
+ * `skip` when the gateway was rate-limiting (`rate-limited`) or the upstream
+ * busy (`upstream-busy`), which say nothing about the path — free models are
+ * the class it limits, and `test/e2e/protocol-routing.e2e.ts`'s free cases
+ * skip on a rate limit too; `fail` on everything else: a gone path, a key
+ * demanded, the wrong wire format, a redirect, an unreadable status, no
+ * answer, or three retired free models.
  *
- * @param verdict - the last candidate's verdict.
+ * @param verdict - the probe's verdict ({@link freeProbeVerdictOf}).
  * @returns the outcome.
  */
 export const freeProbeOutcome = (
@@ -574,5 +718,7 @@ export const freeProbeOutcome = (
   if (FREE_PROBE_PASSES.has(verdict)) {
     return "pass";
   }
-  return verdict === "rate-limited" ? "skip" : "fail";
+  return verdict === "rate-limited" || verdict === "upstream-busy"
+    ? "skip"
+    : "fail";
 };
