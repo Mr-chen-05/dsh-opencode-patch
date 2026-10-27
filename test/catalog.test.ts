@@ -1033,7 +1033,8 @@ describe("catalog · the README's routing table", () => {
     const zen = counted(OPENCODE_ZEN_CATALOG);
     const go = counted(OPENCODE_GO_CATALOG);
 
-    const rows: { go: number; sdk: string; zen: number }[] = [];
+    const rows: { go: number; protocol: string; sdk: string; zen: number }[] =
+      [];
     for (const line of text.split("\n")) {
       const cells = line.split("|").map((cell) => cell.trim());
       // `| SDK | protocol | Zen | Go |` — five cells once split on the pipes.
@@ -1054,7 +1055,7 @@ describe("catalog · the README's routing table", () => {
       ) {
         continue;
       }
-      rows.push({ go: goCount, sdk, zen: zenCount });
+      rows.push({ go: goCount, protocol: cells[2] ?? "", sdk, zen: zenCount });
     }
 
     expect(rows.length).toBeGreaterThan(0);
@@ -1065,6 +1066,18 @@ describe("catalog · the README's routing table", () => {
     // Every SDK either plane names has a row, so a new one cannot be missed.
     expect(rows.map((row) => row.sdk).toSorted()).toEqual(
       [...new Set([...zen.keys(), ...go.keys()])].toSorted()
+    );
+    // The prose under the table restates the Go column's non-completions sum,
+    // and went stale once when a refresh moved the cells but not the sentence.
+    const prose =
+      /Go plane serves (\d+) models on shapes other than completions/u.exec(
+        text
+      );
+    expect(prose, "the Go non-completions sentence is gone").not.toBeNull();
+    expect(Number(prose?.[1])).toBe(
+      rows
+        .filter((row) => row.protocol !== "`openai-completions`")
+        .reduce((sum, row) => sum + row.go, 0)
     );
   });
 

@@ -35,7 +35,7 @@ A **shape** is one wire protocol, named by the SDK a model declares in the catal
 
 That is why the servability check treats `undefined` as servable, and why `@ai-sdk/openai-compatible` is deliberately **not** in `PROTOCOL_FOR_SDK`: listing it would record the default as though it were an override. The coverage guard still covers the case where a model declares it explicitly. None do today, and if one did, the test would name it rather than drop the model.
 
-**The two bold cells were the gap, and they are closed.** The Go plane serves 12 models on shapes other than completions; both planes now serve every shape either one carries, on the plane's own route (§3).
+**The two bold cells were the gap, and they are closed.** The Go plane serves 11 models on shapes other than completions; both planes now serve every shape either one carries, on the plane's own route (§3).
 
 **`@ai-sdk/mistral` is completions (D16).** pi's own data files `mistral-large-4` under `openai-completions`, so the plugin follows it rather than keeping the SDK unserved; nothing is withheld for its protocol any more.
 

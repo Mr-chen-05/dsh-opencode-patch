@@ -92,7 +92,7 @@ npm install dsh-opencode-patch
 // ~/.dsh/profiles/web/package.json
 {
   "dependencies": {
-    "dsh-opencode-patch": "^0.12.0",
+    "dsh-opencode-patch": "^1.4.1",
   },
   "dsh": {
     "profile": {
@@ -164,7 +164,7 @@ Zen 的 provider 级 SDK 是 `@ai-sdk/openai-compatible`。models.dev **只在�
 | `@ai-sdk/google` | 8 | Google Generative AI |
 | `@ai-sdk/mistral` | 1 | OpenAI Chat Completions（与 pi 自己的数据一致） |
 
-数量为 `models.opencode.ai` 中 `opencode` 的 81 个**在用**模型，统计于 2026-10-23 —— 其余已废弃或下架，补丁只内置网关仍在服务的部分。同样这 81 个模型离线内置在 `src/catalog-data.ts`，因此在第一次 catalog 刷新之前它们每一个路由都是正确的；用 `pnpm run catalog:shim` 重新生成该文件。
+数量为 `models.opencode.ai` 中 `opencode` 的 81 个**在用**模型，统计于 2026-10-27 —— 其余已废弃或下架，补丁只内置网关仍在服务的部分。同样这 81 个模型离线内置在 `src/catalog-data.ts`，因此在第一次 catalog 刷新之前它们每一个路由都是正确的；用 `pnpm run catalog:shim` 重新生成该文件。
 
 由此有四条性质：
 

@@ -94,7 +94,7 @@ The package is `dsh-opencode-patch` under every name it is used by: the dependen
 // ~/.dsh/profiles/web/package.json
 {
   "dependencies": {
-    "dsh-opencode-patch": "^0.14.0",
+    "dsh-opencode-patch": "^1.4.1",
   },
   "dsh": {
     "profile": {
@@ -166,7 +166,7 @@ Zen's provider-level SDK is `@ai-sdk/openai-compatible`. models.dev names a **di
 | `@ai-sdk/google` | 8 | Google Generative AI |
 | `@ai-sdk/mistral` | 1 | OpenAI Chat Completions, as pi's own data files it |
 
-Counts are the **81** active `opencode` models in `models.opencode.ai` as of 2026-10-23 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 81 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
+Counts are the **81** active `opencode` models in `models.opencode.ai` as of 2026-10-27 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 81 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
 
 Four properties follow:
 
