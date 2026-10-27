@@ -40,7 +40,7 @@ export const en = {
   keySourceAuto: "Automatic",
   keySourceConfigured: "Declared key first",
   keySourceHint:
-    "Which key wins when several resolve. Automatic takes the declared key, then one captured from a live request; the other two promote one side.",
+    "Which key wins when several resolve. Automatic takes a literal key, then one captured from a live request, then the declared reference; Declared key first puts the reference ahead of the captured key, Live request first puts captured keys first.",
   keySourceRequest: "Live request first",
   readOpencodeStore: "Read the OpenCode installation's key (default off)",
   readOpencodeStoreHint:
@@ -211,7 +211,7 @@ export const zh: Record<keyof typeof en, string> = {
   keySourceAuto: "自动",
   keySourceConfigured: "优先已声明密钥",
   keySourceHint:
-    "多个来源都可用时以哪个为准。自动先取已声明密钥、再取捕获密钥；另两项各优先一侧。",
+    "多个来源都可用时以哪个为准。自动先取字面密钥，再取实时请求捕获的密钥，最后取声明的引用；优先已声明密钥把引用排在捕获密钥之前，优先实时请求把捕获密钥排在最前。",
   keySourceRequest: "优先实时请求",
   readOpencodeStore: "读取 OpenCode 安装的密钥（默认关闭）",
   readOpencodeStoreHint:

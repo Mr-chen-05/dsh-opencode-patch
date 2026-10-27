@@ -76,7 +76,7 @@ describe("plane-model · protocol (D16)", () => {
     expect(modelOf(inputFor("opencode", "mistral-large-4")).api).toBe(
       "openai-completions"
     );
-    const gemini = inputFor("opencode-go", "gemini-4-argon-contributor");
+    const gemini = inputFor("opencode-go", "gemini-4-argon");
     expect(gemini.pi).toBeUndefined();
     expect(modelOf(gemini).api).toBe("google-generative-ai");
     expect(modelOf(inputFor("opencode", "not-a-real-model")).api).toBe(
@@ -199,8 +199,7 @@ describe("plane-model · base (modern, legacy, route-level)", () => {
       modelOf(inputFor("opencode", "gpt-5.3-codex-spark", legacy)).baseUrl
     ).toBe("https://opencode.ai/zen/v1");
     expect(
-      modelOf(inputFor("opencode-go", "gemini-4-argon-contributor", legacy))
-        .baseUrl
+      modelOf(inputFor("opencode-go", "gemini-4-argon", legacy)).baseUrl
     ).toBe("https://opencode.ai/inference/go/google/v1beta");
     expect(
       modelOf(inputFor("opencode-go", "minimax-m3.1-flash", legacy)).baseUrl
@@ -511,6 +510,20 @@ describe("plane-model · metadata (D17) and the model object", () => {
     const toggle = planeModelFor(inputFor("opencode-go", "minimax-m3"));
     expect(toggle.effortNames).toEqual({ high: "On", off: "Off" });
     expect(toggle.model?.thinkingLevelMap).not.toHaveProperty("off");
+    // A completions model whose effort list names none serves the map pi
+    // 1.1.0's own entry carries: Off offered, with none as its wire value.
+    for (const [plane, id] of [
+      ["opencode", "mistral-large-4"],
+      ["opencode-go", "hy3"],
+      ["opencode-go", "hy4-preview"],
+    ] as const) {
+      const pi = piOf(plane, id);
+      expect(pi?.thinkingLevelMap?.off, `${plane}/${id}`).toBe("none");
+      expect(
+        modelOf(inputFor(plane, id)).thinkingLevelMap,
+        `${plane}/${id}`
+      ).toEqual(pi?.thinkingLevelMap);
+    }
     const fromPi = modelOf({
       ...inputFor("opencode", "x"),
       pi: { id: "x", reasoning: true, thinkingLevelMap: { high: "h" } },

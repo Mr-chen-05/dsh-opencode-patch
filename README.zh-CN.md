@@ -57,7 +57,7 @@
 - 🧰 免费层 `read` + `bash` 工具 schema 回退，让免费层的请求体带上它的端点所要求的工具定义——这去掉的是 `403` 的一个成因，而不是全部：网关的那道闸不在请求里，实测如此
 - 📇 基于 OpenCode 官方目录（`models.opencode.ai`，即 models.dev 发布的那份注册表）的模型目录，带离线预置与后台 SWR 刷新——名称、上下文窗口、价格
 - ⭕ 实时双模式停靠栏计量——Go 额度环（5 小时 / 每周 / 每月）或 Zen 按量计费胶囊，外加会话消耗与模型费率
-- 🕵️ 严格凭据隔离——Zen 密钥（`oc_sk_…`）绝不查询 Go 额度端点
+- 🕵️ Go 计量凭据防护——Go 额度端点绝不会收到 `OPENCODE_API_KEY` 引用；它读取 Go 条目的 `apiKeyEnv`（否则 `OPENCODE_GO_API_KEY`），或某次 Go 平面请求携带的密钥
 
 **目录**
 
@@ -103,7 +103,7 @@ npm install dsh-opencode-patch
 }
 ```
 
-**3. 添加凭据**，让额度计量能解析到密钥——在 DSH Credentials 或你的环境变量中存储 `OPENCODE_GO_API_KEY`（Go 订阅，`sk-…`）和/或 `OPENCODE_API_KEY`（Zen 按量计费，`oc_sk_…`）。
+**3. 添加凭据**，让额度计量能解析到密钥——在 DSH Credentials 或你的环境变量中存储 `OPENCODE_GO_API_KEY`（Go 订阅，`sk-…`）和/或 `OPENCODE_API_KEY`（Zen 按量计费，`oc_sk_…`）。**在 Go 平面上要写明它：** 给 `opencode-go` 条目加上 `apiKeyEnv: OPENCODE_GO_API_KEY`。没有 `apiKeyEnv` 的平面条目按 pi 自己的查找认证，而它在两个平面上读的都是 `OPENCODE_API_KEY`，所以没有写明的 Go 条目发送的是 Zen 密钥。
 
 **4. 重启 `dsh web`。** 宿主 bundle 只在启动时导入（`hmr root: []`），因此要重启才会加载 `lib/index.mjs`；客户端 UI 变更（`lib/client.js`）只需刷新浏览器。
 
@@ -121,7 +121,7 @@ npm install dsh-opencode-patch
 | 子代理丢失对话上下文 | **父会话跟踪**（`x-opencode-parent-session-id`、`x-parent-session-id`） |
 | Auto Review 调用报 `TRANSPORT: Connection error` | **回退会话轮次捕获**，在评估调用之间保留轮次状态 |
 | 额度与余额不可见 | **实时双模式停靠栏计量**，显示 Go 额度或 Zen 按量计费 |
-| Zen 密钥在 Go 用量上触发 `403 EntitlementError` | **严格凭据隔离**，让 Zen 密钥不接触 Go 端点 |
+| Zen 密钥在 Go 用量上触发 `403 EntitlementError` | **计量绝不为 Go 读取 `OPENCODE_API_KEY` 引用。** 它依次使用：Go 条目上的字面 `apiKey`、Go 平面请求捕获到的密钥、Go 条目的 `apiKeyEnv`（`OPENCODE_API_KEY` 引用按 `OPENCODE_GO_API_KEY` 读取）、任意捕获的 Go 平面密钥，最后是需显式开启的安装存储。Go 回合携带其条目所写明的密钥；没有写明的条目发送 pi 的 `OPENCODE_API_KEY`，请求补丁把它当作 Go 密钥记录，于是从第一次 Go 回合起计量就把它发往 Go 用量端点并得到这个 `403`。在 Go 条目上写明 `apiKeyEnv: OPENCODE_GO_API_KEY`，让回合与计量一致；或在 Settings 中把凭据来源设为“优先已声明密钥” |
 | 所有项目共用一个 `"global"` 遥测桶 | **动态工作区归属**，由当前 `session.header.cwd` 解析 |
 | 网关 `/models` 返回截断且无名称的列表 | **目录补全**（`models.opencode.ai`）：显示名、上下文窗口与价格 |
 
@@ -146,10 +146,10 @@ npm install dsh-opencode-patch
 
 ### 2. OpenCode Go (`provider: opencode-go`) — 订阅额度
 
-- **OpenAI Chat Completions**（`https://opencode.ai/inference/go/openai/v1/chat/completions`）：`deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `deepseek-v4-pro`, `deepseek-v4.1-flash`, `glm-5.2`, `glm-5.3`, `glm-5.3-flash`, `hy3`, `hy4-preview`, `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`, `kimi-k3.1-pro`, `longcat-2.0`, `mimo-v2.5`, `mimo-v2.5-pro`, `mimo-v2.6-flash`, `mimo-v2.6-pro`, `qwen3.6-plus`, `qwen3.7-max`, `space-bunny`, `space-bunny-free`, `step-5-preview-free`
+- **OpenAI Chat Completions**（`https://opencode.ai/inference/go/openai/v1/chat/completions`）：`deepseek-v4-flash`, `deepseek-v4-flash-vision-exp`, `deepseek-v4-pro`, `deepseek-v4.1-flash`, `glm-5.2`, `glm-5.3`, `glm-5.3-flash`, `hy3`, `hy4-preview`, `iceman-contributor-free`, `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`, `kimi-k3.1-pro`, `longcat-2.0`, `mimo-v2.5`, `mimo-v2.5-pro`, `mimo-v2.6-flash`, `mimo-v2.6-pro`, `qwen3.6-plus`, `qwen3.7-max`, `space-bunny`, `space-bunny-free`, `step-5-preview-free`
 - **OpenAI Responses**（`https://opencode.ai/inference/go/openai/v1/responses`）：`gpt-5.6-luna`, `gpt-6-luna`, `grok-4.5`, `grok-4.6`, `grok-4.7`, `muse-spark-1.2-contributor`, `muse-spark-1.3-contributor`
 - **Anthropic Messages**（`https://opencode.ai/inference/go/anthropic/v1/messages`）：`claude-haiku-5-5`, `minimax-m2.7`, `minimax-m3`, `qwen3.7-plus`, `qwen3.8-flash`, `qwen3.8-max`
-- **Google Generative AI**（`https://opencode.ai/inference/go/google/v1beta/models/*:streamGenerateContent`）：`gemini-4-argon-contributor`，支持图片附件和带签名的工具调用回放。Go 没有旧版 Google 接口，因此两个家族都使用这一个地址。
+- **Google Generative AI**（`https://opencode.ai/inference/go/google/v1beta/models/*:streamGenerateContent`）：`gemini-4-argon`，支持图片附件和带签名的工具调用回放。Go 没有旧版 Google 接口，因此两个家族都使用这一个地址。
 - 由实时三窗口额度计量监控（5 小时滚动、每周、每月）。完整集合随内置目录发布——参见[权威模型目录](#7-权威模型目录双本地预置--实时-swr-更新)。
 
 ### 3. 模型的协议是怎么定的 —— 以及为什么你什么都不用配
@@ -170,8 +170,8 @@ Zen 的 provider 级 SDK 是 `@ai-sdk/openai-compatible`。models.dev **只在�
 
 - **你的挑选仍然有效。** 每个平面服务的正是其 `llm-pi-ai` 条目列出的模型；条目没有列出任何模型时，服务整个目录。Settings → Models → Fetch 提供整个目录：pi 自己的列表，加上目录里 pi 未列出的每个可服务、未下线的模型。从中采纳的模型与其他 id 一样保存，并由插件服务。你保存的任何 id 都会被接受并服务：目录与 pi 都未描述的 id 按 Chat Completions 发送，除非平面条目指定了路由级的 `api`——它只作用于这类 id。
 - **你的模型行优先。** 模型的名称、上下文窗口、输出上限与输入模态，先取你自己的模型行，再取目录，最后取 pi 的内置数据。推理档位先取你行里的 `reasoningEfforts`，再取目录。价格与协议不是模型行的字段：价格先取目录、再取 pi，协议先取目录的 SDK、再取 pi 的条目。
-- **只有开/关两种推理的模型提供“关 / 开”。** 只有该模型的协议确实能关闭推理时才提供“关”；有真正档位列表的模型只提供它自己的档位。
-- **一份凭据，按宿主自己的规则。** 平面的认证方式与 `llm-pi-ai` 相同：条目的 `apiKeyEnv` 经凭据服务解析（未挂载凭据服务时读启动环境），保存在 `llm-pi-ai/opencode` 下的登录记录，否则用 pi 自己的 `OPENCODE_API_KEY` 查找。只有在没有声明引用、且部署选择开启时，才会读取 OpenCode 安装自己的存储。密钥解析不到的平面仍列出其模型，回合在发出任何请求前以 `MISSING_CREDENTIAL` 失败。
+- **只有开/关两种推理的模型提供“关 / 开”。** 只有该模型的协议确实能关闭推理时才提供“关”；有真正档位列表的模型只提供它自己的档位；档位列表中含 `none` 的 Chat Completions 模型同样提供“关”，按 pi 自己条目的写法发送 `reasoning_effort: "none"`。
+- **一份凭据，按宿主自己的规则。** 平面的认证方式与 `llm-pi-ai` 相同：条目的 `apiKeyEnv` 经凭据服务解析（未挂载凭据服务时读启动环境），保存在 `llm-pi-ai/opencode` 下的登录记录，否则用 pi 自己的 `OPENCODE_API_KEY` 查找——两个平面读的是同一个变量：请在 Go 条目上写明 `apiKeyEnv: OPENCODE_GO_API_KEY`。只有在没有声明引用、且部署选择开启时，才会读取 OpenCode 安装自己的存储。密钥解析不到的平面仍列出其模型，回合在发出任何请求前以 `MISSING_CREDENTIAL` 失败。
 
 **设置仍归宿主所有。** 平面条目一如既往留在 `llm-pi-ai` 的 `providers` 块里，_Settings → Models_ 也在那里读写它们。插件把去掉这两个平面的配置副本交给 `llm-pi-ai`，让它不服务这两个平面；并用 `llm-pi-ai` 自己的检查校验对平面的设置编辑，所以格式错误的条目会在写入前被拒绝。
 
@@ -393,7 +393,7 @@ Zen 路线上不出现任何 Go 的数字：根本不画圆环（没有可量的
 | 免费模型报 `403 FreeTierError` | 网关请求头被剥离，或缺少工具定义 | 保持**恢复 User-Agent**、**注入客户端来源头**与**自动补全核心工具**开启 |
 | `400 MissingSessionID` | 未附带会话请求头 | 确认 `dsh-opencode-patch` 已列入 profile 的 `dsh.profile.bundles` |
 | Auto Review 报 `TRANSPORT: Connection error` | 更新后宿主进程未重启 | 停止并重启 `dsh web`，让新的 `lib/index.mjs` 加载 |
-| Go 模型始终不显示额度环 | 解析不到 Go 凭据，或当前激活的网关不是 `opencode-go` | 在 DSH Credentials 中存储 `OPENCODE_GO_API_KEY`，并经 `opencode-go` 路由 |
+| Go 模型始终不显示额度环 | **重启 `dsh web`，然后查看浏览器控制台**——插件通过 `link:` 加载，`lib/index.mjs` 只在进程启动时读取一次，仅刷新页面仍运行旧的宿主代码；计量会报告它的哪条路径没有返回 | 控制台会指出原因：`no remote to mount on`、带异常的 `did not mount`、`still waiting for remote.opencodeGoUsage`、列出其实际暴露键的 `no opencodeGoUsage service on the remote`，或带返回内容的 `the answer is not a usage shape`。缺失或无法路由的凭据只是几个原因之一：在 `opencode-go` 条目上写明 `apiKeyEnv: OPENCODE_GO_API_KEY` 并在 DSH Credentials 中存储该密钥 |
 | 目录中的模型在 Settings → Fetch 里缺失，或已下线的模型仍然存在 | 宿主模块过期、补全关闭，或该路由不是插件服务的平面（只有所服务的 `llm-pi-ai` 行上的 `opencode`/`opencode-go` 会被补全） | `pnpm run build`、重启 `dsh web`、保持**用 OpenCode 官方目录补全列表**开启、从匹配的路由获取、搜索精确 id（如 `space-bunny-free`） |
 | 弹出面板以红色显示“已达限额” | 滚动 / 每月窗口已用到 100% | 打开 [OpenCode 控制台](https://opencode.ai/console)并启用 _使用余额（Use balance）_，以溢出到 Zen 额度 |
 | 非 OpenCode 模型行为异常 | 与本补丁无关 | 发往其他网关的流量原样通过 |
@@ -407,6 +407,7 @@ Zen 路线上不出现任何 Go 的数字：根本不画圆环（没有可量的
 - **插件自己服务 `opencode` 与 `opencode-go`，不再挂载任何隐藏路由。** `opencode-responses`、`opencode-anthropic`、`opencode-google` 及其 `opencode-go-*` 对应路由都已移除：每个模型都在其平面自己的路由上、按目录行指定的协议服务。`internalRoutes` 更早已移除，仍带有它的配置行可以通过校验，该键会被忽略。`providers` 现在指插件为其回合补齐请求的路由，并且总是包含两个平面。
 - **只有开/关两种推理的模型提供“关 / 开”。** 过去它提供整套档位，每一档发送的都是同一个“开”。此类模型上保存的 Minimal、Xhigh 或 Max 选择不再能解析：请重新选择“开”（或“关”）。只有模型的协议能关闭推理时才提供“关”。
 - **Chat Completions 默认改走推理家族。** Completions 回合在 Zen 上发往 `https://opencode.ai/inference/openai/v1`，在 Go 上发往 `https://opencode.ai/inference/go/openai/v1`，与 Responses、Messages、Google 一致。`endpoint: legacy` 让所有协议留在 `/zen/v1`（Go 为 `/zen/go/v1`），但 Go 的 Google 仍在 `/inference/go/google/v1beta`。
+- **没有 `apiKeyEnv` 的 Go 平面用 `OPENCODE_API_KEY` 认证。** 平面的密钥现在按 `llm-pi-ai` 自己的规则解析（D20），而 pi 自己的 OpenCode 查找在两个平面上读的都是 `OPENCODE_API_KEY`。过去条目未写明任何引用时，Go 的 Responses、Messages 与 Google 模型默认使用 `OPENCODE_GO_API_KEY`（其 Chat Completions 模型早已遵循 pi 的规则），所以没有 `apiKeyEnv` 的 `opencode-go` 条目现在在每种协议上都发送 Zen 密钥。计量随之变化：它捕获 Go 回合携带的密钥并优先使用，因此在第一次 Go 回合之后，它把 Zen 密钥发往 Go 用量端点、被拒绝，并退回到 Zen 胶囊或“需要订阅”。请给 Go 条目加上 `apiKeyEnv: OPENCODE_GO_API_KEY`；只存储在 DSH Credentials 中的 Go 密钥只有通过这个引用才能为 Go 回合认证。
 - **保存的任何 id 都会被服务。** 目录未描述的模型在保存时被接受，并按 Chat Completions 发送；过去它会在保存时被拒绝。
 - **无密钥时的列表过滤已移除。** 密钥解析不到的平面会列出其声明的模型，由回合指出缺失的凭据，而不是隐藏付费模型。
 - **`modelOverrides`、`maxContextWindow` 与 `modelRoutes` 已移除**（以及文档中写过、却从未被读取的 `hiddenModels`）。平面条目中模型自己的行可以写名称、上下文窗口、输出上限、输入模态与推理档位，其余由目录补齐；行里的 `contextWindow` 代替 `maxContextWindow`。仍带有这些已移除键的配置行可以通过校验，这些键会被忽略。

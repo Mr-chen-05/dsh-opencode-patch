@@ -414,6 +414,39 @@ describe("route-claim · the listener", () => {
   });
 });
 
+describe("route-claim · validating while the modules are unloaded", () => {
+  it("accepts a valid plane save in the window after pi-ai's partial dispose, and still refuses a malformed one in pi-ai's words", async () => {
+    useTestModules();
+    const pi = piFiber();
+    const host = standIn({ fibers: () => [pi] });
+    await installRouteClaim(host.ctx, config).mounted;
+    await flush();
+    expect(host.llm.registerAdapter).toHaveBeenCalledTimes(1);
+    // pi-ai's row is partially disposed (a profile reload that updated it):
+    // the claim drops the modules it serves with and reconciles on a
+    // microtask. A Settings save that lands before then is still judged.
+    host.listeners.get("loader/partial-dispose")?.({ fiber: pi });
+    const listener = host.listeners.get("internal/config");
+    const candidate = {
+      providers: {
+        deepseek: {},
+        opencode: { models: [{ id: "deepseek-v4-pro" }, { id: "x" }] },
+      },
+    };
+    expect(listener?.call(pi, candidate, () => "next")).toEqual({
+      providers: { deepseek: {} },
+    });
+    expect(() =>
+      listener?.call(
+        pi,
+        { providers: { opencode: { models: [{ id: "" }] } } },
+        () => "next"
+      )
+    ).toThrow(/has a model with an empty id/u);
+    await flush();
+  });
+});
+
 describe("route-claim · a second pi-ai row", () => {
   it("strips and serves only one row's planes when both declare one; the other keeps and serves its own", async () => {
     useTestModules();
@@ -676,6 +709,21 @@ describe("route-claim · reconcile", () => {
     host.listeners.get("internal/config")?.call(pi, pi._config, () => "next");
     await flush();
     expect(host.handle.replace).toHaveBeenCalledWith(["opencode"]);
+    // A commit that removes the last plane withdraws the routes through the
+    // live handle, replace([]), never by releasing it; committing the plane
+    // back moves it through the same handle, with no second registration.
+    pi._config = { providers: { deepseek: {} } };
+    host.listeners.get("internal/config")?.call(pi, pi._config, () => "next");
+    await flush();
+    expect(host.handle.replace).toHaveBeenLastCalledWith([]);
+    expect(host.handle).not.toHaveBeenCalled();
+    expect(claim.committedEntries()).toEqual({});
+    pi._config = { providers: { deepseek: {}, opencode: zen } };
+    host.listeners.get("internal/config")?.call(pi, pi._config, () => "next");
+    await flush();
+    expect(host.handle.replace).toHaveBeenLastCalledWith(["opencode"]);
+    expect(host.handle).not.toHaveBeenCalled();
+    expect(host.llm.registerAdapter).toHaveBeenCalledTimes(2);
     // pi-ai going away withdraws them through the same handle.
     pi.state = 3;
     host.listeners.get("llm/adapters-updated")?.();

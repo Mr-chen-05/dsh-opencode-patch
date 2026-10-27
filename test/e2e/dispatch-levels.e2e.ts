@@ -22,11 +22,14 @@
  * The last block is live and keyed: one toggle-only model per plane and
  * protocol, sent through the plane adapter on a tier-A host with the effort id
  * the picker's "On" carries, so the adapter builds the wire value and a
- * gateway that refuses it fails here rather than in a user's turn. It runs on
- * the `full` tier of `OPENCODE_E2E_KEYED` (the default when it is unset; CI
- * runs it nightly and on dispatch), and skips without the plane's key, on a
- * lower tier, and when no toggle model was entitled on the account (none
- * reached the gateway's body check).
+ * gateway that refuses it fails here rather than in a user's turn. Each
+ * protocol walks up to three toggle-only candidates in catalog order, moving
+ * past one refused on entitlement or one the vendor withdrew (confirmed by a
+ * raw probe of the same id; unconfirmed, the turn fails). It runs on the
+ * `full` tier of `OPENCODE_E2E_KEYED` (the default when it is unset; CI runs
+ * it nightly and on dispatch), and skips without the plane's key, on a lower
+ * tier, and, naming the protocol, when a protocol's every candidate was
+ * refused on entitlement or withdrawn.
  *
  * Opt-in (`OPENCODE_E2E=1`), like every file in this suite. The sweep needs
  * no network and no port: its value is the real rule and the real catalog.
@@ -44,6 +47,18 @@ import {
   waitForPlaneOwner,
 } from "../support/host.ts";
 import { armedKey, keyedTierOf } from "../support/keyed-probes.ts";
+import { isModelGoneMessage } from "../support/keyless-matrix.ts";
+import {
+  accessDisabled,
+  modelGone,
+  PLUGIN_PATH_FOR,
+  sendProbe,
+} from "../support/live-probe.ts";
+import {
+  candidatesByProtocol,
+  type TurnVerdict,
+  walkPerProtocol,
+} from "../support/live-walk.ts";
 import {
   type CatalogModelSpec,
   OPENCODE_FAMILY_API,
@@ -184,23 +199,32 @@ describe.skipIf(!ENABLED)(
   }
 );
 
-/** The first toggle-only model of each protocol on a plane: its efforts are named "On". */
+/** The most toggle-only candidates any one protocol declares in the live block. */
+const TOGGLE_CANDIDATES = 3;
+
+/** One turn's own timeout in the live block. */
+const TURN_TIMEOUT_MS = 60_000;
+
+/**
+ * Up to {@link TOGGLE_CANDIDATES} toggle-only models of each protocol on a
+ * plane, in catalog order: their efforts are named "On".
+ */
 const toggleModels = (
   plane: (typeof PLANES)[number]
-): { spec: CatalogModelSpec; protocol: Protocol }[] => {
-  const seen = new Map<Protocol, CatalogModelSpec>();
-  for (const spec of plane.catalog) {
-    const protocol = protocolForSdk(spec.provider_npm);
-    if (protocol === undefined || seen.has(protocol)) {
-      continue;
-    }
-    const reasoning = reasoningFor(spec, protocol);
-    if (reasoning?.efforts.some((effort) => effort.name === "On") === true) {
-      seen.set(protocol, spec);
-    }
-  }
-  return [...seen].map(([protocol, spec]) => ({ protocol, spec }));
-};
+): Map<string, CatalogModelSpec[]> =>
+  candidatesByProtocol(
+    plane.catalog,
+    (spec) => {
+      const protocol = protocolForSdk(spec.provider_npm);
+      const toggle =
+        protocol !== undefined &&
+        reasoningFor(spec, protocol)?.efforts.some(
+          (effort) => effort.name === "On"
+        ) === true;
+      return toggle ? protocol : undefined;
+    },
+    TOGGLE_CANDIDATES
+  );
 
 /** An answer about the account, not the wire: no paid access, no funds, rate limited. */
 const ENTITLEMENT =
@@ -214,14 +238,17 @@ describe.skipIf(!ENABLED)(
 
     it.for(PLANES)(
       "$route: every toggle-only protocol accepts On through the plane adapter",
-      { timeout: 120_000 },
+      { timeout: 4 * TOGGLE_CANDIDATES * (TURN_TIMEOUT_MS + 20_000) + 60_000 },
       async (plane, context) => {
         // Without the plane's key there is nothing to send: reported as
         // skipped, never as a pass.
         context.skip(!keyed(plane), "no key for this plane");
         const toggles = toggleModels(plane);
         // Anti-vacuity: each plane carries at least one toggle-only model.
-        expect(toggles.length).toBeGreaterThan(0);
+        expect(toggles.size).toBeGreaterThan(0);
+        const specs = new Map(
+          [...toggles.values()].flat().map((spec) => [spec.id, spec])
+        );
         const ref =
           plane.route === "opencode"
             ? "OPENCODE_API_KEY"
@@ -232,48 +259,83 @@ describe.skipIf(!ENABLED)(
           providers: {
             [plane.route]: {
               apiKeyEnv: ref,
-              models: toggles.map(({ spec }) => ({ id: spec.id })),
+              models: [...specs.keys()].map((id) => ({ id })),
             },
           },
         });
         try {
           await waitForPlaneOwner(tier.llm, [plane.route]);
-          const refused: string[] = [];
-          let reached = 0;
-          for (const { protocol, spec } of toggles) {
-            // The id the picker's "On" carries, read from what the adapter
-            // answers rather than assumed.
-            const info = (await tier.llm.resolveModelInfo(
-              plane.route,
-              spec.id
-            )) as { reasoning?: { efforts?: { id: string; name: string }[] } };
-            const on = info.reasoning?.efforts?.find(
-              (effort) => effort.name === "On"
-            )?.id;
-            expect(on, `${spec.id} offers no On`).toBeDefined();
-            const drained = await drainStream(tier.llm, plane.route, spec.id, {
-              reasoningEffort: on,
-              signal: AbortSignal.timeout(60_000),
-            });
-            const message = drained.failureMessage ?? drained.error ?? "";
-            if (ENTITLEMENT.test(message)) {
-              continue;
+          const walk = await walkPerProtocol(
+            new Map(
+              [...toggles].map(([protocol, list]) => [
+                protocol,
+                list.map((spec) => spec.id),
+              ])
+            ),
+            async (protocol, id): Promise<TurnVerdict> => {
+              // The id the picker's "On" carries, read from what the adapter
+              // answers rather than assumed.
+              const info = (await tier.llm.resolveModelInfo(
+                plane.route,
+                id
+              )) as {
+                reasoning?: { efforts?: { id: string; name: string }[] };
+              };
+              const on = info.reasoning?.efforts?.find(
+                (effort) => effort.name === "On"
+              )?.id;
+              expect(on, `${id} offers no On`).toBeDefined();
+              const drained = await drainStream(tier.llm, plane.route, id, {
+                reasoningEffort: on,
+                signal: AbortSignal.timeout(TURN_TIMEOUT_MS),
+              });
+              if (
+                drained.error === undefined &&
+                drained.finish?.kind !== "error"
+              ) {
+                return { kind: "ok" };
+              }
+              const message = drained.failureMessage ?? drained.error ?? "";
+              if (ENTITLEMENT.test(message)) {
+                return { kind: "entitlement" };
+              }
+              if (isModelGoneMessage(message)) {
+                // Confirmed by hand at the URL the plugin's model names, with
+                // no reasoning field: the gateway answers "Model is
+                // unavailable" for a misrouted id too.
+                const spec = specs.get(id);
+                if (spec === undefined) {
+                  throw new Error(`${id} is not a declared candidate`);
+                }
+                const served = servedModel(plane, spec);
+                const raw = await sendProbe({
+                  key: plane.key,
+                  model: id,
+                  protocol,
+                  timeoutMs: 20_000,
+                  url: `${served.baseUrl}${(PLUGIN_PATH_FOR[protocol] ?? "").replace("{model}", id)}`,
+                });
+                if (modelGone(raw)) {
+                  return { kind: "gone" };
+                }
+                if (accessDisabled(raw)) {
+                  return { kind: "entitlement" };
+                }
+                return {
+                  detail: `the turn says the model is gone (${message}), a raw probe of the same id answered ${raw.summary}`,
+                  kind: "refused",
+                };
+              }
+              return { detail: message, kind: "refused" };
             }
-            reached += 1;
-            if (
-              drained.error !== undefined ||
-              drained.finish?.kind === "error"
-            ) {
-              refused.push(`${spec.id} (${protocol}): ${message}`);
-            }
-          }
-          // Every toggle model refused on entitlement: nothing about the wire
-          // was observed, which is a skip, never a pass.
-          context.skip(
-            reached === 0,
-            "no toggle model was entitled on this account"
           );
-          expect(refused).toEqual([]);
+          expect(walk.refused).toEqual([]);
+          // A protocol no toggle candidate reached was not tested: a skip
+          // that names it, never a pass on the others.
+          context.skip(
+            walk.unreached.length > 0,
+            `unreached (every toggle candidate refused on entitlement or withdrawn): ${walk.unreached.join(", ")}`
+          );
         } finally {
           await tier.dispose();
         }

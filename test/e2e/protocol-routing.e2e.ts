@@ -58,6 +58,22 @@
  * (the default when it is unset; CI runs it nightly and on dispatch), and skip
  * otherwise. The keyless cases run on every tier.
  *
+ * **The last block sends through the plugin's own provider.** The probes above
+ * write their bodies and headers by hand, which is what makes them an exact
+ * oracle for the vendor; they are not the request a user's turn sends. So one
+ * paid model per protocol per plane — Go's Gemini on `/inference/go/google/v1beta`
+ * included — goes through the plane adapter on a tier-A host
+ * (`test/support/host.ts`): pi's own protocol implementation, its credential
+ * header, the session header and the fetch patch, against the live gateway.
+ * Each protocol walks up to three paid candidates in catalog order and stops
+ * at the first turn that says something about the wire: a turn refused on
+ * entitlement moves on, and so does one answered that the vendor withdrew the
+ * model (`410`, or `400` "Model is unavailable") once a raw probe of the same
+ * id at the URL the plugin should use confirms it. If the raw probe does not,
+ * the turn fails, because the gateway gives that answer for a misrouted id
+ * too. Any other error finish fails; a protocol no candidate reached makes
+ * the case skip with that protocol named, never pass on the others.
+ *
  * Opt-in via `OPENCODE_E2E=1`. The base is overridable so this can be pointed at
  * a mirror or a local stub: an override is used for every protocol with the
  * legacy family's paths, as before.
@@ -67,14 +83,34 @@
 
 import { describe, expect, it } from "vitest";
 
+import {
+  drainStream,
+  fakeCredentials,
+  mountTierA,
+  waitForPlaneOwner,
+} from "../support/host.ts";
 import { armedKey, keyedTierOf } from "../support/keyed-probes.ts";
+import { isModelGoneMessage } from "../support/keyless-matrix.ts";
+import {
+  accessDisabled,
+  AUTH_FOR,
+  modelGone,
+  PATH_FOR,
+  PLUGIN_PATH_FOR,
+  type Probe,
+  sendProbe,
+} from "../support/live-probe.ts";
+import {
+  candidatesByProtocol,
+  type TurnVerdict,
+  walkPerProtocol,
+} from "../support/live-walk.ts";
 import {
   baseUrlFor,
   GO_GOOGLE_BASE_URL,
   GOOGLE_SDK,
   OPENCODE_FAMILY_API,
   OPENCODE_GO_CATALOG,
-  OPENCODE_UA,
   OPENCODE_ZEN_CATALOG,
   PROTOCOL_FOR_SDK,
   findModelSpec,
@@ -121,93 +157,6 @@ const FANOUT_BUDGET_MS = 240_000;
 const DEFAULT_PROTOCOL = "openai-completions";
 
 /**
- * The path each protocol uses against an OVERRIDDEN base, which is read as a
- * legacy-family base (`…/zen/v1`): one base for every protocol.
- */
-const PATH_FOR: Readonly<Record<string, string>> = {
-  "anthropic-messages": "/messages",
-  // The Gemini path carries the MODEL in the URL, not the body, so the probe
-  // substitutes the `{model}` placeholder the same way the wire does.
-  "google-generative-ai": "/models/{model}:streamGenerateContent?alt=sse",
-  "openai-completions": "/chat/completions",
-  "openai-responses": "/responses",
-};
-
-/**
- * The path each protocol appends to the base the plugin's model names: pi's
- * Anthropic client appends `/v1/messages` to a base without `/v1`, the others
- * append their own path to a base that carries its version.
- */
-const PLUGIN_PATH_FOR: Readonly<Record<string, string>> = {
-  "anthropic-messages": "/v1/messages",
-  "google-generative-ai": "/models/{model}:streamGenerateContent?alt=sse",
-  "openai-completions": "/chat/completions",
-  "openai-responses": "/responses",
-};
-
-/**
- * Each endpoint's OWN auth convention.
- *
- * `/messages` is the Anthropic Messages shape, which reads `x-api-key` and
- * ignores `Authorization`. Sending the Bearer form there answers
- * `401 Missing API key` — the header is simply not read — so a probe that used
- * one convention everywhere would conclude the model was unreachable.
- */
-const AUTH_FOR: Readonly<
-  Record<string, (key: string) => Record<string, string>>
-> = {
-  "anthropic-messages": (key) => ({
-    "anthropic-version": "2023-06-01",
-    "x-api-key": key,
-  }),
-  "google-generative-ai": (key) => ({ "x-goog-api-key": key }),
-  "openai-completions": (key) => ({ authorization: `Bearer ${key}` }),
-  "openai-responses": (key) => ({ authorization: `Bearer ${key}` }),
-};
-
-/** A body shaped for the protocol, so the gateway judges the MODEL, not the JSON. */
-const BODY_FOR: Readonly<Record<string, Record<string, unknown>>> = {
-  "anthropic-messages": {
-    max_tokens: 1,
-    messages: [{ content: "hi", role: "user" }],
-  },
-  // An empty `messages` array is itself a 400, which would make every
-  // completions probe uninformative — the gateway would reject the body before
-  // it ever looked at the model.
-  "openai-completions": {
-    max_tokens: 8,
-    messages: [{ content: "hi", role: "user" }],
-    stream: false,
-  },
-  "google-generative-ai": {
-    // Measured: without `role` the upstream refuses with "Please use a valid
-    // role: user, model" — the gateway forwards it, which is itself proof the
-    // path and the x-goog-api-key convention are accepted.
-    contents: [{ parts: [{ text: "hi" }], role: "user" }],
-    generationConfig: { maxOutputTokens: 8 },
-  },
-  "openai-responses": { input: "hi", max_output_tokens: 16 },
-};
-
-/**
- * Headers the plugin injects, so a probe looks like the traffic we actually
- * send: a turn's user agent is `OPENCODE_UA`, which the fetch patch stamps —
- * `OPENCODE_PATCH_USER_AGENT` signs only the plugin's own requests.
- */
-const PLUGIN_HEADERS: Readonly<Record<string, string>> = {
-  "content-type": "application/json",
-  "user-agent": OPENCODE_UA,
-  "x-opencode-client": "cli",
-  "x-opencode-project": "global",
-  "x-opencode-session": "ses_e2e0000000000abcdefghij",
-};
-
-interface Probe {
-  readonly status: number;
-  readonly summary: string;
-}
-
-/**
  * The URL the plugin sends `protocol` for `model` to on `plane`: the base the
  * served model names when `protocol` is the one it is served on, else the
  * plane's base for `protocol` on the default family — or the override.
@@ -247,70 +196,18 @@ const probe = async (
   model: string,
   key?: string,
   plane: "go" | "zen" = "zen"
-): Promise<Probe> => {
-  const template = PATH_FOR[protocol];
-  if (template === undefined) {
-    throw new Error(`no live path is known for protocol ${protocol}`);
-  }
-  // A protocol whose path carries the model does not also want it in the body:
-  // the Gemini endpoints reject unknown fields rather than ignoring them.
-  const payload = template.includes("{model}")
-    ? BODY_FOR[protocol]
-    : { ...BODY_FOR[protocol], model };
-  const auth =
-    key === undefined || key.length === 0
-      ? {}
-      : (AUTH_FOR[protocol]?.(key) ?? {});
-  let response: Response;
-  try {
-    response = await fetch(urlFor(plane, protocol, model), {
-      body: JSON.stringify(payload),
-      headers: { ...PLUGIN_HEADERS, ...auth },
-      method: "POST",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch (error) {
-    // Status 0 means "the gateway did not answer" — neither agreement nor
-    // refusal. Measured while writing this: under rate limiting the gateway
-    // answers 429 at first and then holds the connection open without a
-    // response until the client gives up, so a timeout here is the gateway being
-    // busy rather than this plugin being wrong. Reporting it as a status is what
-    // lets the case SKIP instead of failing on an answer nobody received.
-    return {
-      status: 0,
-      summary: `no answer: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
-  }
-  const body = await response.text();
-  return {
-    status: response.status,
-    summary: `${response.status} ${body.slice(0, 200)}`,
-  };
-};
+): Promise<Probe> =>
+  sendProbe({
+    key,
+    model,
+    protocol,
+    timeoutMs: TIMEOUT_MS,
+    url: urlFor(plane, protocol, model),
+  });
 
 const otherProtocols = (expected: string) =>
   Object.keys(PATH_FOR).filter((protocol) => protocol !== expected);
 
-/** Whether the gateway refused on ENTITLEMENT rather than on anything we control. */
-/**
- * Whether the gateway's answer makes routing UNOBSERVABLE, so the case skips.
- *
- * Two shapes qualify, and both are the gateway speaking about the ACCOUNT
- * rather than about the route:
- *
- * - `403 Model access is disabled` — the account has no paid access, so every
- *   endpoint answers alike and nothing about routing can be seen.
- * - `429` — the account is rate limited. Measured while writing this: the
- *   gateway answers `429 Upstream request failed` on the first calls, and then
- *   HOLDS THE CONNECTION open without a response for a minute, which is what
- *   turned a routing case into a timeout rather than a skip. Every endpoint
- *   would answer alike here too, so the same reasoning applies.
- *
- * A skip is the honest answer in both: it says the routing was not verified,
- * which is not the same as saying it was verified and passed.
- */
 /**
  * Whether the gateway is refusing the FREE TIER rather than the route.
  *
@@ -334,16 +231,6 @@ const otherProtocols = (expected: string) =>
  */
 const freeTierClosed = (result: Probe): boolean =>
   result.summary.includes("FreeTierError");
-
-const accessDisabled = (result: Probe): boolean =>
-  result.status === 402 ||
-  result.summary.includes("Insufficient account funds") ||
-  (result.status === 403 &&
-    result.summary.includes("Model access is disabled")) ||
-  result.status === 429 ||
-  // No answer at all is the third shape of "cannot tell": the gateway is busy,
-  // so nothing about the route was observed either way.
-  result.status === 0;
 
 /** The route id each plane is reached by, and its family map. */
 const PLANE_ROUTE = {
@@ -405,11 +292,21 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
     candidates: readonly string[],
     protocol: string,
     key?: string,
-    plane: "go" | "zen" = "zen"
+    plane: "go" | "zen" = "zen",
+    // A case that asserts one particular answer narrows the pick to candidates
+    // that give it, so an otherwise observable answer of another kind (an
+    // unmetered 200 where the case asserts the free-tier gate) moves the walk on
+    // instead of being asserted on.
+    accept: (answer: Probe) => boolean = () => true
   ): Promise<string | undefined> => {
     for (const model of candidates) {
       const answer = await probe(protocol, model, key, plane);
-      if (!accessDisabled(answer) && answer.status !== 0) {
+      if (
+        !accessDisabled(answer) &&
+        !modelGone(answer) &&
+        answer.status !== 0 &&
+        accept(answer)
+      ) {
         return model;
       }
     }
@@ -422,11 +319,19 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
       // The vendor catalog no longer lists a free model on /responses, so the
       // free-tier routing case now asserts the COMPLETIONS side of the split.
       // The subject is picked live from the free slice, in catalog order, so
-      // whichever free model is alive today is the one tested.
+      // whichever GATED free model is alive today is the one tested: the case
+      // asserts the free-tier gate, so an unmetered model (which answers 200
+      // everywhere) cannot be its subject.
       const candidates = OPENCODE_ZEN_CATALOG.filter((m) => m.is_free).map(
         (m) => m.id
       );
-      const model = await pickModel(candidates, "openai-completions");
+      const model = await pickModel(
+        candidates,
+        "openai-completions",
+        undefined,
+        "zen",
+        freeTierClosed
+      );
       if (model === undefined) {
         context.skip();
         return;
@@ -951,17 +856,24 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
           servedProtocolFor(model) ?? "openai-completions",
           model
         );
-        if (freeTierClosed(response)) {
+        // A gated, withdrawn or throttled candidate says nothing about whether
+        // the free tier is reachable, so the walk moves on to the next one.
+        if (
+          freeTierClosed(response) ||
+          modelGone(response) ||
+          accessDisabled(response)
+        ) {
           continue;
         }
         answered = { model, status: response.status };
         break;
       }
       if (answered === undefined) {
-        // Reported rather than skipped: the account (or the vendor) closed the
-        // whole free tier, and that is worth a line in the run's output.
+        // Reported rather than skipped: the account (or the vendor) closed,
+        // withdrew or throttled the whole free tier, and that is worth a line
+        // in the run's output.
         console.log(
-          `[e2e] every free candidate answered FreeTierError — the free tier needs a session token this plugin does not hold; see docs/opencode-1.19-api.md. The header-restoration case did not run.`
+          `[e2e] no free candidate answered with a completion — each was gated (FreeTierError: the free tier needs a session token this plugin does not hold; see docs/opencode-1.19-api.md), withdrawn upstream, or throttled. The header-restoration case did not run.`
         );
         return;
       }
@@ -973,3 +885,149 @@ describe.skipIf(!LIVE)("live protocol routing", () => {
     FANOUT_BUDGET_MS
   );
 });
+
+/** An answer about the account, not the wire: no paid access, no funds, rate limited. */
+const ADAPTER_ENTITLEMENT =
+  /\b40[23]\b|\b429\b|access is disabled|Insufficient account funds|FreeTierError/iu;
+
+/** The plane routes the adapter block sends on, with the catalog and key each reads. */
+const ADAPTER_PLANES = [
+  {
+    catalog: OPENCODE_ZEN_CATALOG,
+    key: ZEN_KEY,
+    ref: "OPENCODE_API_KEY",
+    route: "opencode",
+  },
+  {
+    catalog: OPENCODE_GO_CATALOG,
+    key: GO_KEY,
+    ref: "OPENCODE_GO_API_KEY",
+    route: "opencode-go",
+  },
+] as const;
+
+/**
+ * The most paid candidates any one protocol declares in the adapter block.
+ * Bounded so a plane of withdrawn models costs a few turns, not the catalog.
+ */
+const ADAPTER_CANDIDATES = 3;
+
+/**
+ * Wall-clock allowance for the adapter block: up to {@link ADAPTER_CANDIDATES}
+ * turns per protocol, each possibly followed by a raw probe that confirms a
+ * withdrawal, at {@link TIMEOUT_MS} apiece.
+ */
+const ADAPTER_BUDGET_MS = 4 * ADAPTER_CANDIDATES * 2 * TIMEOUT_MS + 60_000;
+
+/** A paid row's protocol on its plane, or `undefined` for a row it cannot serve. */
+const paidProtocolOf = (
+  spec: (typeof OPENCODE_ZEN_CATALOG)[number]
+): string | undefined => {
+  if (spec.is_free === true || !isServableSdk(spec.provider_npm)) {
+    return undefined;
+  }
+  return spec.provider_npm === undefined
+    ? DEFAULT_PROTOCOL
+    : (PROTOCOL_FOR_SDK[spec.provider_npm] ?? DEFAULT_PROTOCOL);
+};
+
+describe.skipIf(!LIVE)(
+  "live protocol routing · through the plugin's plane adapter",
+  () => {
+    it.for(ADAPTER_PLANES)(
+      "$route: one paid model per protocol completes a turn through the plane adapter",
+      { timeout: ADAPTER_BUDGET_MS },
+      async (plane, context) => {
+        context.skip(
+          plane.key === undefined || plane.key.length === 0,
+          "no key for this plane"
+        );
+        // An override names somewhere the plugin does not send.
+        context.skip(
+          BASE_OVERRIDE[plane.route === "opencode" ? "zen" : "go"] !==
+            undefined,
+          "a base override is set: the adapter sends where the plugin sends"
+        );
+        const planeName = plane.route === "opencode" ? "zen" : "go";
+        const groups = new Map(
+          [
+            ...candidatesByProtocol(
+              plane.catalog,
+              paidProtocolOf,
+              ADAPTER_CANDIDATES
+            ),
+          ].map(([protocol, specs]) => [protocol, specs.map((s) => s.id)])
+        );
+        // Anti-vacuity: each plane carries completions, Responses, Messages
+        // and Google models.
+        expect([...groups.keys()].toSorted()).toEqual([
+          "anthropic-messages",
+          "google-generative-ai",
+          "openai-completions",
+          "openai-responses",
+        ]);
+        const tier = await mountTierA({
+          credentials: fakeCredentials({
+            refs: { [plane.ref]: plane.key ?? "" },
+          }),
+          plugin: {},
+          providers: {
+            [plane.route]: {
+              apiKeyEnv: plane.ref,
+              models: [...groups.values()].flat().map((id) => ({ id })),
+            },
+          },
+        });
+        try {
+          await waitForPlaneOwner(tier.llm, [plane.route]);
+          const walk = await walkPerProtocol(
+            groups,
+            async (protocol, id): Promise<TurnVerdict> => {
+              const drained = await drainStream(tier.llm, plane.route, id, {
+                signal: AbortSignal.timeout(TIMEOUT_MS),
+              });
+              if (
+                drained.error === undefined &&
+                drained.finish?.kind !== undefined &&
+                drained.finish.kind !== "error"
+              ) {
+                return { kind: "ok" };
+              }
+              const message = drained.failureMessage ?? drained.error ?? "";
+              if (ADAPTER_ENTITLEMENT.test(message)) {
+                return { kind: "entitlement" };
+              }
+              if (isModelGoneMessage(message)) {
+                // The gateway answers "Model is unavailable" for an id sent
+                // where it is not served, too (upstream-findings §3.8). Ask
+                // the endpoint the plugin should use, by hand, before
+                // reading it as the vendor's state.
+                const raw = await probe(protocol, id, plane.key, planeName);
+                if (modelGone(raw)) {
+                  return { kind: "gone" };
+                }
+                if (accessDisabled(raw)) {
+                  return { kind: "entitlement" };
+                }
+                return {
+                  detail: `the turn says the model is gone (${message}), a raw probe of the same id answered ${raw.summary}`,
+                  kind: "refused",
+                };
+              }
+              return { detail: message, kind: "refused" };
+            }
+          );
+          expect(walk.refused).toEqual([]);
+          // A protocol no candidate reached was not tested: a skip that names
+          // it, never a pass on the others.
+          context.skip(
+            walk.unreached.length > 0,
+            `unreached (every candidate refused on entitlement or withdrawn): ${walk.unreached.join(", ")}`
+          );
+        } finally {
+          await tier.dispose();
+        }
+      }
+    );
+  }
+);

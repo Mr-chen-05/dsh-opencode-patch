@@ -14,7 +14,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   CONSOLE_URL,
-  GO_MODEL_LIMITS,
   GO_PLAN_URL,
   type GoUsage,
   type RelativeReset,
@@ -51,11 +50,13 @@ const usage = (overrides: Partial<GoUsage> = {}): GoUsage => ({
   ...overrides,
 });
 
-it("renders unknown Gemini allowances before and after the JSON transport", () => {
-  const model = "gemini-4-argon-contributor";
-  const limits = GO_MODEL_LIMITS[model]!;
+it("renders unknown allowances before and after the JSON transport", () => {
+  // The generator writes `Number.NaN` for a model the vendor's page does not
+  // price. Whether today's table holds such a row is the vendor's choice, so
+  // the allowance is built here in the shape the generator emits.
+  const model = "gemini-4-argon";
   const raw = usage({
-    allowance: { model, go: limits.go, goPlus: limits.goPlus },
+    allowance: { model, go: Number.NaN, goPlus: Number.NaN },
   });
   // JSON turns the catalog's NaN into null across the host/client boundary.
   // oxlint-disable-next-line unicorn/prefer-structured-clone -- exercise the host's JSON transport

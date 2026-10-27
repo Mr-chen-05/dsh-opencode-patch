@@ -10,6 +10,9 @@
  * - a profile's `reasoningEfforts` dict: an offered level maps to its wire
  *   value, and `off: null` means "Off is offered, send nothing".
  *
+ * A string `off` means the same in both: Off is offered, and that string is
+ * the disable the protocol sends.
+ *
  * The picker reads the efforts pi derives from the map
  * (`getSupportedThinkingLevels`), so one rule here decides both what the
  * composer offers and what dispatch accepts. A model whose reasoning is only a
@@ -95,10 +98,16 @@ export interface ModelReasoning {
   readonly effortNames: Readonly<Record<string, string>>;
 }
 
-/** The levels a catalog spec offers, and whether it is a bare switch. */
+/** The values in a catalog effort list that name an explicit disable. */
+const DISABLE_VALUES: readonly string[] = ["none", "off"];
+
+/**
+ * The levels a catalog spec offers, whether it is a bare switch, and the
+ * disable value its effort list names, if any.
+ */
 const offeredLevels = (
   spec: ReasoningSpec
-): { levels: PiLevel[]; toggle: boolean } => {
+): { levels: PiLevel[]; toggle: boolean; disable?: string } => {
   const options = spec.reasoning_options ?? [];
   const values = options.find(
     (option) => option.type === "effort" && (option.values?.length ?? 0) > 0
@@ -108,7 +117,12 @@ const offeredLevels = (
       (level) => level !== "off" && values.includes(level)
     );
     if (levels.length > 0) {
-      return { levels, toggle: false };
+      const disable = DISABLE_VALUES.find((value) => values.includes(value));
+      return {
+        levels,
+        toggle: false,
+        ...(disable === undefined ? {} : { disable }),
+      };
     }
   }
   if (options.some((option) => option.type === "toggle")) {
@@ -120,8 +134,17 @@ const offeredLevels = (
 /**
  * The reasoning a catalog spec declares, for one protocol.
  *
- * - An `effort` list offers exactly its pi levels. `none`/`off` in it never
- *   offer Off: those models do not take an explicit disable.
+ * - An `effort` list offers exactly its pi levels. A `none` (or `off`) in it
+ *   is the model's explicit disable: on completions it offers Off with that
+ *   value as Off's WIRE value, the way pi's own entries carry it
+ *   (`thinkingLevelMap.off = "none"`), because pi's completions path sends a
+ *   string `off` as `reasoning_effort`, both when Off is picked and when no
+ *   effort is (`openai-completions.js:717-721`). On Responses the list's
+ *   `none` does not offer Off yet: pi 1.1.0's own entries disagree there
+ *   (gpt-5.x pin `off: null`, gpt-6 carry `"none"`), and a string `off`
+ *   becomes the request sent when no effort is selected
+ *   (`openai-responses.js:278-280`), so that is the owner's call, not this
+ *   rule's.
  * - A bare `toggle` offers `high` as "On", and Off where the protocol can
  *   disable (D1).
  * - Any other reasoning model gets `low`/`medium`/`high`.
@@ -139,22 +162,27 @@ export const reasoningFor = (
   if (spec.reasoning !== true) {
     return undefined;
   }
-  const { levels, toggle } = offeredLevels(spec);
+  const { disable, levels, toggle } = offeredLevels(spec);
   const off = toggle && canDisableReasoning(protocol, compat);
+  // The explicit disable the effort list names, sent as Off's wire value.
+  const offWire =
+    disable !== undefined && protocol === "openai-completions"
+      ? disable
+      : undefined;
   const thinkingLevelMap: Record<string, string | null> = off
     ? {}
-    : { off: null };
+    : { off: offWire ?? null };
   for (const level of PI_LEVELS) {
     if (level !== "off") {
       thinkingLevelMap[level] = levels.includes(level) ? level : null;
     }
   }
-  const reasoningEfforts: Record<string, string | null> = off
-    ? { off: null }
-    : {};
-  const efforts: { id: string; name: string }[] = off
-    ? [{ id: "off", name: "Off" }]
-    : [];
+  // Off offered as "send nothing" (a bare toggle), as a wire value, or not.
+  const offEffort: string | null | undefined = off ? null : offWire;
+  const reasoningEfforts: Record<string, string | null> =
+    offEffort === undefined ? {} : { off: offEffort };
+  const efforts: { id: string; name: string }[] =
+    off || offWire !== undefined ? [{ id: "off", name: "Off" }] : [];
   for (const level of levels) {
     reasoningEfforts[level] = level;
     efforts.push({ id: level, name: toggle ? "On" : effortName(level) });
