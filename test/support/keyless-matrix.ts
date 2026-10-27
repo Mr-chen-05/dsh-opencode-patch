@@ -373,6 +373,24 @@ export const redirectPathOf = (
 const isRedirect = (status: number): boolean => status >= 300 && status < 400;
 
 /**
+ * Whether a live turn's failure message says the gateway withdrew the model.
+ *
+ * The same two answers {@link classifyKeylessProbe} reads as `model-gone` — a
+ * `410`, or a `400` saying "Model is unavailable" — as they reach a turn's
+ * failure message rather than a raw response. It is a PRE-FILTER, not a
+ * verdict: the gateway answers "Model is unavailable" for an id sent where it
+ * is not served too (`docs/upstream-findings.md` §3.8), so the live adapter
+ * blocks move past such a model only once a raw probe of the same id
+ * (`modelGone` in `test/support/live-probe.ts`) confirms the vendor withdrew
+ * it, and fail the turn otherwise.
+ *
+ * @param message - the turn's failure message.
+ * @returns whether the message names a withdrawn model.
+ */
+export const isModelGoneMessage = (message: string): boolean =>
+  /\b410\b|model is unavailable/iu.test(message);
+
+/**
  * Read one keyless answer.
  *
  * @param answer.status - the HTTP status.

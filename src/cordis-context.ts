@@ -85,18 +85,15 @@ export interface CordisContext {
       request?: unknown,
       signal?: AbortSignal
     ) => Promise<unknown>;
-    /**
-     * Re-dispatch a generation. Used to hand a call to the route whose `api`
-     * already names the format it needs, instead of translating the protocol.
-     */
-    stream?: (options: unknown) => unknown;
     /** Registered provider routes, for checking a target exists before using it. */
     listProviders?: () => unknown;
     /** Routes offered in Settings → Models. */
     listConfigurableProviders?: () => unknown;
     /**
-     * Register an adapter for routes the plugin owns. Used to serve the
-     * gateway's Responses plane without the user declaring anything.
+     * Register an adapter for routes the plugin owns. The route claim
+     * registers the plane adapter for exactly the planes the profile declares
+     * (`host/route-claim.ts`, D13), and moves them through the returned
+     * handle's `replace`.
      */
     registerAdapter?: (
       providers: readonly string[],
@@ -120,12 +117,6 @@ export interface CordisContext {
       signal?: AbortSignal
     ) => Promise<unknown>;
   };
-  /**
-   * A child context whose reads and writes of `name` resolve in a new scope.
-   * Used to hide the authorization seam from a mounted `llm-pi-ai` instance, so
-   * it registers no auth flows and cannot collide with the host's own.
-   */
-  isolate?: (name: string) => CordisContext;
   /**
    * Register a service on the current fiber. The only write a live context
    * proxy accepts from a running fiber: an ad-hoc property set for a name that
@@ -288,8 +279,10 @@ export type LoaderService = LoaderHost["loader"];
  * value it verified.
  *
  * `ctx.get` first: it reads the store WITHOUT consulting `inject`, which is what
- * an optional dependency needs, and this plugin declares only `llm`. The
- * property is a guarded fallback for a context that serves only that.
+ * an optional dependency needs, and this plugin's root declares nothing
+ * (`inject` is `[]`; it reaches `llm` and `settings` through `ctx.inject`
+ * scopes). The property is a guarded fallback for a context that serves only
+ * that.
  *
  * @param ctx - the plugin context, mock or real.
  * @returns the loader service, or `undefined`.

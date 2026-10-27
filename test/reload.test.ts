@@ -35,6 +35,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   adaptersOf,
+  type HostLlm,
   mountTierA,
   PLANES,
   piAiRestarts,
@@ -110,6 +111,9 @@ const ownValues = (
     ])
   );
 
+/** The settings namespace the tier-A discovery probe registers under. */
+const PROBE_NAMESPACE = "reload-probe";
+
 const asContext = (llm: object): CordisContext =>
   ({ llm }) as unknown as CordisContext;
 
@@ -149,6 +153,21 @@ interface Site {
     /** A's install, where what differs is not config. */
     readonly installA?: (llm: object) => (() => void) | undefined;
     readonly probe: (llm: Record<string, unknown>) => Promise<unknown>;
+  };
+  /**
+   * The same site on the real host (tier A), where the stand-in's probe does not
+   * apply: a call whose answer through the site's decoration differs from the
+   * host's own THERE, so the block's "survivor still decorates" and "last
+   * dispose restores" checks can fail. Without one, discovery would not be
+   * probed there at all. The `settings.describe` graft has none: tier A has no
+   * settings service, so its stand-in cases above are its cases.
+   */
+  readonly tierA?: {
+    /** The install the block drives, where the site's default decorates nothing there. */
+    readonly install?: (llm: object) => (() => void) | undefined;
+    /** Host state the probe needs, set before the first install. */
+    readonly setup?: (llm: HostLlm) => void;
+    readonly probe: (llm: HostLlm) => Promise<unknown>;
   };
 }
 
@@ -239,6 +258,17 @@ const SITES: readonly Site[] = [
         call(llm, "discoverModels", "llm-pi-ai", {
           baseURL: "https://relay.example/v1",
         }),
+    },
+    // A discovery registered on the real runtime, answering one id with no
+    // network: the decoration merges by the request's route alone.
+    tierA: {
+      probe: (llm) =>
+        llm.discoverModels(PROBE_NAMESPACE, { provider: "opencode-go" }),
+      setup: (llm) => {
+        llm.registerModelDiscovery(PROBE_NAMESPACE, async () => [
+          { id: "minimax-m3" },
+        ]);
+      },
     },
     targetOf: (llm) => llm,
   },
@@ -464,35 +494,55 @@ describe("reload · on the real host (tier A)", { timeout: 15_000 }, () => {
   });
 
   // Tier A has no settings service, so the graft's own host stand-ins above
-  // are its cases; discovery runs on the real `llm` service here.
+  // are its cases; every site with a tier-A probe (discovery) runs on the real
+  // `llm` service here.
   it.each(
     SITES.flatMap((site) =>
-      site.name === "discovery"
-        ? [
-            [site.name, "first disposed first", site, true] as const,
-            [site.name, "last disposed first", site, false] as const,
+      site.tierA === undefined
+        ? []
+        : [
+            [
+              site.name,
+              "first disposed first",
+              site,
+              site.tierA,
+              true,
+            ] as const,
+            [
+              site.name,
+              "last disposed first",
+              site,
+              site.tierA,
+              false,
+            ] as const,
           ]
-        : []
     )
-  )("%s · %s", async (_siteName, _order, site, fifo) => {
+  )("%s · %s", async (_siteName, _order, site, tierA, fifo) => {
     tier = await mountTierA({ providers: s0Providers() });
     const { llm } = tier;
     const target: object = llm;
+    tierA.setup?.(llm);
+    const install = tierA.install ?? site.install;
     const listed = llm.listProviders();
     const info = await llm.resolveModelInfo("opencode", "deepseek-v4-pro");
+    const raw = await tierA.probe(llm);
     for (const key of site.keys) {
       expect(Object.hasOwn(target, key), key).toBe(false);
     }
 
-    const a = site.install(llm);
+    const a = install(llm);
     const installedA = ownValues(target, site.keys);
-    const b = site.install(llm);
+    const b = install(llm);
     expect(a).toBeTypeOf("function");
     expect(b).toBeTypeOf("function");
     const installedB = ownValues(target, site.keys);
     for (const key of site.keys) {
       expect(Object.hasOwn(target, key), key).toBe(true);
     }
+    // The probe has to tell the decoration from the host's own answer here,
+    // or the two checks against `raw` below could not fail.
+    const decorated = await tierA.probe(llm);
+    expect(decorated).not.toEqual(raw);
 
     (fifo ? a : b)?.();
     const survivor = fifo ? installedB : installedA;
@@ -502,11 +552,16 @@ describe("reload · on the real host (tier A)", { timeout: 15_000 }, () => {
         `survivor intact: ${key}`
       ).toBe(survivor.get(key));
     }
+    await expect(tierA.probe(llm), "survivor decorates").resolves.toEqual(
+      decorated
+    );
 
     (fifo ? b : a)?.();
     for (const key of site.keys) {
       expect(Object.hasOwn(target, key), `restored: ${key}`).toBe(false);
     }
+    await expect(tierA.probe(llm), "restored").resolves.toEqual(raw);
+    // Smoke: other calls through the restored receiver still answer as before.
     expect(llm.listProviders()).toEqual(listed);
     await expect(
       llm.resolveModelInfo("opencode", "deepseek-v4-pro")
@@ -579,10 +634,36 @@ describe("reload · through apply()", { timeout: 15_000 }, () => {
       };
     };
 
+    const ownBefore = {
+      llm: new Set(Reflect.ownKeys(llm)),
+      settings: new Set(Reflect.ownKeys(settings)),
+    };
     const a = activation();
     const b = activation();
     void apply(a.ctx);
     void apply(b.ctx);
+    // The behavioural tripwire for "patchMethod is the only way": whatever
+    // syntax a later site used, every function `apply()` left as an own property
+    // of a host object carries the helper's record. A bare `llm.x = wrapped`
+    // would leave an own function with none.
+    for (const [label, host] of [
+      ["llm", llm],
+      ["settings", settings],
+    ] as const) {
+      const added = Reflect.ownKeys(host).filter(
+        (key) => !ownBefore[label].has(key)
+      );
+      expect(added.length, label).toBeGreaterThan(0);
+      for (const key of added) {
+        const value = Reflect.getOwnPropertyDescriptor(host, key)?.value;
+        if (typeof value === "function" && typeof key === "string") {
+          expect(
+            inspectPatch(value, key),
+            `${label}.${key} installed through patchMethod`
+          ).toBeDefined();
+        }
+      }
+    }
     const llmB = ownValues(llm, llmKeys);
     for (const key of llmKeys) {
       expect(llmB.get(key), key).toBeTypeOf("function");
