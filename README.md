@@ -159,13 +159,13 @@ Zen's provider-level SDK is `@ai-sdk/openai-compatible`. models.dev names a **di
 
 | models.dev `provider.npm` | models | protocol | served from |
 | :-- | --: | :-- | :-- |
-| _(absent)_ | 25 | OpenAI Chat Completions | the route you configured |
+| _(absent)_ | 24 | OpenAI Chat Completions | the route you configured |
 | `@ai-sdk/openai` | 31 | OpenAI Responses | `opencode-responses` |
 | `@ai-sdk/anthropic` | 17 | Anthropic Messages | `opencode-anthropic` |
 | `@ai-sdk/google` | 8 | Google Generative AI | `opencode-google` |
 | `@ai-sdk/mistral` | 1 | _(a dialect this plugin does not serve)_ | **not offered** |
 
-Counts are the **82** active `opencode` models in `models.opencode.ai` as of 2026-10-23 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 82 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
+Counts are the **81** active `opencode` models in `models.opencode.ai` as of 2026-10-23 — everything else the vendor lists is deprecated or retired, and the patch ships only what the gateway still serves. The same 81 are bundled offline in `src/catalog-data.ts`, so every one of them routes correctly before the first catalog refresh; regenerate that file with `pnpm run catalog:shim`.
 
 The patch **keeps those two routes out of both the model picker and _Settings → Models_**. Three properties hold today, and one does not yet:
 
@@ -221,7 +221,7 @@ Merging is **additive**: adapter rows are kept, canonical rows are appended when
 
 Two things follow that you will notice in use. **Cold start is never empty** — the bundled shim answers before the first refresh, so the picker has models immediately. And **a model the catalog has no row for still appears**, with `—` where its rate would be: never a guess, and never the previous model's name.
 
-Both generated files are checked in CI (`catalog:shim`, `limits:shim`); they exit non-zero when the vendor's data moved, which is the only way to notice the vendor's registry changing under you.
+Both generated files are checked in CI (`catalog:shim`, `limits:shim`); they exit non-zero when the vendor's data moved, which is the only way to notice the vendor's registry changing under you. A pull request fails on that only when it changes the code that generates the file; otherwise CI warns, and a nightly run proposes the refresh as a pull request of its own.
 
 → Protocol routing, the merge and the UI in technical detail: [`docs/protocol-routing-and-merge.md`](./docs/protocol-routing-and-merge.md) · [中文](./docs/protocol-routing-and-merge.md)
 
