@@ -244,7 +244,7 @@ describe(
       const go = idsOf(answers["opencode-go"] ?? []);
       expect(zen).toContain("gpt-5.3-codex-spark");
       expect(go).toContain("minimax-m3.1-flash");
-      expect(go).toContain("gemini-4-argon-contributor");
+      expect(go).toContain("gemini-4-argon");
       // A gap row is the CATALOG's row — never the user's saved
       // `My Spark`/400000, which is configuration, not discovery.
       const spec = OPENCODE_ZEN_CATALOG.find(

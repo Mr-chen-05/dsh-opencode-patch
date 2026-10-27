@@ -593,7 +593,7 @@ describe.skipIf(!ENABLED)("e2e · the published host binary (dsh)", () => {
     }
     expect(fetchedIds("opencode")).toContain("gpt-5.3-codex-spark");
     expect(fetchedIds("opencode-go")).toContain("minimax-m3.1-flash");
-    expect(fetchedIds("opencode-go")).toContain("gemini-4-argon-contributor");
+    expect(fetchedIds("opencode-go")).toContain("gemini-4-argon");
   });
 
   // A newer pi lists gap ids itself and orders its own list differently, so
