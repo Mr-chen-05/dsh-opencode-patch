@@ -63,7 +63,7 @@ const PROTOCOL_OF: Readonly<Record<Plane, Readonly<Record<string, Protocol>>>> =
     },
     "opencode-go": {
       "deepseek-v4-pro": "openai-completions",
-      "gemini-4-argon-contributor": "google-generative-ai",
+      "gemini-4-argon": "google-generative-ai",
       "minimax-m3": "anthropic-messages",
       "minimax-m3.1-flash": "openai-completions",
       "muse-spark-1.2-contributor": "openai-responses",
@@ -129,6 +129,57 @@ const credentialOf = (
 
 const keyOf = (plane: Plane): string =>
   plane === "opencode" ? ZEN_KEY : GO_KEY;
+
+/**
+ * The fields each protocol's body must carry, written out from the vendor
+ * formats: Responses an `input`, completions `messages`, Messages `messages`
+ * and `max_tokens`, Google `contents` (and no `messages`).
+ */
+const BODY_FIELDS: Readonly<Record<Protocol, readonly string[]>> = {
+  "anthropic-messages": ["max_tokens", "messages", "model"],
+  "google-generative-ai": ["contents"],
+  "openai-completions": ["messages", "model"],
+  "openai-responses": ["input", "model"],
+};
+
+/** The gateway's answer for an id it does not serve: the vendor's 404. */
+const UNKNOWN_ID = "not-in-any-catalog";
+
+/** The finish chunk of one turn's chunks. */
+const finishOf = (
+  chunks: readonly Record<string, unknown>[]
+): { reason?: { kind?: string } } | undefined =>
+  chunks.find((chunk) => chunk.type === "finish") as
+    | { reason?: { kind?: string } }
+    | undefined;
+
+/**
+ * Assert the gateway accepted one request (or, for the id no catalog names,
+ * refused it the vendor's way) and that the turn finished accordingly. The
+ * gateway records a request before it judges it, so the path alone cannot
+ * tell an accepted body from a refused one.
+ */
+const expectAnswered = (
+  label: string,
+  model: string,
+  request: { status: number; reject: string | null } | undefined,
+  chunks: readonly Record<string, unknown>[]
+): void => {
+  const kind = finishOf(chunks)?.reason?.kind;
+  if (model === UNKNOWN_ID) {
+    expect({ reject: request?.reject, status: request?.status }, label).toEqual(
+      { reject: "model_unknown", status: 404 }
+    );
+    expect(kind, label).toBe("error");
+    return;
+  }
+  expect({ reject: request?.reject, status: request?.status }, label).toEqual({
+    reject: null,
+    status: 200,
+  });
+  expect(kind, label).toBeDefined();
+  expect(kind, label).not.toBe("error");
+};
 
 /** The DSH session every turn here runs in, and the header it becomes. */
 const SESSION = "plane-dispatch-session";
@@ -224,15 +275,25 @@ describe("plane dispatch · the default (modern) family", () => {
       for (const model of CHARACTERIZED_MODELS[plane]) {
         const protocol = protocolOf(plane, model);
         const before = gateway.requests.length;
-        await turn(llm, plane, model);
+        const chunks = await turn(llm, plane, model);
         const sent = gateway.requests.slice(before);
         expect(
           sent.map((request) => request.path),
           `${plane}/${model}`
         ).toEqual([MODERN_PATH(plane, protocol, model)]);
         const [request] = sent;
-        if (protocol !== "google-generative-ai") {
-          expect((request?.body as { model?: string })?.model).toBe(model);
+        expectAnswered(`${plane}/${model}`, model, request, chunks);
+        const body = (request?.body ?? {}) as Record<string, unknown>;
+        for (const field of BODY_FIELDS[protocol]) {
+          expect(body[field], `${plane}/${model} body.${field}`).toBeDefined();
+        }
+        if (protocol === "google-generative-ai") {
+          expect(body.messages, `${plane}/${model}`).toBeUndefined();
+        } else {
+          expect(body.model, `${plane}/${model}`).toBe(model);
+        }
+        if (protocol === "anthropic-messages") {
+          expect(request?.headers["anthropic-version"]).toBeTruthy();
         }
         const [header, value] = credentialOf(protocol, keyOf(plane));
         expect(request?.headers[header], `${plane}/${model} ${header}`).toBe(
@@ -254,11 +315,13 @@ describe("plane dispatch · the legacy family and a route-level base", () => {
       for (const model of CHARACTERIZED_MODELS[plane]) {
         const protocol = protocolOf(plane, model);
         const before = gateway.requests.length;
-        await turn(llm, plane, model);
+        const chunks = await turn(llm, plane, model);
+        const sent = gateway.requests.slice(before);
         expect(
-          gateway.requests.slice(before).map((request) => request.path),
+          sent.map((request) => request.path),
           `${plane}/${model}`
         ).toEqual([LEGACY_PATH(plane, protocol, model)]);
+        expectAnswered(`${plane}/${model}`, model, sent[0], chunks);
       }
     }
   );
@@ -270,10 +333,12 @@ describe("plane dispatch · the legacy family and a route-level base", () => {
     for (const model of ["deepseek-v4-pro", "gpt-5.4", "claude-haiku-5-5"]) {
       const protocol = protocolOf("opencode", model);
       const before = gateway.requests.length;
-      await turn(llm, "opencode", model);
-      expect(
-        gateway.requests.slice(before).map((request) => request.path)
-      ).toEqual([LEGACY_PATH("opencode", protocol, model)]);
+      const chunks = await turn(llm, "opencode", model);
+      const sent = gateway.requests.slice(before);
+      expect(sent.map((request) => request.path)).toEqual([
+        LEGACY_PATH("opencode", protocol, model),
+      ]);
+      expectAnswered(`opencode/${model}`, model, sent[0], chunks);
     }
   });
 
@@ -356,6 +421,78 @@ describe("plane dispatch · the toggle model's Off and On (D1)", () => {
   );
 });
 
+describe("plane dispatch · a completions model whose effort list names none (D1)", () => {
+  // pi 1.1.0 files these with `off: "none"`: Off is offered, and the disable
+  // is `reasoning_effort: "none"`, sent both for Off and for a turn that
+  // selects no effort (`openai-completions.js:717-721`). The mock gateway
+  // has no endpoint for `@ai-sdk/mistral` (which endpoint the vendor serves it
+  // on is unmeasured, docs/redirect-planes.md §2), so it answers Zen
+  // mistral-large-4 with its protocol refusal. The mock carries no body shape
+  // check for the completions kind, so that row pins the path, the credential
+  // header and the `reasoning_effort` read off the parsed body, not a body the
+  // gateway judged well formed; the Go row, an SDK-less completions model, is
+  // the case whose body the gateway accepts.
+  it.each([
+    [
+      "opencode",
+      "mistral-large-4",
+      ["off", "high"],
+      { reject: "protocol", status: 400 },
+    ],
+    [
+      "opencode-go",
+      "hy3",
+      ["off", "low", "high"],
+      { reject: null, status: 200 },
+    ],
+  ] as const)(
+    "%s %s offers Off and sends reasoning_effort none for Off and for no effort, and the level for High",
+    async (plane, model, offered, answer) => {
+      const llm = await mount({
+        [plane]: {
+          apiKeyEnv:
+            plane === "opencode" ? "OPENCODE_API_KEY" : "OPENCODE_GO_API_KEY",
+          models: [{ id: model }],
+        },
+      });
+      const info = (await llm.resolveModelInfo(plane, model)) as {
+        reasoning?: { efforts?: { id: string }[] };
+      };
+      expect(info.reasoning?.efforts?.map((effort) => effort.id)).toEqual(
+        offered
+      );
+      const sent: {
+        effort: unknown;
+        path: string;
+        reject: string | null;
+        status: number;
+      }[] = [];
+      for (const extra of [
+        { reasoningEffort: "off" },
+        {},
+        { reasoningEffort: "high" },
+      ]) {
+        const before = gateway.requests.length;
+        await turn(llm, plane, model, extra);
+        const [request] = gateway.requests.slice(before);
+        sent.push({
+          effort: (request?.body as { reasoning_effort?: unknown } | undefined)
+            ?.reasoning_effort,
+          path: request?.path ?? "",
+          reject: request?.reject ?? null,
+          status: request?.status ?? 0,
+        });
+      }
+      const path = MODERN_PATH(plane, "openai-completions", model);
+      expect(sent).toEqual([
+        { effort: "none", path, ...answer },
+        { effort: "none", path, ...answer },
+        { effort: "high", path, ...answer },
+      ]);
+    }
+  );
+});
+
 describe("plane dispatch · Go Gemini replay stays on one provider label", () => {
   it("a Go Gemini turn's replay state is the plane's own, and the next turn replays the signed tool call natively", async () => {
     // Driven by its own responder rather than the gateway's canned stream: the
@@ -410,12 +547,12 @@ describe("plane dispatch · Go Gemini replay stays on one provider label", () =>
       providers: {
         "opencode-go": {
           apiKeyEnv: "OPENCODE_GO_API_KEY",
-          models: [{ id: "gemini-4-argon-contributor" }],
+          models: [{ id: "gemini-4-argon" }],
         },
       },
     });
     await waitForPlaneOwner(tier.llm, ["opencode-go"]);
-    const model = "gemini-4-argon-contributor";
+    const model = "gemini-4-argon";
     const tools = [
       {
         description: "Read a sample value",

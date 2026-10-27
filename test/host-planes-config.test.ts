@@ -20,6 +20,7 @@ import {
   removeProviders,
   routeIds,
   settle,
+  stateOf,
 } from "./support/host-planes.ts";
 import {
   characterizedProviders,
@@ -200,9 +201,15 @@ describe("host planes · the route set (tier B)", { timeout: 30_000 }, () => {
     const { tier } = await bootPlanes({
       providers: { deepseek: deepseek ?? {} },
     });
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
+    // The plugin's row is ACTIVE only once `apply` returned, and `apply`
+    // awaits the claim's mount; the mount's own reconcile is queued in its
+    // `finally`, which settle() lets run. Only then is the empty registry a
+    // finding rather than a race.
+    await until(
+      () => stateOf(tier.pluginEntry?.fiber) === FIBER_STATE.ACTIVE,
+      "the plugin's row is active"
+    );
+    await settle();
     expect(routeIds(tier.llm)).toEqual(["deepseek"]);
     const zen = s0Providers().opencode ?? {};
     await tier.ctx.configEditor.edit(

@@ -145,7 +145,7 @@ describe("host · the internal/config waterfall (tier A)", () => {
     expect(tier.piFiber.state).toBe(2);
   });
 
-  it("F8 — pi-ai's own listener validates the value its inner chain returns, not what an outer listener will return (llm-pi-ai/src/index.ts:177-186; config.ts:364-368)", async () => {
+  it("F8/F4 — pi-ai's own listener validates the value its inner chain returns, not what an outer listener will return (llm-pi-ai/src/index.ts:177-186; config.ts:364-368)", async () => {
     // Read for P-R1: an outer listener that strips the planes and returns a
     // copy does NOT shield pi-ai's save check, which runs on `next()`'s value.
     // A listener INSIDE pi-ai's (registered after it, unprepended) is what

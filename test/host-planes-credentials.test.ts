@@ -31,7 +31,12 @@ import {
   createOpencodeStore,
   type FixtureStore,
 } from "./support/opencode-store-fixture.ts";
-import { clearCapturedApiKeys, recordCapturedApiKey } from "./support/src.ts";
+import {
+  clearCapturedApiKeys,
+  getCapturedApiKey,
+  recordCapturedApiKey,
+  resolveGoApiKey,
+} from "./support/src.ts";
 
 let tierA: TierA | undefined;
 
@@ -74,6 +79,81 @@ describe("host planes · credentials (tier A, D20)", { timeout: 30_000 }, () => 
     );
     const { requests } = await turn(tier.llm, "opencode", "deepseek-v4-pro");
     expect(requests[0]?.headers.authorization).toBe("Bearer svc-k".length);
+  });
+
+  it("a Go plane with no apiKeyEnv authenticates with pi's OPENCODE_API_KEY lookup, on every protocol; naming OPENCODE_GO_API_KEY sends the Go key", async () => {
+    // pi 1.1.0's opencode-go provider reads OPENCODE_API_KEY, the same
+    // variable as Zen (D20): a Go entry without a reference sends the Zen
+    // key. The two keys differ in length, which is what the recorder keeps.
+    const refs = {
+      OPENCODE_API_KEY: "zen-k-from-the-service",
+      OPENCODE_GO_API_KEY: "go-k",
+    };
+    const sent = async (entry: Record<string, unknown>) => {
+      offline();
+      tierA = await mountTierA({
+        credentials: fakeCredentials({ refs }),
+        plugin: {},
+        providers: {
+          "opencode-go": {
+            models: [{ id: "deepseek-v4-pro" }, { id: "minimax-m3" }],
+            ...entry,
+          },
+        },
+      });
+      await waitForPlaneOwner(tierA.llm, ["opencode-go"]);
+      const completions = await turn(
+        tierA.llm,
+        "opencode-go",
+        "deepseek-v4-pro"
+      );
+      const messages = await turn(tierA.llm, "opencode-go", "minimax-m3");
+      await tierA.dispose();
+      tierA = undefined;
+      return [
+        completions.requests[0]?.headers.authorization,
+        messages.requests[0]?.headers["x-api-key"],
+      ];
+    };
+    expect(await sent({})).toEqual([
+      `Bearer ${refs.OPENCODE_API_KEY}`.length,
+      refs.OPENCODE_API_KEY.length,
+    ]);
+    expect(await sent({ apiKeyEnv: "OPENCODE_GO_API_KEY" })).toEqual([
+      `Bearer ${refs.OPENCODE_GO_API_KEY}`.length,
+      refs.OPENCODE_GO_API_KEY.length,
+    ]);
+  });
+
+  it("the Go meter resolves OPENCODE_GO_API_KEY for a no-reference Go entry until a Go turn, then the Zen key that turn carried", async () => {
+    // The README's credential-isolation row describes this: the meter never
+    // reads an OPENCODE_API_KEY reference, but `auto` puts a key captured on
+    // a Go-plane request ahead of the configured one, so a Go entry that
+    // names no reference hands the meter the Zen key after its first turn.
+    const refs = {
+      OPENCODE_API_KEY: "zen-k-from-the-service",
+      OPENCODE_GO_API_KEY: "go-k",
+    };
+    offline();
+    tierA = await mountTierA({
+      credentials: fakeCredentials({ refs }),
+      plugin: {},
+      providers: { "opencode-go": { models: [{ id: "deepseek-v4-pro" }] } },
+    });
+    await waitForPlaneOwner(tierA.llm, ["opencode-go"]);
+    expect(await resolveGoApiKey(tierA.ctx, "opencode-go")).toBe(
+      refs.OPENCODE_GO_API_KEY
+    );
+    const { requests } = await turn(
+      tierA.llm,
+      "opencode-go",
+      "deepseek-v4-pro"
+    );
+    expect(requests[0]?.url).toContain("/inference/go/");
+    expect(getCapturedApiKey("opencode-go", "go")).toBe(refs.OPENCODE_API_KEY);
+    expect(await resolveGoApiKey(tierA.ctx, "opencode-go")).toBe(
+      refs.OPENCODE_API_KEY
+    );
   });
 
   it("a Sign-in record under llm-pi-ai/opencode authenticates the plane", async () => {

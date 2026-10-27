@@ -20,25 +20,37 @@
  * leaves out is `x-opencode-request`, a per-request metric id.
  *
  * What it decides, per plane, from the cells the default family dispatches to
- * (`TODAY_DISPATCH`) alone (`planeOutcome`):
+ * (`TODAY_DISPATCH`), each read beside the legacy and root cells of the same
+ * protocol, which carry the same model and key (`planeOutcome`):
  *
- * - FAIL when one answers path-gone, wrong-protocol or auth-refused — the flip
- *   rule's evidence (`docs/redirect-planes.md` §13) — or an answer that
- *   measured nothing a turn could use: an unreadable status (`other`), a
- *   redirect, a refused session, no answer on either attempt
- *   (`transport-error`), or no model to send (`no-model`). Only the first
- *   three are flip evidence.
+ * - FAIL when one answers path-gone, wrong-protocol or auth-refused, or a
+ *   retired model (`model-gone`) that another shape accepted, or an answer
+ *   that measured nothing a turn could use: an unreadable status (`other`), a
+ *   redirect, a refused session, no answer on the last attempt that did not
+ *   follow a 429 (`transport-error`), or no model to send (`no-model`). The
+ *   flip rule's evidence (`docs/redirect-planes.md` §13) is a wrong-protocol,
+ *   a path-gone, an auth-refused or a model-gone that the cell a flip would
+ *   send the same protocol to (`LEGACY_DISPATCH`'s, when it is not the
+ *   default cell itself, so never Go's Google) accepted. A refusal only the
+ *   root or Go Google's `/zen/go` cell accepted fails but is not evidence, as
+ *   no flip reaches them; nor is a key refused on every shape that read it
+ *   (the CI secret), a key no other shape read, or a protocol or a path the
+ *   flip's cell refused too or measured nothing about (a re-run). Each other
+ *   shape counts only for what it measured: the account's answer shows a key
+ *   read and a path that exists, never a protocol or a model served.
  * - SKIP when none of them was `served`: the account's answer (no funds, a
  *   model the account may not use), a rate limit (a 429, or a 429 and then no
  *   answer, the measured rate-limit hang), a busy upstream (a 503, a 529, or a
- *   5xx naming an overload — the gateway routed it), a retired model, or a
- *   parsed but refused body. Nothing showed the plugin's turns are served, so it is a
- *   skip, never a pass.
+ *   5xx naming an overload — never read as a shape accepting the request,
+ *   since the gateway's front may answer it), a retired model, or a
+ *   parsed but refused body. Nothing showed the plugin's turns are served, so
+ *   it is a skip, never a pass.
  * - PASS otherwise.
  *
  * Every other cell — the legacy cells `endpoint: legacy` dispatches to, which
  * P-R2 decided are recorded, not guarded, and the root shape nothing
- * dispatches to — is recorded only.
+ * dispatches to — never fails or passes a plane on its own: it is recorded,
+ * and read only beside a default cell of the same protocol.
  *
  * Armed by the `probes` tier (`OPENCODE_E2E_KEYED`, unset meaning `full`):
  * CI runs it on pull requests that touch `src/host/**`, the modules that
@@ -53,8 +65,9 @@
  * `OPENCODE_E2E_RECORD_DIR` is set, written there as `keyed.md` — rewritten
  * after every cell, so a job killed at its time limit still leaves what it
  * measured, the cells it did not reach reading `not sent`. A redirect is never
- * followed: it is recorded as `redirected`, with the path it pointed at, in
- * the console table and the dated record alike. No
+ * followed (`redirect: "manual"`, which `test/keyed-probes.test.ts` holds
+ * every probe `fetch` to): it is recorded as `redirected`, with the path it
+ * pointed at, in the console table and the dated record alike. No
  * header and no key is ever printed; a body is printed only through
  * `excerpt`, which redacts the key.
  *
@@ -213,16 +226,16 @@ describe.skipIf(
       expect(planeCells).toHaveLength(12);
       const key = KEYS[plane];
       if (key === undefined) {
-        for (const cell of planeCells) {
-          recorded.push({
+        recorded.push(
+          ...planeCells.map((cell) => ({
             family: cell.family,
             model: cell.model,
             plane,
             protocol: cell.protocol,
             status: undefined,
             verdict: "no-key",
-          });
-        }
+          }))
+        );
         await persist(false);
         context.skip(true, "no key for this plane");
         return;

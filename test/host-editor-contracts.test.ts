@@ -64,7 +64,7 @@ const knownProviders = (): Record<string, Record<string, unknown>> => {
   const providers = s0Providers();
   const gaps = new Set([
     "gpt-5.3-codex-spark",
-    "gemini-4-argon-contributor",
+    "gemini-4-argon",
     "minimax-m3.1-flash",
   ]);
   for (const plane of ["opencode", "opencode-go"]) {
@@ -232,7 +232,7 @@ describe(
       ]);
     });
 
-    it("the stripping listener does not shield pi-ai's own save check: with a gap id stored, a plane edit is refused and the file is untouched (llm-pi-ai/src/index.ts:177-186; config.ts:364-368)", async () => {
+    it("F4 — the stripping listener does not shield pi-ai's own save check: with a gap id stored, a plane edit is refused and the file is untouched (llm-pi-ai/src/index.ts:177-186; config.ts:364-368)", async () => {
       // Read for P-R1. An outermost listener's copy is what the fiber KEEPS,
       // but pi-ai validates the value its inner chain returns — the editor's
       // raw candidate — and against its stripped previous config every plane
@@ -319,6 +319,44 @@ describe(
         providers: s0Providers(),
       });
       expect(await providerWithApiKey(tier)).toBe("deepseek");
+    });
+
+    it("restatement — an apiKeyEnv outside credentialRef's grammar throws upstream's TypeError instead of reading 'not configured' (credentials/src/index.ts:29-34)", async () => {
+      // pi-ai's resolveProfiles refuses such a ref today, so only a describe
+      // graft (P-R1's) could carry one; the restatement must then fail the
+      // way upstream's initializeDefaultModel would, not skip the provider.
+      tier = await bootTierB({
+        credentials: planeKeysOnly(),
+        plugin: false,
+        providers: s0Providers(),
+      });
+      const { settings } = tier.ctx;
+      const malformedDescribe: typeof settings.describe = (options) =>
+        settings.describe(options).map((namespace) => {
+          if (namespace.ns !== "llm-pi-ai") {
+            return namespace;
+          }
+          const value = structuredClone(namespace.value) as {
+            providers: { opencode: Record<string, unknown> };
+          };
+          value.providers.opencode.apiKeyEnv = "OPENCODE API KEY";
+          return { ...namespace, value };
+        });
+      const view = {
+        credentials: tier.credentials,
+        ctx: { settings: { describe: malformedDescribe } },
+        llm: tier.llm,
+      } as unknown as TierB;
+      const from = tier.credentials.calls.length;
+      await expect(providerWithApiKey(view)).rejects.toThrow(
+        new TypeError(
+          'credential ref "OPENCODE API KEY" must match /^[A-Za-z_][A-Za-z0-9_]*$/'
+        )
+      );
+      // The malformed ref is never handed to the credentials service.
+      expect(describedRefs(tier, from)).toEqual(["DEEPSEEK_API_KEY"]);
+      // Control: the unmodified view answers the plane, so the throw is the ref's.
+      expect(await providerWithApiKey(tier)).toBe("opencode");
     });
 
     it("host contract, F20 — under a test-local strip it answers FALSE with the plane keys stored: the directory still lists the planes, but their describe().value is gone, so their keys are never asked about", async () => {

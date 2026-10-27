@@ -19,6 +19,18 @@
  *   editor candidate has its changed plane entries validated strictly, and a
  *   malformed one is refused in pi-ai's message style. A commit run never
  *   throws: that would fail pi-ai's fiber and every route it holds.
+ *
+ *   **A constraint this places on the host (F12).** cordis's
+ *   `Fiber.update(config, noSave)` hands the RESOLVED value to
+ *   `internal/update`, where the loader writes it to the row's options and
+ *   the profile unless `noSave` is set (`cordis/src/fiber.ts:736-753`,
+ *   `loader/src/index.ts:115-121`). So a `piFiber.update(raw)` with `noSave`
+ *   false would persist this copy and delete both planes from the user's
+ *   file. No caller does that today — the editor writes the raw value, and
+ *   the loader's own update passes `noSave = true`
+ *   (`loader/src/config/entry.ts:106`) — and the same path would already
+ *   write interpolated `!!js` values for any plugin. Guarding it waits for a
+ *   real caller.
  * - **Reconcile.** Reads the committed plane entries from pi-ai's
  *   `_config.providers`, interpolates them with the loader's `interpolate`
  *   (F16), normalizes them with pi-ai's `Config`, builds the profiles
@@ -201,6 +213,14 @@ export const installRouteClaim = (
     handle: undefined as AdapterRegistrationLike | undefined,
     llm: undefined as LlmLike | undefined,
     modules: undefined as HostModules | undefined,
+    /**
+     * The last modules that loaded, for judging a Settings save. Never
+     * cleared by a handover or pi-ai's partial dispose: validation reads only
+     * pi-ai's `Config`, the libraries and pi's catalog, none of which change
+     * between two loads short of a hot reload, which the next reconcile
+     * re-reads anyway. So a valid save is not refused for timing.
+     */
+    validationModules: undefined as HostModules | undefined,
     normalized: {} as Partial<Record<PlaneRoute, unknown>>,
     pendingDuplicate: false,
     profiles: new Map<string, PlaneProfileLike>() as ReadonlyMap<
@@ -562,6 +582,7 @@ export const installRouteClaim = (
       return;
     }
     state.modules = modules;
+    state.validationModules = modules;
     try {
       rebuild(pi, modules);
     } catch (error) {
@@ -600,7 +621,10 @@ export const installRouteClaim = (
       ) {
         continue;
       }
-      const { modules } = state;
+      // Refused only before the host's modules ever loaded (at boot, before
+      // the mount's preload settles), never in the window after a handover
+      // or a partial dispose.
+      const modules = state.modules ?? state.validationModules;
       if (modules === undefined) {
         throw new Error(
           `llm-pi-ai: provider "${plane}" cannot be validated yet: the plugin has not loaded the host's pi-ai module; try the save again`
@@ -792,6 +816,7 @@ export const installRouteClaim = (
     try {
       // Preload the libraries, so the first commit run does not wait on them.
       state.modules = await loadHostModules(ctx, livePiAi());
+      state.validationModules = state.modules;
       const served = servedRow();
       state.served = served;
       if (served !== undefined && resolvedPlanes(served).length > 0) {

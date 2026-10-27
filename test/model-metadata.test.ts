@@ -74,7 +74,56 @@ describe("model-metadata · reasoningFor (D1)", () => {
     expect(ids(deepseek)).toEqual(["off", "high"]);
   });
 
-  it("offers an effort list exactly, never Off for none/off, and low/medium/high for a bare reasoning flag", () => {
+  it("offers Off for a none in a completions effort list, with none as Off's wire value in both vocabularies, as pi's own entry does", () => {
+    expect(zen("mistral-large-4").reasoning_options).toEqual([
+      { type: "effort", values: ["none", "high"] },
+    ]);
+    const mistral = reasoningFor(zen("mistral-large-4"), "openai-completions");
+    expect(mistral?.efforts).toEqual([
+      { id: "off", name: "Off" },
+      { id: "high", name: "High" },
+    ]);
+    expect(mistral?.thinkingLevelMap).toEqual({
+      high: "high",
+      low: null,
+      max: null,
+      medium: null,
+      minimal: null,
+      off: "none",
+      xhigh: null,
+    });
+    expect(mistral?.reasoningEfforts).toEqual({ high: "high", off: "none" });
+    // The profile dict reads back to the same map through pi-ai's own rule.
+    expect(
+      piReasoningFromEfforts(
+        "mistral-large-4",
+        "opencode",
+        mistral?.reasoningEfforts ?? false
+      )
+    ).toEqual({ reasoning: true, thinkingLevelMap: mistral?.thinkingLevelMap });
+    // Go's completions models that list none read the same.
+    expect(ids(reasoningFor(go("hy3"), "openai-completions"))).toEqual([
+      "off",
+      "low",
+      "high",
+    ]);
+    expect(
+      reasoningFor(go("hy4-preview"), "openai-completions")?.thinkingLevelMap
+        .off
+    ).toBe("none");
+    // An "off" value is the same signal, carried verbatim.
+    expect(
+      reasoningFor(
+        {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: ["off", "low"] }],
+        },
+        "openai-completions"
+      )?.reasoningEfforts
+    ).toEqual({ low: "low", off: "off" });
+  });
+
+  it("offers an effort list exactly, no Off for a none on Responses, and low/medium/high for a bare reasoning flag", () => {
     const gpt = reasoningFor(zen("gpt-5.4"), "openai-responses");
     expect(zen("gpt-5.4").reasoning_options?.[0]?.values).toContain("none");
     expect(ids(gpt)).toEqual(["low", "medium", "high", "xhigh"]);

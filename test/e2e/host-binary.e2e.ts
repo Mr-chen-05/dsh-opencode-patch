@@ -36,7 +36,7 @@
  *
  * @module test/e2e/host-binary.e2e
  */
-import { spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -79,6 +79,16 @@ const PREFIX = E2E.hostBinary.prefix;
 const CELL = E2E.hostBinary.cell;
 const PINNED = CELL === "pinned";
 const BOOT_DEADLINE_MS = 180_000;
+/** Each `dsh plugin install` (a blocking `spawnSync`). */
+const INSTALL_DEADLINE_MS = 120_000;
+/**
+ * The hook's budget, derived from the deadlines it actually runs — two installs
+ * and a boot — so every failure path reaches its own message and the probe
+ * copy before vitest's hook timeout can fire. `spawnSync` blocks the worker, so
+ * the hook timer cannot interrupt an install; it can only fire during the boot
+ * wait, which is the window where the child is live and the artifact matters.
+ */
+const HOOK_BUDGET_MS = 2 * INSTALL_DEADLINE_MS + BOOT_DEADLINE_MS + 30_000;
 const CHECKOUT = fileURLToPath(new URL("../..", import.meta.url));
 const PROBE_BUNDLE = join(CHECKOUT, "test", "e2e", "host");
 
@@ -263,6 +273,8 @@ let home = "";
 let out: ProbeOutput;
 /** The version of the host prefix's own pi. */
 let hostPiVersion = "";
+/** The booted host, kept so `afterAll` can stop it before removing HOME. */
+let child: ChildProcess | undefined;
 
 describe.skipIf(!ENABLED)("e2e · the published host binary (dsh)", () => {
   beforeAll(async () => {
@@ -317,7 +329,7 @@ describe.skipIf(!ENABLED)("e2e · the published host binary (dsh)", () => {
         cwd: home,
         encoding: "utf8",
         env,
-        timeout: BOOT_DEADLINE_MS,
+        timeout: INSTALL_DEADLINE_MS,
       });
       if (run.status !== 0) {
         // A spawn error, a timeout and a signal all leave `status` null; name
@@ -377,7 +389,7 @@ describe.skipIf(!ENABLED)("e2e · the published host binary (dsh)", () => {
     );
 
     const probeOut = join(home, "probe.json");
-    const child = spawn(
+    const host = spawn(
       process.execPath,
       [bin, "--profile", "e2e", "--no-open", "--port", "0"],
       {
@@ -395,17 +407,18 @@ describe.skipIf(!ENABLED)("e2e · the published host binary (dsh)", () => {
         stdio: ["ignore", "pipe", "pipe"],
       }
     );
+    child = host;
     let stderr = "";
-    child.stderr.on("data", (chunk: Buffer) => {
+    host.stderr.on("data", (chunk: Buffer) => {
       stderr = `${stderr}${chunk.toString("utf8")}`.slice(-4000);
     });
-    child.stdout.resume();
+    host.stdout.resume();
     const end = await new Promise<RunEnd>((resolve) => {
       const timer = setTimeout(() => {
-        child.kill("SIGKILL");
+        host.kill("SIGKILL");
         resolve({ code: null, signal: "SIGKILL", timedOut: true });
       }, BOOT_DEADLINE_MS);
-      child.on("exit", (code, signal) => {
+      host.on("exit", (code, signal) => {
         clearTimeout(timer);
         resolve({ code, signal, timedOut: false });
       });
@@ -437,9 +450,18 @@ describe.skipIf(!ENABLED)("e2e · the published host binary (dsh)", () => {
     }
     out = parsed;
     console.info(`[e2e-host] probe output:\n${JSON.stringify(out, null, 2)}`);
-  }, BOOT_DEADLINE_MS * 2);
+  }, HOOK_BUDGET_MS);
 
   afterAll(() => {
+    // A hook that failed before the boot settled leaves the host running;
+    // stop it before its HOME goes.
+    if (
+      child !== undefined &&
+      child.exitCode === null &&
+      child.signalCode === null
+    ) {
+      child.kill("SIGKILL");
+    }
     if (home.length > 0) {
       rmSync(home, { force: true, recursive: true });
     }
@@ -503,14 +525,10 @@ describe.skipIf(!ENABLED)("e2e · the published host binary (dsh)", () => {
           sent: row.sent,
         });
       }
-      expect(
-        out.dispatch["opencode-go/gemini-4-argon-contributor"]?.sent
-      ).toEqual([
-        "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon-contributor:streamGenerateContent?alt=sse",
+      expect(out.dispatch["opencode-go/gemini-4-argon"]?.sent).toEqual([
+        "https://opencode.ai/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent?alt=sse",
       ]);
-      expect(out.callConfig["opencode-go/gemini-4-argon-contributor"]).toBe(
-        "ok"
-      );
+      expect(out.callConfig["opencode-go/gemini-4-argon"]).toBe("ok");
     }
   );
 
@@ -579,7 +597,7 @@ describe.skipIf(!ENABLED)("e2e · the published host binary (dsh)", () => {
     }
     expect(fetchedIds("opencode")).toContain("gpt-5.3-codex-spark");
     expect(fetchedIds("opencode-go")).toContain("minimax-m3.1-flash");
-    expect(fetchedIds("opencode-go")).toContain("gemini-4-argon-contributor");
+    expect(fetchedIds("opencode-go")).toContain("gemini-4-argon");
   });
 
   // A newer pi lists gap ids itself and orders its own list differently, so

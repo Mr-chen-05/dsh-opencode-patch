@@ -21,7 +21,10 @@
  * binary e2e reads too, so the in-process host and the published binary cannot
  * drift apart unnoticed. Each model's three facets (model info, the
  * call-config verdict, the wire) carry their own tag there, and this file
- * generates one test per model and facet titled with that tag.
+ * generates one test per model and facet titled with that tag, in each apply
+ * order (`todayRowsFor(order)` carries that order's tags), so the tag is what
+ * a reader and a phase's diff go by. Where a measurement contradicted the
+ * plan's expectation the row keeps the measurement and says so.
  *
  * Every case boots its own host. The main block boots in the published host's
  * apply order (`plugin-first`: the plugin applies before pi-ai registers,
@@ -227,14 +230,21 @@ const appendTo =
     };
   };
 
-/** One generated case per row and facet, titled with the facet's own tag. */
-const FACET_CASES = ROW_KEYS.flatMap((key) =>
-  (["info", "callConfig", "wire"] as const).map((facet) => ({
-    facet,
-    key,
-    tag: S0_TODAY.rows[key].tags[facet],
-  }))
-);
+const FACETS = ["info", "callConfig", "wire"] as const;
+
+/**
+ * One generated case per row and facet, titled with the facet's own tag in
+ * that order's table, so a phase's diff names every facet it moves in both
+ * orders.
+ */
+const facetCasesFor = (order: ApplyOrder) =>
+  ROW_KEYS.flatMap((key) =>
+    FACETS.map((facet) => ({
+      facet,
+      key,
+      tag: todayRowsFor(order)[key].tags[facet],
+    }))
+  );
 
 /** The plane a row key belongs to, and the bundled catalog for it. */
 const catalogFor = (key: RowKey) =>
@@ -289,9 +299,7 @@ describe(
 
     it("fixture: the gap ids are gaps on pi 1.1.0, the unknown id is unknown everywhere, and the known ids are known", () => {
       expect(piKnows("opencode", "gpt-5.3-codex-spark")).toBeUndefined();
-      expect(
-        piKnows("opencode-go", "gemini-4-argon-contributor")
-      ).toBeUndefined();
+      expect(piKnows("opencode-go", "gemini-4-argon")).toBeUndefined();
       expect(piKnows("opencode-go", "minimax-m3.1-flash")).toBeUndefined();
       expect(piKnows("opencode", "deepseek-v4-pro")).toBe("openai-completions");
       expect(piKnows("opencode", "gemini-3-flash")).toBe(
@@ -392,7 +400,7 @@ describe(
       expect(compared).toBeGreaterThan(0);
     });
 
-    it("fixture: the handback's save-block pattern (test/host-planes.test.ts) names the stored gap id, and todayRowsFor answers both orders the same and refuses one it does not know", () => {
+    it("fixture: the handback's save-block pattern (test/host-planes.test.ts) names the stored gap id, todayRowsFor answers both orders the same and refuses one it does not know, and a facet whose value moves between the orders is exactly a facet whose tag moves", () => {
       const pinned =
         'provider "opencode" model "gpt-5.3-codex-spark" needs an api';
       expect(pinned).toMatch(S0_TODAY.saveBlockedByStoredGap);
@@ -403,6 +411,39 @@ describe(
       for (const order of APPLY_ORDERS) {
         expect(Object.keys(todayRowsFor(order))).toEqual(ROW_KEYS);
         expect(todayRowsFor(order)).toEqual(S0_TODAY.rows);
+      }
+      // Structural, so no phase has to edit it: a facet whose VALUE differs
+      // between the orders is exactly a facet whose TAG differs, and each one
+      // would be a defect in the published order whose pi-ai-first value is
+      // already the behaviour to keep. P-R1 collapsed the override, so both
+      // sets are empty (the [BASELINE] apply-order case below pins that), and
+      // this keeps a future override honest.
+      const piAiFirst = todayRowsFor("pi-ai-first");
+      const moved = ROW_KEYS.flatMap((key) =>
+        FACETS.filter(
+          (facet) =>
+            JSON.stringify(expectedFacet(facet, key, piAiFirst)) !==
+            JSON.stringify(expectedFacet(facet, key))
+        ).map((facet) => `${key} · ${facet}`)
+      );
+      const retagged = ROW_KEYS.flatMap((key) =>
+        FACETS.filter(
+          (facet) =>
+            piAiFirst[key].tags[facet] !== S0_TODAY.rows[key].tags[facet]
+        ).map((facet) => `${key} · ${facet}`)
+      );
+      expect(retagged).toEqual(moved);
+      for (const key of ROW_KEYS) {
+        for (const facet of FACETS) {
+          if (moved.includes(`${key} · ${facet}`)) {
+            expect(S0_TODAY.rows[key].tags[facet], `${key} · ${facet}`).toBe(
+              "KNOWN_DEFECT"
+            );
+            expect(piAiFirst[key].tags[facet], `${key} · ${facet}`).toBe(
+              "BASELINE"
+            );
+          }
+        }
       }
       // A probe JSON missing the field reads `undefined`; it must not select
       // any table.
@@ -462,9 +503,14 @@ describe(
       }
     });
 
-    it.each(FACET_CASES)("[$tag] $key · $facet", async ({ facet, key }) => {
-      expect(await measureFacet(facet, key)).toEqual(expectedFacet(facet, key));
-    });
+    it.each(facetCasesFor("plugin-first"))(
+      "[$tag] $key · $facet",
+      async ({ facet, key }) => {
+        expect(await measureFacet(facet, key)).toEqual(
+          expectedFacet(facet, key)
+        );
+      }
+    );
 
     it("[BASELINE] the toggle-only model is offered Off / On, and a level it does not take is refused (D1)", async () => {
       // Chosen from the bundled catalog, not by name: on/off reasoning, no levels.
@@ -555,16 +601,14 @@ describe(
       expect(drained.finish).toEqual({ code: "AUTH", kind: "error" });
     });
 
-    it("[BASELINE] Go gemini-4-argon-contributor validates and is sent on Go's Google base with the Go key (F10)", async () => {
-      expect(
-        await callConfigOf("opencode-go", "gemini-4-argon-contributor")
-      ).toBe("ok");
+    it("[BASELINE] Go gemini-4-argon validates and is sent on Go's Google base with the Go key (F10)", async () => {
+      expect(await callConfigOf("opencode-go", "gemini-4-argon")).toBe("ok");
       const { drained, requests } = await sentBy(
         "opencode-go",
-        "gemini-4-argon-contributor"
+        "gemini-4-argon"
       );
       expect(requests.map((request) => request.url)).toEqual(
-        S0_TODAY.rows["opencode-go/gemini-4-argon-contributor"].sent
+        S0_TODAY.rows["opencode-go/gemini-4-argon"].sent
       );
       expect(requests[0]?.headers["x-goog-api-key"]).toBe("go-test-key".length);
       // pi maps a Google 401 to its own code, not AUTH (as with pi alone).
@@ -651,21 +695,44 @@ describe(
       }
     });
 
-    it("[BASELINE] no facet depends on the apply order any more: every row measured in this order equals S0_TODAY", async () => {
-      const expected = todayRowsFor("pi-ai-first");
-      expect(expected).toEqual(S0_TODAY.rows);
-      for (const facet of ["info", "callConfig", "wire"] as const) {
-        const measured: Record<string, unknown> = {};
-        const want: Record<string, unknown> = {};
-        for (const key of ROW_KEYS) {
-          measured[key] = await measureFacet(facet, key);
-          want[key] = expectedFacet(facet, key, expected);
-        }
-        expect(measured, facet).toEqual(want);
+    // With the plugin owning the planes the claim answers the same in this
+    // order, so this order's table is S0_TODAY's (todayRowsFor), every facet
+    // of it is measured here under its own tag, and the apply-order case below
+    // pins that no facet moves.
+    it.each(facetCasesFor("pi-ai-first"))(
+      "[$tag] $key · $facet",
+      async ({ facet, key }) => {
+        expect(await measureFacet(facet, key)).toEqual(
+          expectedFacet(facet, key, todayRowsFor("pi-ai-first"))
+        );
       }
-    });
+    );
   }
 );
+
+describe("characterization · the apply order (no host)", () => {
+  // Pure: it reads the two tables the binary e2e and the two booted blocks
+  // pick between, and boots nothing. Each order's generated facet cases
+  // measure its table; this case pins that they no longer differ. P-T1b held
+  // it as "[KNOWN_DEFECT] the apply order decides exactly one facet" (Go
+  // gemini-4-argon's callConfig); P-R1 flipped that row and
+  // dropped todayRowsFor's pi-ai-first override in the same diff
+  // (CONTRIBUTING.md, "Tags").
+  it("[BASELINE] no facet depends on the apply order: todayRowsFor answers S0_TODAY's rows, with S0_TODAY's tags, in both orders", () => {
+    const piAiFirst = todayRowsFor("pi-ai-first");
+    expect(todayRowsFor("plugin-first")).toEqual(S0_TODAY.rows);
+    expect(piAiFirst).toEqual(S0_TODAY.rows);
+    const moved = ROW_KEYS.flatMap((key) =>
+      FACETS.filter(
+        (facet) =>
+          JSON.stringify(expectedFacet(facet, key, piAiFirst)) !==
+            JSON.stringify(expectedFacet(facet, key)) ||
+          piAiFirst[key].tags[facet] !== S0_TODAY.rows[key].tags[facet]
+      ).map((facet) => `${key} · ${facet}`)
+    );
+    expect(moved).toEqual([]);
+  });
+});
 
 describe(
   "characterization · a gap-free plane (tier B)",

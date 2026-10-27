@@ -94,6 +94,21 @@ describe("route-claim · reconcile", () => {
     host.listeners.get("internal/config")?.call(pi, pi._config, () => "next");
     await flush();
     expect(host.handle.replace).toHaveBeenCalledWith(["opencode"]);
+    // A commit that removes the last plane withdraws the routes through the
+    // live handle, replace([]), never by releasing it; committing the plane
+    // back moves it through the same handle, with no second registration.
+    pi._config = { providers: { deepseek: {} } };
+    host.listeners.get("internal/config")?.call(pi, pi._config, () => "next");
+    await flush();
+    expect(host.handle.replace).toHaveBeenLastCalledWith([]);
+    expect(host.handle).not.toHaveBeenCalled();
+    expect(claim.committedEntries()).toEqual({});
+    pi._config = { providers: { deepseek: {}, opencode: zen } };
+    host.listeners.get("internal/config")?.call(pi, pi._config, () => "next");
+    await flush();
+    expect(host.handle.replace).toHaveBeenLastCalledWith(["opencode"]);
+    expect(host.handle).not.toHaveBeenCalled();
+    expect(host.llm.registerAdapter).toHaveBeenCalledTimes(2);
     // pi-ai going away withdraws them through the same handle.
     pi.state = 3;
     host.listeners.get("llm/adapters-updated")?.();
