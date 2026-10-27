@@ -510,6 +510,20 @@ describe("plane-model · metadata (D17) and the model object", () => {
     const toggle = planeModelFor(inputFor("opencode-go", "minimax-m3"));
     expect(toggle.effortNames).toEqual({ high: "On", off: "Off" });
     expect(toggle.model?.thinkingLevelMap).not.toHaveProperty("off");
+    // A completions model whose effort list names none serves the map pi
+    // 1.1.0's own entry carries: Off offered, with none as its wire value.
+    for (const [plane, id] of [
+      ["opencode", "mistral-large-4"],
+      ["opencode-go", "hy3"],
+      ["opencode-go", "hy4-preview"],
+    ] as const) {
+      const pi = piOf(plane, id);
+      expect(pi?.thinkingLevelMap?.off, `${plane}/${id}`).toBe("none");
+      expect(
+        modelOf(inputFor(plane, id)).thinkingLevelMap,
+        `${plane}/${id}`
+      ).toEqual(pi?.thinkingLevelMap);
+    }
     const fromPi = modelOf({
       ...inputFor("opencode", "x"),
       pi: { id: "x", reasoning: true, thinkingLevelMap: { high: "h" } },

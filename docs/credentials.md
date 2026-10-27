@@ -13,6 +13,8 @@ The plugin's default is the deployment's own credential: whatever `apiKeyEnv` th
     a named apiKeyEnv  →  the credentials service (the launch environment only when no service is mounted)
     no reference       →  pi's own lookup (a Sign-in record under llm-pi-ai/<plane>, then OPENCODE_API_KEY)  →  the installation's store (opt-in)
 
+**pi's own lookup reads `OPENCODE_API_KEY` on both planes** (pi 1.1.0's `providers/opencode.js` and `providers/opencode-go.js` both name that one variable). So a Go entry that names no reference authenticates every Go turn with the Zen key, and a Go key stored in DSH Credentials reaches a Go turn only as the entry's `apiKeyEnv: OPENCODE_GO_API_KEY`. Before P-R1 the Go plane's Responses, Messages and Google turns defaulted to `OPENCODE_GO_API_KEY`; that default went with the hidden routes, and the README's "Changed in 1.x" names it. The meter inherits the consequence: the fetch interceptor files the bearer of a Go-plane request as a Go key, and the meter's `auto` order puts that captured key ahead of the configured `OPENCODE_GO_API_KEY`, so after the first Go turn of a no-reference Go entry the meter sends the Zen key to the Go usage endpoint, which refuses it. `test/host-planes.test.ts` pins both turn cases on the Go plane, and the meter's switch from the Go key to the captured Zen key.
+
 A named reference that resolves nothing is `MISSING_CREDENTIAL`, and no request is sent; a credentials service that fails propagates its own error rather than reading as a missing key. A captured or literal key never answers for the adapter. The installation's store is read only when the deployment sets `readOpencodeStore`, only for a plane that names no reference, and only when pi's own lookup would find nothing: the resolver's answer is handed to pi as the request's explicit key, which pi lets win over its own lookup, so a store key returned any earlier would outrank a Sign-in record or an exported `OPENCODE_API_KEY`.
 
 **The fetch interceptor's fallback is the second, narrower path.** It keeps real request auth untouched and fills only a missing or placeholder credential on gateway traffic, in this order:
@@ -44,7 +46,7 @@ Where a route names no reference at all, the chain continues into the login and 
 
 ## The planes are separate, so their credentials are
 
-Zen credentials serve Zen calls, Go credentials serve Go calls, and never the other way: the planes are different accounts with different keys, different endpoints and different catalogs.
+Zen credentials serve Zen calls, Go credentials serve Go calls: the planes are different accounts with different keys, different endpoints and different catalogs. On a plane turn that holds when each entry names its own reference; an entry that names none takes pi's `OPENCODE_API_KEY` on either plane (above), which is why the Go entry should name `OPENCODE_GO_API_KEY`.
 
 A route's credential is an **API key** — a reference in the credential store, or the environment — and that is a measured constraint rather than a first choice: the section below shows a login token is refused by the model endpoints the same way a wrong key is.
 

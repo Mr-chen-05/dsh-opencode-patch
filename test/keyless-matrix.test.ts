@@ -17,6 +17,7 @@ import {
   cellKey,
   classifyKeylessProbe,
   isFreeSpec,
+  isModelGoneMessage,
   isTransientProbeAnswer,
   keylessMatrix,
   MATRIX_PROTOCOLS,
@@ -332,6 +333,21 @@ describe("keyless matrix · reading an answer", () => {
     [500, "", "other"],
   ] as const)("%i %s → %s", (status, bodyText, verdict) => {
     expect(classifyKeylessProbe({ bodyText, status })).toBe(verdict);
+  });
+});
+
+describe("a live turn's failure message that says the model is gone", () => {
+  // The adapter blocks of the live e2e suites read this as a reason to ASK:
+  // a raw probe of the same id decides whether the vendor withdrew it.
+  it.each([
+    ["410 status code (no body)", true],
+    ["400 Upstream request failed: Model is unavailable", true],
+    ["model is UNAVAILABLE", true],
+    ["400 Invalid request: messages is required", false],
+    ["4100 tokens exceeded", false],
+    ["", false],
+  ] as const)("%j → %s", (message, gone) => {
+    expect(isModelGoneMessage(message)).toBe(gone);
   });
 });
 

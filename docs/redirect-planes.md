@@ -10,8 +10,8 @@ A **plane** is one gateway base URL with its own catalog and its own credential.
 
 | Plane | Route id | Base URL | Credential | Models |
 | :-- | :-- | :-- | :-- | --: |
-| Zen (pay-as-you-go, free tier) | `opencode` | the `endpoint` family's | `OPENCODE_API_KEY` | 82 served / 127 listed |
-| Go (subscription) | `opencode-go` | the `endpoint` family's | `OPENCODE_GO_API_KEY` | 30 served / 34 listed |
+| Zen (pay-as-you-go, free tier) | `opencode` | the `endpoint` family's | the entry's `apiKeyEnv`; without one, pi's `OPENCODE_API_KEY` | 82 served / 127 listed |
+| Go (subscription) | `opencode-go` | the `endpoint` family's | the entry's `apiKeyEnv` (name `OPENCODE_GO_API_KEY`); without one, pi's `OPENCODE_API_KEY` | 30 served / 34 listed |
 
 **There is no longer one base URL per plane to quote.** The gateway answers on two endpoint families and the `endpoint` setting picks one: `auto` follows the catalog, which today names `…/inference/openai/v1` and `…/inference/go/openai/v1`, and `legacy` pins the older `…/zen/v1` and `…/zen/go/v1`. Both are still served and they are entitled separately, which is why the choice is the user's rather than a migration. The dated measurement below was taken on the legacy family.
 
