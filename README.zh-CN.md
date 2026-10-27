@@ -219,7 +219,7 @@ opencode-responses:
 
 有两点你在使用中会注意到。**冷启动永远不为空**——内置 shim 在第一次刷新前就能回答，选择器立刻有模型可选。而且**目录里没有条目的模型照样出现**，费率位置显示 `—`：既不猜，也不会退回去显示上一个模型的名字。
 
-两个生成文件都在 CI 里校验（`catalog:shim`、`limits:shim`）；厂商数据变动时它们以非零码退出——这是唯一能发现厂商注册表在你背后变了的办法。
+两个生成文件都在 CI 里校验（`catalog:shim`、`limits:shim`）；厂商数据变动时它们以非零码退出——这是唯一能发现厂商注册表在你背后变了的办法。只有当拉取请求改动了生成该文件的代码时，CI 才会因此失败；否则只给出警告，由每晚的任务以单独的拉取请求提出刷新。
 
 → 协议路由、合并与界面的技术细节： [`docs/protocol-routing-and-merge.md`](./docs/protocol-routing-and-merge.md) · [English](./docs/protocol-routing-and-merge.md)
 
