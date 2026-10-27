@@ -105,6 +105,8 @@ interface ProbeOutput {
   >;
   readonly callConfig: Record<string, string>;
   readonly dispatch: Record<string, { sent: string[]; finish: string }>;
+  /** Each turn's Google `generationConfig.thinkingConfig`, by `route/model`. */
+  readonly thinking?: Record<string, Record<string, unknown>[]>;
   readonly describe: { user: string[]; value: string[] } | undefined;
   readonly describeEntries: Record<
     string,
@@ -483,6 +485,18 @@ describe.skipIf(!ENABLED)("e2e · the published host binary (dsh)", () => {
       expect(out.callConfig["opencode-go/gemini-4-argon"]).toBe("ok");
     }
   );
+
+  // The probe's turn chooses no effort, so a model the catalog describes by
+  // level is sent the level pi falls back to, never a budget: on the pinned
+  // pi through the plugin's Google wrapper (D16), on a newer pi through pi's
+  // own pattern. The live 400 was a `thinkingBudget` here.
+  it("[BASELINE] the Go Gemini level model is sent a thinking level and no thinkingBudget, through the shipped bundle (D16)", () => {
+    const sent = out.thinking?.["opencode-go/gemini-4-argon"] ?? [];
+    expect(sent.length).toBeGreaterThan(0);
+    for (const config of sent) {
+      expect(config).toEqual({ thinkingLevel: "LOW" });
+    }
+  });
 
   it("[BASELINE] the settings page reads every plane the profile declares", () => {
     expect(out.describe?.value.toSorted()).toEqual([

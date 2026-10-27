@@ -123,7 +123,7 @@ Two properties matter more than completeness:
 
 Cold start is never empty: the bundled shim answers before the first refresh, so the picker has models immediately, and a refresh replaces the set rather than appending to it twice. A missing price is its own answer: when models.dev has no row for a model, the meter shows the model's name and `—` for the rate rather than `Free`, and the panel never falls back to describing the _previous_ model.
 
-Both generated files are checked in CI: `catalog:shim` and `limits:shim` exit non-zero when the vendor moved, which is the only way to notice that models.dev changed under you. Regenerating one is a three-step deploy: regenerate, rebuild the bundles, commit both. The host loads `lib/index.mjs`, not `src/`.
+Both generated files are checked in CI: `catalog:shim` and `limits:shim` exit non-zero when the vendor moved, which is the only way to notice that models.dev changed under you. A pull request is gated on that only when its own diff touches the generator or a module the generator loads (`scripts/freshness-scope.ts` decides); any other pull request, and a push to main, warns, and the nightly job proposes the refresh. Regenerating one is a three-step deploy: regenerate, rebuild the bundles, commit both. The host loads `lib/index.mjs`, not `src/`.
 
 ## 4. The UI
 
@@ -136,7 +136,7 @@ What belongs here is only the part that is a routing consequence: the meter is a
 | Concern | Module |
 | :-- | :-- |
 | Which protocol and endpoint a model is served on | `utils/protocols.ts`, `utils/plane-model.ts`, `utils/plane-profile.ts` |
-| Serving the planes | `host/route-claim.ts`, `host/plane-provider.ts`, `host/describe-graft.ts` |
+| Serving the planes | `host/route-claim.ts`, `host/plane-provider.ts`, `host/google-levels.ts`, `host/describe-graft.ts` |
 | Catalog merge | `models-catalog.ts`, `models-discovery.ts`, `catalog-data.ts` |
 | Allowance table | `go-limits-data.ts` (generated) |
 | Credentials and the `/usage` endpoint | `go-discovery.ts`, `key-capture.ts` |

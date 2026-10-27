@@ -81,6 +81,7 @@
  *   OPENCODE_E2E=1 OPENCODE_API_KEY=… pnpm run test:e2e
  */
 
+import { usesGoogleThinkingLevel } from "@earendil-works/pi-ai/api/google-shared";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -117,6 +118,7 @@ import {
   findModelSpecOn,
   isServableSdk,
   planeModelFor,
+  usesCatalogThinkingLevels,
 } from "../support/src.ts";
 
 const LIVE = process.env.OPENCODE_E2E === "1";
@@ -931,6 +933,71 @@ const paidProtocolOf = (
     : (PROTOCOL_FOR_SDK[spec.provider_npm] ?? DEFAULT_PROTOCOL);
 };
 
+/** One adapter plane, as {@link ADAPTER_PLANES} lists it. */
+type AdapterPlane = (typeof ADAPTER_PLANES)[number];
+
+/**
+ * One turn through the plane adapter, read the way the walk reads it: a
+ * completion, an answer about the account, a confirmed withdrawal, or a
+ * refusal that fails the case (a 400 INVALID_ARGUMENT thinking refusal among
+ * them, the live D16 failure).
+ */
+const adapterVerdict = async (
+  tier: Awaited<ReturnType<typeof mountTierA>>,
+  plane: AdapterPlane,
+  protocol: string,
+  id: string,
+  extra: Readonly<Record<string, unknown>> = {}
+): Promise<TurnVerdict> => {
+  const drained = await drainStream(tier.llm, plane.route, id, {
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    ...extra,
+  });
+  if (
+    drained.error === undefined &&
+    drained.finish?.kind !== undefined &&
+    drained.finish.kind !== "error"
+  ) {
+    return { kind: "ok" };
+  }
+  const message = drained.failureMessage ?? drained.error ?? "";
+  if (ADAPTER_ENTITLEMENT.test(message)) {
+    return { kind: "entitlement" };
+  }
+  if (isModelGoneMessage(message)) {
+    // The gateway answers "Model is unavailable" for an id sent where it is
+    // not served, too (upstream-findings §3.8). Ask the endpoint the plugin
+    // should use, by hand, before reading it as the vendor's state.
+    const planeName = plane.route === "opencode" ? "zen" : "go";
+    const raw = await probe(protocol, id, plane.key, planeName);
+    if (modelGone(raw)) {
+      return { kind: "gone" };
+    }
+    if (accessDisabled(raw)) {
+      return { kind: "entitlement" };
+    }
+    return {
+      detail: `the turn says the model is gone (${message}), a raw probe of the same id answered ${raw.summary}`,
+      kind: "refused",
+    };
+  }
+  return { detail: message, kind: "refused" };
+};
+
+/** Google's discrete thinking levels, lowest first. */
+const GOOGLE_LEVELS = ["minimal", "low", "medium", "high"] as const;
+
+/** The highest level a catalog spec's first effort list offers. */
+const highestLevelOf = (
+  spec: (typeof OPENCODE_ZEN_CATALOG)[number]
+): string | undefined => {
+  const values =
+    spec.reasoning_options?.find(
+      (option) => option.type === "effort" && (option.values?.length ?? 0) > 0
+    )?.values ?? [];
+  return GOOGLE_LEVELS.findLast((level) => values.includes(level));
+};
+
 describe.skipIf(!LIVE)(
   "live protocol routing · through the plugin's plane adapter",
   () => {
@@ -948,7 +1015,6 @@ describe.skipIf(!LIVE)(
             undefined,
           "a base override is set: the adapter sends where the plugin sends"
         );
-        const planeName = plane.route === "opencode" ? "zen" : "go";
         const groups = new Map(
           [
             ...candidatesByProtocol(
@@ -980,46 +1046,77 @@ describe.skipIf(!LIVE)(
         });
         try {
           await waitForPlaneOwner(tier.llm, [plane.route]);
-          const walk = await walkPerProtocol(
-            groups,
-            async (protocol, id): Promise<TurnVerdict> => {
-              const drained = await drainStream(tier.llm, plane.route, id, {
-                signal: AbortSignal.timeout(TIMEOUT_MS),
-              });
-              if (
-                drained.error === undefined &&
-                drained.finish?.kind !== undefined &&
-                drained.finish.kind !== "error"
-              ) {
-                return { kind: "ok" };
-              }
-              const message = drained.failureMessage ?? drained.error ?? "";
-              if (ADAPTER_ENTITLEMENT.test(message)) {
-                return { kind: "entitlement" };
-              }
-              if (isModelGoneMessage(message)) {
-                // The gateway answers "Model is unavailable" for an id sent
-                // where it is not served, too (upstream-findings §3.8). Ask
-                // the endpoint the plugin should use, by hand, before
-                // reading it as the vendor's state.
-                const raw = await probe(protocol, id, plane.key, planeName);
-                if (modelGone(raw)) {
-                  return { kind: "gone" };
-                }
-                if (accessDisabled(raw)) {
-                  return { kind: "entitlement" };
-                }
-                return {
-                  detail: `the turn says the model is gone (${message}), a raw probe of the same id answered ${raw.summary}`,
-                  kind: "refused",
-                };
-              }
-              return { detail: message, kind: "refused" };
-            }
+          const walk = await walkPerProtocol(groups, (protocol, id) =>
+            adapterVerdict(tier, plane, protocol, id)
           );
           expect(walk.refused).toEqual([]);
           // A protocol no candidate reached was not tested: a skip that names
           // it, never a pass on the others.
+          context.skip(
+            walk.unreached.length > 0,
+            `unreached (every candidate refused on entitlement or withdrawn): ${walk.unreached.join(", ")}`
+          );
+        } finally {
+          await tier.dispose();
+        }
+      }
+    );
+
+    it.for(ADAPTER_PLANES)(
+      "$route: a Google model the catalog describes by level completes a turn at its highest offered level (D16)",
+      { timeout: ADAPTER_BUDGET_MS },
+      async (plane, context) => {
+        context.skip(
+          plane.key === undefined || plane.key.length === 0,
+          "no key for this plane"
+        );
+        context.skip(
+          BASE_OVERRIDE[plane.route === "opencode" ? "zen" : "go"] !==
+            undefined,
+          "a base override is set: the adapter sends where the plugin sends"
+        );
+        // A level model pi's own pattern misses, so the turn exercises the
+        // plugin's Google wrapper; once pi learns every such id the case
+        // names that and skips, rather than re-testing pi's own path.
+        const candidates = plane.catalog
+          .filter(
+            (spec) =>
+              paidProtocolOf(spec) === "google-generative-ai" &&
+              usesCatalogThinkingLevels(spec) &&
+              !usesGoogleThinkingLevel({ id: spec.id } as never)
+          )
+          .slice(0, ADAPTER_CANDIDATES);
+        context.skip(
+          candidates.length === 0,
+          "no paid Google model the catalog describes by level that pi's own pattern misses"
+        );
+        const tier = await mountTierA({
+          credentials: fakeCredentials({
+            refs: { [plane.ref]: plane.key ?? "" },
+          }),
+          plugin: {},
+          providers: {
+            [plane.route]: {
+              apiKeyEnv: plane.ref,
+              models: candidates.map((spec) => ({ id: spec.id })),
+            },
+          },
+        });
+        try {
+          await waitForPlaneOwner(tier.llm, [plane.route]);
+          const levelOf = new Map(
+            candidates.map((spec) => [spec.id, highestLevelOf(spec)])
+          );
+          const walk = await walkPerProtocol(
+            new Map([
+              ["google-generative-ai", candidates.map((spec) => spec.id)],
+            ]),
+            (protocol, id) =>
+              adapterVerdict(tier, plane, protocol, id, {
+                reasoningEffort: levelOf.get(id),
+              })
+          );
+          expect(walk.refused).toEqual([]);
           context.skip(
             walk.unreached.length > 0,
             `unreached (every candidate refused on entitlement or withdrawn): ${walk.unreached.join(", ")}`
